@@ -1,0 +1,9 @@
+title: Settings
+layout:
+  - FamilyManager
+  - ParaManager
+  - Line Style Edit
+  - Line Pattern
+  - Text
+  - Hatching
+  - ColorSplasher
