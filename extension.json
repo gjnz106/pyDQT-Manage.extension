@@ -1,0 +1,13 @@
+{
+  "builtin": false,
+  "default_enabled": true,
+  "type": "extension",
+  "rocket_mode_compatible": true,
+  "name": "pyDQT-Manage",
+  "description": "DQT BIM Leader tools - Inquiry/QA-QC, IFC-SG compliance, Settings standards, Cleanup",
+  "author": "Dang Quoc Truong (DQT)",
+  "author_profile": "",
+  "url": "",
+  "image": "",
+  "dependencies": []
+}
