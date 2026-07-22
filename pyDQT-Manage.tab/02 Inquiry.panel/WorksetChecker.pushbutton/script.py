@@ -213,9 +213,15 @@ MAIN_XAML = """
                     <TextBlock Text="OPTIONS" FontSize="9" FontWeight="SemiBold" Foreground="#666" Margin="0,0,0,8"/>
                     <TextBlock Text="View name prefix" FontSize="10" Margin="0,0,0,3"/>
                     <TextBox x:Name="txtPrefix" Padding="6,4" Margin="0,0,0,12" Text="QC-WS - "/>
-                    <CheckBox x:Name="chkDisplay" Content="Detail: Fine + Shaded w/ Edges" IsChecked="True" Margin="0,0,0,8" TextWrapping="Wrap"/>
-                    <CheckBox x:Name="chkReuse" Content="Reuse view if name matches" IsChecked="True" Margin="0,0,0,8" TextWrapping="Wrap"/>
-                    <CheckBox x:Name="chkOpenFirst" Content="Open first view when done" IsChecked="True" Margin="0,0,0,8" TextWrapping="Wrap"/>
+                    <CheckBox x:Name="chkDisplay" IsChecked="True" Margin="0,0,0,8">
+                        <TextBlock Text="Detail: Fine + Shaded w/ Edges" TextWrapping="Wrap"/>
+                    </CheckBox>
+                    <CheckBox x:Name="chkReuse" IsChecked="True" Margin="0,0,0,8">
+                        <TextBlock Text="Reuse view if name matches" TextWrapping="Wrap"/>
+                    </CheckBox>
+                    <CheckBox x:Name="chkOpenFirst" IsChecked="True" Margin="0,0,0,8">
+                        <TextBlock Text="Open first view when done" TextWrapping="Wrap"/>
+                    </CheckBox>
                     <TextBlock Text="Each generated view turns ON exactly one workset and turns OFF every other workset." FontSize="9" Foreground="#888" TextWrapping="Wrap" Margin="0,10,0,0"/>
                 </StackPanel>
             </Border>
