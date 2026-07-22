@@ -1,0 +1,2 @@
+title: "Check\nUpdate"
+tooltip: "Check whether your pyDQT-Manage is the latest version (compares the installed git commit with GitHub)."
