@@ -1,0 +1,10 @@
+title: "Workset\nChecker"
+tooltip: >-
+  Automatically generate one 3D view per workset for QA/QC review.
+  Each generated view isolates a single workset (turned ON) while
+  hiding every other workset, making it easy to visually verify what
+  belongs to each workset.
+
+  Copyright by Dang Quoc Truong - DQT
+author: Dang Quoc Truong (DQT)
+highlight: new
