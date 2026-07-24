@@ -50,6 +50,35 @@ def _eid_int(eid):
 
 
 # ============================================================================
+# VIEW TYPE LABELS (for "Where Used" locations)
+# ============================================================================
+
+_VIEW_TYPE_LABELS = {
+    DB.ViewType.FloorPlan: "Floor Plan",
+    DB.ViewType.CeilingPlan: "Ceiling Plan",
+    DB.ViewType.Elevation: "Elevation",
+    DB.ViewType.Section: "Section",
+    DB.ViewType.Detail: "Detail View",
+    DB.ViewType.ThreeD: "3D View",
+    DB.ViewType.DraftingView: "Drafting View",
+    DB.ViewType.Legend: "Legend",
+    DB.ViewType.Schedule: "Schedule",
+    DB.ViewType.PanelSchedule: "Panel Schedule",
+    DB.ViewType.ColumnSchedule: "Graphical Column Schedule",
+    DB.ViewType.DrawingSheet: "Sheet",
+    DB.ViewType.AreaPlan: "Area Plan",
+    DB.ViewType.EngineeringPlan: "Structural Plan",
+    DB.ViewType.Rendering: "Rendering",
+    DB.ViewType.Walkthrough: "Walkthrough",
+}
+
+
+def _friendly_view_type(view_type):
+    """Human-readable label for a DB.ViewType value"""
+    return _VIEW_TYPE_LABELS.get(view_type, str(view_type))
+
+
+# ============================================================================
 # CONFIGURATION
 # ============================================================================
 
@@ -101,9 +130,13 @@ class TextNoteTypeItem(object):
         # Get bold/italic
         self._bold = self._get_bold()
         self._italic = self._get_italic()
-        
+
+        # Get width factor
+        self._width_factor = self._get_width_factor()
+
         # Usage
         self._usage_count = 0
+        self._usage_locations = []
     
     def _get_font_name(self):
         """Get font name"""
@@ -134,7 +167,17 @@ class TextNoteTypeItem(object):
         except Exception:
             pass
         return "No"
-    
+
+    def _get_width_factor(self):
+        """Get width factor"""
+        try:
+            wf_param = self._text_type.get_Parameter(DB.BuiltInParameter.TEXT_WIDTH_SCALE)
+            if wf_param and wf_param.HasValue:
+                return wf_param.AsValueString() or str(wf_param.AsDouble())
+        except Exception:
+            pass
+        return "N/A"
+
     # Properties
     @property
     def element(self):
@@ -175,14 +218,26 @@ class TextNoteTypeItem(object):
     @property
     def italic(self):
         return self._italic
-    
+
+    @property
+    def width_factor(self):
+        return self._width_factor
+
     @property
     def usage_count(self):
         return self._usage_count
-    
+
     @usage_count.setter
     def usage_count(self, value):
         self._usage_count = value
+
+    @property
+    def usage_locations(self):
+        return self._usage_locations
+
+    @usage_locations.setter
+    def usage_locations(self, value):
+        self._usage_locations = value
 
 
 # ============================================================================
@@ -190,32 +245,73 @@ class TextNoteTypeItem(object):
 # ============================================================================
 
 def calculate_textnote_usage(doc, text_items):
-    """Calculate usage for text note types"""
-    
+    """Calculate usage for text note types, and which views/legends/
+    schedules each type is placed in."""
+
     # Reset all counts
     for item in text_items:
         item.usage_count = 0
-    
+        item.usage_locations = []
+
     # Build lookup by type ID
     type_lookup = {}
     for item in text_items:
         type_lookup[item.id] = item
-    
+
+    # tid -> { view_id: [view_name, view_type_label, count] }
+    location_data = {}
+
     try:
         # Get all TextNote elements
         collector = DB.FilteredElementCollector(doc).OfClass(DB.TextNote)
-        
+
         for text_note in collector:
             try:
                 type_id = text_note.GetTypeId()
                 tid = _eid_int(type_id)
-                if type_id and tid in type_lookup:
-                    type_lookup[tid].usage_count += 1
+                if not type_id or tid not in type_lookup:
+                    continue
+
+                type_lookup[tid].usage_count += 1
+
+                # Track which view/legend/schedule this instance lives in
+                try:
+                    view_id = text_note.OwnerViewId
+                    vid = _eid_int(view_id) if view_id else -1
+                    view = doc.GetElement(view_id) if vid != -1 else None
+                    view_name = view.Name if view else "Unknown View"
+                    view_type = _friendly_view_type(view.ViewType) if view else "Unknown"
+                except Exception:
+                    vid = -1
+                    view_name = "Unknown View"
+                    view_type = "Unknown"
+
+                locs = location_data.setdefault(tid, {})
+                if vid in locs:
+                    locs[vid][2] += 1
+                else:
+                    locs[vid] = [view_name, view_type, 1]
             except Exception:
                 pass
-                
+
     except Exception as ex:
         print("Error calculating text note usage: {}".format(str(ex)))
+
+    # Attach sorted location summaries back onto each item
+    for tid, locs in location_data.items():
+        item = type_lookup.get(tid)
+        if item is None:
+            continue
+        entries = []
+        for vid, (view_name, view_type, count) in locs.items():
+            entries.append({
+                "view_id": vid,
+                "view_name": view_name,
+                "view_type": view_type,
+                "count": count
+            })
+        entries.sort(key=lambda e: e["view_name"])
+        item.usage_locations = entries
 
 
 # ============================================================================
@@ -960,6 +1056,164 @@ class BatchRenameDialog(Window):
 
 
 # ============================================================================
+# WHERE USED DIALOG
+# ============================================================================
+
+class UsageLocationsDialog(Window):
+    """Shows every view/legend/schedule a Text Note Type instance is
+    placed in, with a per-view instance count."""
+
+    def __init__(self, item, uidoc):
+        self.item = item
+        self.uidoc = uidoc
+        self.loc_grid = None
+        self._build_ui()
+
+    def _build_ui(self):
+        self.Title = "Where Used - {}".format(self.item.name)
+        self.Width = 560
+        self.Height = 480
+        self.WindowStartupLocation = System.Windows.WindowStartupLocation.CenterScreen
+        self.Background = Config.hex_to_brush(Config.BACKGROUND_COLOR)
+
+        main_grid = Grid()
+        main_grid.Margin = Thickness(15)
+        main_grid.RowDefinitions.Add(RowDefinition(Height=GridLength(1, GridUnitType.Auto)))
+        main_grid.RowDefinitions.Add(RowDefinition(Height=GridLength(1, GridUnitType.Auto)))
+        main_grid.RowDefinitions.Add(RowDefinition(Height=GridLength(1, GridUnitType.Star)))
+        main_grid.RowDefinitions.Add(RowDefinition(Height=GridLength(1, GridUnitType.Auto)))
+
+        header = Border()
+        header.Background = Config.hex_to_brush(Config.PRIMARY_COLOR)
+        header.CornerRadius = System.Windows.CornerRadius(4)
+        header.Padding = Thickness(10, 8, 10, 8)
+        header.Margin = Thickness(0, 0, 0, 10)
+        title = TextBlock()
+        title.Text = "Where Used"
+        title.FontSize = 16
+        title.FontWeight = FontWeights.Bold
+        header.Child = title
+        Grid.SetRow(header, 0)
+        main_grid.Children.Add(header)
+
+        info = TextBlock()
+        info.Text = "'{}' - {} instance(s) across {} view(s)".format(
+            self.item.name, self.item.usage_count, len(self.item.usage_locations))
+        info.FontSize = 12
+        info.Foreground = Config.hex_to_brush(Config.TEXT_LIGHT)
+        info.Margin = Thickness(0, 0, 0, 10)
+        Grid.SetRow(info, 1)
+        main_grid.Children.Add(info)
+
+        self.loc_grid = self._create_locations_grid()
+        Grid.SetRow(self.loc_grid, 2)
+        main_grid.Children.Add(self.loc_grid)
+
+        buttons = StackPanel()
+        buttons.Orientation = Orientation.Horizontal
+        buttons.HorizontalAlignment = HorizontalAlignment.Right
+        buttons.Margin = Thickness(0, 10, 0, 0)
+
+        open_btn = Button()
+        open_btn.Content = "Open Selected View"
+        open_btn.Width = 150
+        open_btn.Height = 32
+        open_btn.Margin = Thickness(0, 0, 8, 0)
+        open_btn.Background = Config.hex_to_brush(Config.PRIMARY_COLOR)
+        open_btn.Click += self._on_open_view
+        buttons.Children.Add(open_btn)
+
+        close_btn = Button()
+        close_btn.Content = "Close"
+        close_btn.Width = 90
+        close_btn.Height = 32
+        close_btn.Background = Config.hex_to_brush(Config.WHITE)
+        close_btn.Click += lambda s, e: self.Close()
+        buttons.Children.Add(close_btn)
+
+        Grid.SetRow(buttons, 3)
+        main_grid.Children.Add(buttons)
+
+        self.Content = main_grid
+
+    def _create_locations_grid(self):
+        grid = DataGrid()
+        grid.AutoGenerateColumns = False
+        grid.IsReadOnly = True
+        grid.SelectionMode = System.Windows.Controls.DataGridSelectionMode.Single
+        grid.SelectionUnit = System.Windows.Controls.DataGridSelectionUnit.FullRow
+        grid.CanUserSortColumns = True
+        grid.Background = Config.hex_to_brush(Config.WHITE)
+        grid.BorderBrush = Config.hex_to_brush(Config.BORDER_COLOR)
+        grid.GridLinesVisibility = System.Windows.Controls.DataGridGridLinesVisibility.Horizontal
+        grid.HorizontalGridLinesBrush = Config.hex_to_brush("#EEEEEE")
+        grid.RowBackground = Config.hex_to_brush(Config.WHITE)
+        grid.AlternatingRowBackground = Config.hex_to_brush(Config.ROW_ALT_COLOR)
+
+        col_view = DataGridTextColumn()
+        col_view.Header = "View / Sheet Name"
+        col_view.Binding = Binding("ViewName")
+        col_view.Width = DataGridLength(1, System.Windows.Controls.DataGridLengthUnitType.Star)
+        grid.Columns.Add(col_view)
+
+        col_type = DataGridTextColumn()
+        col_type.Header = "View Type"
+        col_type.Binding = Binding("ViewType")
+        col_type.Width = DataGridLength(150)
+        grid.Columns.Add(col_type)
+
+        col_count = DataGridTextColumn()
+        col_count.Header = "Count"
+        col_count.Binding = Binding("Count")
+        col_count.Width = DataGridLength(70)
+        grid.Columns.Add(col_count)
+
+        for _asm in ("System.Data", "System.Data.Common"):
+            try:
+                clr.AddReference(_asm)
+            except Exception:
+                pass
+        from System.Data import DataTable
+
+        dt = DataTable("Locations")
+        dt.Columns.Add("ViewName", System.String)
+        dt.Columns.Add("ViewType", System.String)
+        dt.Columns.Add("Count", System.Int32)
+        dt.Columns.Add("ViewId", System.Int64)
+
+        for loc in self.item.usage_locations:
+            row = dt.NewRow()
+            row["ViewName"] = loc["view_name"]
+            row["ViewType"] = loc["view_type"]
+            row["Count"] = loc["count"]
+            row["ViewId"] = loc["view_id"]
+            dt.Rows.Add(row)
+
+        grid.ItemsSource = dt.DefaultView
+        return grid
+
+    def _on_open_view(self, sender, args):
+        sel = self.loc_grid.SelectedItem
+        if sel is None:
+            MessageBox.Show("Select a row first.", "Info",
+                          MessageBoxButton.OK, MessageBoxImage.Information)
+            return
+        try:
+            view_id_val = sel["ViewId"]
+            if view_id_val is None or view_id_val < 0:
+                MessageBox.Show("This location has no valid view to open.", "Info",
+                              MessageBoxButton.OK, MessageBoxImage.Information)
+                return
+            view = doc.GetElement(DB.ElementId(view_id_val))
+            if view is not None and self.uidoc is not None:
+                self.uidoc.ActiveView = view
+                self.Close()
+        except Exception as ex:
+            MessageBox.Show("Could not open view: {}".format(str(ex)), "Error",
+                          MessageBoxButton.OK, MessageBoxImage.Error)
+
+
+# ============================================================================
 # MAIN WINDOW
 # ============================================================================
 
@@ -967,9 +1221,10 @@ class TextNoteTypeManagerWindow(Window):
     """Text Note Type Manager with Sheet Manager style UI"""
     
     def __init__(self):
+        self.uidoc = revit.uidoc
         self.all_items = []
         self.filtered_items = []
-        
+
         self.txt_total = None
         self.txt_selected = None
         self.txt_used = None
@@ -1247,13 +1502,25 @@ class TextNoteTypeManagerWindow(Window):
         col_italic.Binding = Binding("Italic")
         col_italic.Width = DataGridLength(60)
         grid.Columns.Add(col_italic)
-        
+
+        col_width_factor = DataGridTextColumn()
+        col_width_factor.Header = "Width Factor"
+        col_width_factor.Binding = Binding("WidthFactor")
+        col_width_factor.Width = DataGridLength(90)
+        grid.Columns.Add(col_width_factor)
+
         col_usage = DataGridTextColumn()
         col_usage.Header = "Usage"
         col_usage.Binding = Binding("Usage")
         col_usage.Width = DataGridLength(70)
         grid.Columns.Add(col_usage)
-        
+
+        col_used_in = DataGridTextColumn()
+        col_used_in.Header = "Used In"
+        col_used_in.Binding = Binding("UsedIn")
+        col_used_in.Width = DataGridLength(70)
+        grid.Columns.Add(col_used_in)
+
         col_id = DataGridTextColumn()
         col_id.Header = "ID"
         col_id.Binding = Binding("ElemId")
@@ -1279,9 +1546,11 @@ class TextNoteTypeManagerWindow(Window):
         dt.Columns.Add("Font", System.String)
         dt.Columns.Add("Bold", System.String)
         dt.Columns.Add("Italic", System.String)
+        dt.Columns.Add("WidthFactor", System.String)
         dt.Columns.Add("Usage", System.Int32)
+        dt.Columns.Add("UsedIn", System.Int32)
         dt.Columns.Add("ElemId", System.Int32)
-        
+
         for item in items:
             row = dt.NewRow()
             row["Name"] = item.name
@@ -1289,7 +1558,9 @@ class TextNoteTypeManagerWindow(Window):
             row["Font"] = item.font
             row["Bold"] = item.bold
             row["Italic"] = item.italic
+            row["WidthFactor"] = item.width_factor
             row["Usage"] = item.usage_count
+            row["UsedIn"] = len(item.usage_locations)
             row["ElemId"] = item.id
             dt.Rows.Add(row)
         
@@ -1327,7 +1598,11 @@ class TextNoteTypeManagerWindow(Window):
         btn_duplicate = self._create_button("Duplicate", orange, white_fg=True)
         btn_duplicate.Click += self._on_duplicate
         center_panel.Children.Add(btn_duplicate)
-        
+
+        btn_where_used = self._create_button("Where Used", blue, white_fg=True)
+        btn_where_used.Click += self._on_show_usage
+        center_panel.Children.Add(btn_where_used)
+
         btn_delete = self._create_button("Delete", red, white_fg=True)
         btn_delete.Click += self._on_delete
         center_panel.Children.Add(btn_delete)
@@ -1622,6 +1897,30 @@ class TextNoteTypeManagerWindow(Window):
             MessageBox.Show("Error: {}".format(str(ex)), "Error",
                           MessageBoxButton.OK, MessageBoxImage.Error)
     
+    def _on_show_usage(self, sender, args):
+        """Show which views/legends/schedules the selected type is placed in"""
+        selected = self._get_selected_items()
+
+        if not selected:
+            MessageBox.Show("Please select one type to see where it's used!",
+                          "Warning", MessageBoxButton.OK, MessageBoxImage.Warning)
+            return
+
+        if len(selected) > 1:
+            MessageBox.Show("Please select only ONE type to see where it's used!",
+                          "Warning", MessageBoxButton.OK, MessageBoxImage.Warning)
+            return
+
+        item = selected[0]
+
+        if item.usage_count == 0:
+            MessageBox.Show("'{}' is not placed anywhere in the model.".format(item.name),
+                          "Where Used", MessageBoxButton.OK, MessageBoxImage.Information)
+            return
+
+        dialog = UsageLocationsDialog(item, self.uidoc)
+        dialog.ShowDialog()
+
     def _on_delete(self, sender, args):
         selected = self._get_selected_items()
         
