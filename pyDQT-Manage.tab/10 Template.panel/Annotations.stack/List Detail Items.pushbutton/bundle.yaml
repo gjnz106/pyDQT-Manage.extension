@@ -1,0 +1,6 @@
+title: "List Detail\nItems"
+tooltip: |
+  Place every Detail Component type (view-based and line-based) on the
+  active drafting/legend view, grouped by family with type labels.
+
+  Optimised port of the chilizer Template tool - by Dang Quoc Truong (DQT)

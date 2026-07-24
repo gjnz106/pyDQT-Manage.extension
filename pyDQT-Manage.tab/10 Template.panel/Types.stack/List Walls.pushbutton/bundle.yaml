@@ -1,0 +1,8 @@
+title: "List\nWalls"
+tooltip: |
+  List all Basic Wall types - as Legend Components on a Legend, or as real
+  walls on a Floor Plan. Labels optionally include the full layer buildup.
+
+  Shift-Click: settings (spacing, text style, bold, include buildup).
+
+  Optimised port of the chilizer Template tool - by Dang Quoc Truong (DQT)

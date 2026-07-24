@@ -1,0 +1,6 @@
+title: "List Filled\nRegions"
+tooltip: |
+  Draw a labelled rectangle for every Filled Region type so all patterns
+  can be reviewed on one view.
+
+  Optimised port of the chilizer Template tool - by Dang Quoc Truong (DQT)

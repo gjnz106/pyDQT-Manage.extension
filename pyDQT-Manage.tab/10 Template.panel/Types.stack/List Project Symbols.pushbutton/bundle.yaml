@@ -1,0 +1,8 @@
+title: "List Proj\nSymbols"
+tooltip: |
+  Place project annotation symbols (tags, heads, marks) on a Legend view,
+  grouped by Category > Family > Type.
+
+  Shift-Click: choose which symbol categories to include.
+
+  Optimised port of the chilizer Template tool - by Dang Quoc Truong (DQT)
