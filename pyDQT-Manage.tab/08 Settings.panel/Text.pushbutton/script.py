@@ -1471,14 +1471,23 @@ class TextNoteTypeManagerWindow(Window):
     
     def _get_selected_items(self):
         """Get selected TextNoteTypeItem objects from DataGrid selection.
-        Maps DataRowView selections back to filtered_items by row index."""
+        Matches DataRowView selections back to items by ElemId, not by row
+        index - the index into Items reflects the grid's current (possibly
+        user-sorted) view order, while filtered_items stays in load order,
+        so index-based mapping picks the wrong item after a column sort."""
         selected = []
         try:
+            by_id = {}
+            for item in self.filtered_items:
+                by_id[item.id] = item
             for sel in self.data_grid.SelectedItems:
-                # Find index of selected DataRowView in Items
-                idx = self.data_grid.Items.IndexOf(sel)
-                if 0 <= idx < len(self.filtered_items):
-                    selected.append(self.filtered_items[idx])
+                try:
+                    elem_id = sel["ElemId"]
+                except Exception:
+                    continue
+                item = by_id.get(elem_id)
+                if item is not None:
+                    selected.append(item)
         except Exception:
             pass
         return selected
@@ -1502,14 +1511,17 @@ class TextNoteTypeManagerWindow(Window):
         self._update_stats()
     
     def _on_select_unused(self, sender, args):
-        """Select rows where Usage == 0"""
+        """Select rows where Usage == 0.
+        Reads the Usage cell straight off each bound DataRowView instead of
+        indexing filtered_items by position - Items[i] reflects the grid's
+        current (possibly user-sorted) view order, not the load order."""
         self.data_grid.UnselectAll()
-        for i, item in enumerate(self.filtered_items):
-            if item.usage_count == 0:
-                try:
-                    self.data_grid.SelectedItems.Add(self.data_grid.Items[i])
-                except Exception:
-                    pass
+        try:
+            for row_view in self.data_grid.Items:
+                if row_view["Usage"] == 0:
+                    self.data_grid.SelectedItems.Add(row_view)
+        except Exception:
+            pass
         self._update_stats()
     
     def _on_refresh(self, sender, args):
