@@ -74,11 +74,12 @@ shift = tu.display_to_internal(box_offset + box_height, doc) * scale
 
 pt = tu.pick_point_or_exit("Pick point for the filled regions list")
 
-# starting rectangle
-p1 = DB.XYZ(pt.X, pt.Y, 0)
-p2 = DB.XYZ(pt.X + w, pt.Y, 0)
-p3 = DB.XYZ(pt.X + w, pt.Y + h, 0)
-p4 = DB.XYZ(pt.X, pt.Y + h, 0)
+# starting rectangle - build it in the view plane (use the pick point's Z)
+z = pt.Z
+p1 = DB.XYZ(pt.X, pt.Y, z)
+p2 = DB.XYZ(pt.X + w, pt.Y, z)
+p3 = DB.XYZ(pt.X + w, pt.Y + h, z)
+p4 = DB.XYZ(pt.X, pt.Y + h, z)
 rectangle = [
     DB.Line.CreateBound(p1, p2),
     DB.Line.CreateBound(p2, p3),

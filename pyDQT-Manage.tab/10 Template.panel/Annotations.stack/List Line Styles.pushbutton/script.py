@@ -66,8 +66,10 @@ shift = tu.display_to_internal(vert_offset, doc) * scale
 
 pick_point = tu.pick_point_or_exit("Pick point for the line styles list")
 
-p1 = pick_point
-p2 = DB.XYZ(pick_point.X + w, pick_point.Y, 0)
+# keep the line in the view plane: use the pick point's own Z for both ends
+z = pick_point.Z
+p1 = DB.XYZ(pick_point.X, pick_point.Y, z)
+p2 = DB.XYZ(pick_point.X + w, pick_point.Y, z)
 l1 = DB.Line.CreateBound(p1, p2)
 
 with revit.Transaction(tu.DQT_TXN + "List Line Styles"):
