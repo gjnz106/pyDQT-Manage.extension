@@ -36,7 +36,7 @@ pick_point = tu.pick_point_or_exit("Pick point for the text styles list")
 offset = 0.0
 with revit.Transaction(tu.DQT_TXN + "List Text Styles"):
     for name, ts in styles.items():
-        text_position = DB.XYZ(pick_point.X, pick_point.Y - offset, 0)
+        text_position = DB.XYZ(pick_point.X, pick_point.Y - offset, pick_point.Z)
         text_height = ts.get_Parameter(DB.BuiltInParameter.TEXT_SIZE).AsDouble()
         offset += (text_height * 2.75 * float(view.Scale))
         DB.TextNote.Create(doc, view.Id, text_position, name, ts.Id)
