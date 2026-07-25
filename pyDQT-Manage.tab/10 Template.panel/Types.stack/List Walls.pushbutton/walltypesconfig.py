@@ -30,9 +30,14 @@ def get_text_types(doc=None):
 
 def get_config(option, doc=None):
     doc = doc or revit.doc
-    val = my_config.get_option(option, None)
-    if val is not None:
-        return val
+    # pyRevit's get_option re-raises when the option is missing and no
+    # non-None default is given, so guard it and fall through to defaults.
+    try:
+        val = my_config.get_option(option)
+        if val is not None:
+            return val
+    except Exception:
+        pass
     if option == "v_offset":
         return "Compact"
     if option == "text_bold":

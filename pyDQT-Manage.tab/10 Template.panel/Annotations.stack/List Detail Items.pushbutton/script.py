@@ -94,7 +94,7 @@ def advance_below(instance, point):
     """Move point below the placed instance + row gap."""
     bb = instance.get_BoundingBox(view)
     bb_h = (bb.Max.Y - bb.Min.Y) if bb else 0
-    return DB.XYZ(point.X, point.Y - bb_h - row_gap, 0)
+    return DB.XYZ(point.X, point.Y - bb_h - row_gap, point.Z)
 
 
 location = tu.pick_point_or_exit("Pick point for the detail items list")
@@ -104,7 +104,7 @@ with revit.Transaction(tu.DQT_TXN + "List Detail Items"):
     for fam in sorted(dict_vb):
         header = tu.place_label("Family : " + fam, location.Add(label_offset), view, text_style_id)
         tu.set_bold(header)
-        location = DB.XYZ(location.X, location.Y - row_gap, 0)
+        location = DB.XYZ(location.X, location.Y - row_gap, location.Z)
 
         for typ in sorted(dict_vb[fam]):
             sym = dict_vb[fam][typ]
@@ -114,13 +114,13 @@ with revit.Transaction(tu.DQT_TXN + "List Detail Items"):
             tu.place_label("Type : " + typ, location.Add(label_offset), view, text_style_id)
             location = advance_below(inst, location)
 
-        location = DB.XYZ(location.X, location.Y - row_gap, 0)
+        location = DB.XYZ(location.X, location.Y - row_gap, location.Z)
 
     # curve/line-based (line placement)
     for fam in sorted(dict_cb):
         header = tu.place_label("Family : " + fam, location.Add(label_offset), view, text_style_id)
         tu.set_bold(header)
-        location = DB.XYZ(location.X, location.Y - row_gap, 0)
+        location = DB.XYZ(location.X, location.Y - row_gap, location.Z)
 
         for typ in sorted(dict_cb[fam]):
             sym = dict_cb[fam][typ]
@@ -133,4 +133,4 @@ with revit.Transaction(tu.DQT_TXN + "List Detail Items"):
             tu.place_label("Type : " + typ, location.Add(label_offset), view, text_style_id)
             location = advance_below(inst, location)
 
-        location = DB.XYZ(location.X, location.Y - row_gap, 0)
+        location = DB.XYZ(location.X, location.Y - row_gap, location.Z)
