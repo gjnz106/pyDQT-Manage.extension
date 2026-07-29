@@ -1581,8 +1581,10 @@ class TextNoteTypeManagerWindow(Window):
         grid.AlternatingRowBackground = Config.hex_to_brush(Config.ROW_ALT_COLOR)
         
         # Use DataTable-compatible columns (Binding works with DataRowView).
-        # Columns carrying a Tag are editable - the Tag names the parameter
-        # that _on_cell_edit_ending writes back to (see EDITABLE_FIELDS).
+        # _on_cell_edit_ending identifies which field it is looking at by
+        # reading the column's Binding path (e.g. "TextSize") rather than a
+        # Tag - DataGridColumn has no Tag property in WPF, only
+        # FrameworkElement does.
         col_name = DataGridTextColumn()
         col_name.Header = "Type Name"
         col_name.Binding = Binding("Name")
@@ -1594,35 +1596,30 @@ class TextNoteTypeManagerWindow(Window):
         col_size.Header = "Text Size"
         col_size.Binding = Binding("TextSize")
         col_size.Width = DataGridLength(100)
-        col_size.Tag = "TextSize"
         grid.Columns.Add(col_size)
 
         col_font = DataGridTextColumn()
         col_font.Header = "Font"
         col_font.Binding = Binding("Font")
         col_font.Width = DataGridLength(150)
-        col_font.Tag = "Font"
         grid.Columns.Add(col_font)
 
         col_bold = DataGridCheckBoxColumn()
         col_bold.Header = "Bold"
         col_bold.Binding = Binding("Bold")
         col_bold.Width = DataGridLength(60)
-        col_bold.Tag = "Bold"
         grid.Columns.Add(col_bold)
 
         col_italic = DataGridCheckBoxColumn()
         col_italic.Header = "Italic"
         col_italic.Binding = Binding("Italic")
         col_italic.Width = DataGridLength(60)
-        col_italic.Tag = "Italic"
         grid.Columns.Add(col_italic)
 
         col_width_factor = DataGridTextColumn()
         col_width_factor.Header = "Width Factor"
         col_width_factor.Binding = Binding("WidthFactor")
         col_width_factor.Width = DataGridLength(90)
-        col_width_factor.Tag = "WidthFactor"
         grid.Columns.Add(col_width_factor)
 
         col_usage = DataGridTextColumn()
@@ -1931,8 +1928,11 @@ class TextNoteTypeManagerWindow(Window):
         if self._suppress_cell_events:
             return
 
-        field = args.Column.Tag
-        if not field:
+        try:
+            field = args.Column.Binding.Path.Path
+        except Exception:
+            return
+        if field not in EDITABLE_FIELDS:
             return
 
         editing = args.EditingElement
