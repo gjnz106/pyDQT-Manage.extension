@@ -23,8 +23,10 @@ from System.Windows import (Window, Thickness, GridLength, GridUnitType,
 from System.Windows.Controls import (Grid, RowDefinition, ColumnDefinition, Border,
                                       StackPanel, TextBlock, TextBox, Button,
                                       ComboBox, ComboBoxItem, DataGrid, Orientation,
-                                      DataGridTextColumn,
+                                      DataGridTextColumn, DataGridCheckBoxColumn,
+                                      DataGridEditAction,
                                       ScrollViewer, TabControl, TabItem, CheckBox)
+from System.Windows.Threading import DispatcherPriority
 from System.Windows.Media import SolidColorBrush
 from System.Windows.Data import Binding
 from System.Windows.Controls import DataGridLength
@@ -107,6 +109,79 @@ class Config(object):
 # TEXT NOTE TYPE ITEM (Data Model)
 # ============================================================================
 
+
+# ============================================================================
+# INLINE EDITING
+# ============================================================================
+
+# Grid column Tag -> the parameter it writes to.
+EDITABLE_FIELDS = {
+    "TextSize": DB.BuiltInParameter.TEXT_SIZE,
+    "Font": DB.BuiltInParameter.TEXT_FONT,
+    "Bold": DB.BuiltInParameter.TEXT_STYLE_BOLD,
+    "Italic": DB.BuiltInParameter.TEXT_STYLE_ITALIC,
+    "WidthFactor": DB.BuiltInParameter.TEXT_WIDTH_SCALE,
+}
+
+
+def apply_text_type_edit(item, field, value):
+    """Write one edited cell back to its TextNoteType.
+
+    Returns (ok, error_message). Text Size is written with SetValueString so
+    Revit parses it in the project's display units - typing "2.5" in a
+    millimetre project must mean 2.5 mm, not 2.5 feet, so there is no numeric
+    fallback for it."""
+    bip = EDITABLE_FIELDS.get(field)
+    if bip is None:
+        return False, "unknown field '{}'".format(field)
+
+    param = item.text_type.get_Parameter(bip)
+    if param is None:
+        return False, "this type has no {} parameter".format(field)
+    if param.IsReadOnly:
+        return False, "{} is read-only on this type".format(field)
+
+    t = DB.Transaction(doc, "DQT - Edit Text Note Type")
+    t.Start()
+    try:
+        if field in ("Bold", "Italic"):
+            param.Set(1 if value else 0)
+
+        elif field == "Font":
+            text = str(value).strip()
+            if not text:
+                raise Exception("font name cannot be empty")
+            param.Set(text)
+
+        elif field == "TextSize":
+            text = str(value).strip()
+            if not text:
+                raise Exception("text size cannot be empty")
+            if not param.SetValueString(text):
+                raise Exception(
+                    "'{}' is not a valid text size - type a number in the "
+                    "project's units (e.g. 2.5)".format(text))
+
+        elif field == "WidthFactor":
+            text = str(value).strip()
+            if not text:
+                raise Exception("width factor cannot be empty")
+            if not param.SetValueString(text):
+                # Width factor is a plain ratio, so a raw number is safe here.
+                try:
+                    param.Set(float(text))
+                except ValueError:
+                    raise Exception("'{}' is not a number".format(text))
+
+        t.Commit()
+        return True, None
+
+    except Exception as ex:
+        if t.HasStarted() and not t.HasEnded():
+            t.RollBack()
+        return False, str(ex)
+
+
 class TextNoteTypeItem(object):
     """Wrapper class for Text Note Type - simple data holder"""
     
@@ -149,24 +224,44 @@ class TextNoteTypeItem(object):
         return "Unknown"
     
     def _get_bold(self):
-        """Check if bold"""
+        """True if bold"""
         try:
             bold_param = self._text_type.get_Parameter(DB.BuiltInParameter.TEXT_STYLE_BOLD)
             if bold_param:
-                return "Yes" if bold_param.AsInteger() == 1 else "No"
+                return bold_param.AsInteger() == 1
         except Exception:
             pass
-        return "No"
-    
+        return False
+
     def _get_italic(self):
-        """Check if italic"""
+        """True if italic"""
         try:
             italic_param = self._text_type.get_Parameter(DB.BuiltInParameter.TEXT_STYLE_ITALIC)
             if italic_param:
-                return "Yes" if italic_param.AsInteger() == 1 else "No"
+                return italic_param.AsInteger() == 1
         except Exception:
             pass
-        return "No"
+        return False
+
+    def reload(self):
+        """Re-read the editable parameters from Revit.
+        Called after an inline edit so the grid shows the value Revit actually
+        stored (it normalises units, e.g. "1.8" becomes "1.8000 mm")."""
+        try:
+            name_param = self._text_type.get_Parameter(DB.BuiltInParameter.SYMBOL_NAME_PARAM)
+            if name_param:
+                self._name = name_param.AsString()
+        except Exception:
+            pass
+        try:
+            size_param = self._text_type.get_Parameter(DB.BuiltInParameter.TEXT_SIZE)
+            self._text_size = size_param.AsValueString() if size_param else "N/A"
+        except Exception:
+            pass
+        self._font = self._get_font_name()
+        self._bold = self._get_bold()
+        self._italic = self._get_italic()
+        self._width_factor = self._get_width_factor()
 
     def _get_width_factor(self):
         """Get width factor"""
@@ -213,10 +308,18 @@ class TextNoteTypeItem(object):
     
     @property
     def bold(self):
-        return self._bold
-    
+        return "Yes" if self._bold else "No"
+
     @property
     def italic(self):
+        return "Yes" if self._italic else "No"
+
+    @property
+    def is_bold(self):
+        return self._bold
+
+    @property
+    def is_italic(self):
         return self._italic
 
     @property
@@ -1232,7 +1335,10 @@ class TextNoteTypeManagerWindow(Window):
         self.search_box = None
         self.filter_combo = None
         self.data_grid = None
-        
+        # Set while writing values back into a row, so the resulting change
+        # notifications are not mistaken for fresh user edits.
+        self._suppress_cell_events = False
+
         self._build_ui()
         self._load_data()
     
@@ -1461,7 +1567,9 @@ class TextNoteTypeManagerWindow(Window):
     def _create_datagrid(self):
         grid = DataGrid()
         grid.AutoGenerateColumns = False
-        grid.IsReadOnly = True
+        # Editable grid: the columns that must not be touched set IsReadOnly
+        # individually below.
+        grid.IsReadOnly = False
         grid.SelectionMode = System.Windows.Controls.DataGridSelectionMode.Extended
         grid.SelectionUnit = System.Windows.Controls.DataGridSelectionUnit.FullRow
         grid.CanUserSortColumns = True
@@ -1472,63 +1580,75 @@ class TextNoteTypeManagerWindow(Window):
         grid.RowBackground = Config.hex_to_brush(Config.WHITE)
         grid.AlternatingRowBackground = Config.hex_to_brush(Config.ROW_ALT_COLOR)
         
-        # Use DataTable-compatible text columns (Binding works with DataRowView)
+        # Use DataTable-compatible columns (Binding works with DataRowView).
+        # Columns carrying a Tag are editable - the Tag names the parameter
+        # that _on_cell_edit_ending writes back to (see EDITABLE_FIELDS).
         col_name = DataGridTextColumn()
         col_name.Header = "Type Name"
         col_name.Binding = Binding("Name")
         col_name.Width = DataGridLength(280)
+        col_name.IsReadOnly = True      # renaming goes through Rename/Batch Rename
         grid.Columns.Add(col_name)
-        
+
         col_size = DataGridTextColumn()
         col_size.Header = "Text Size"
         col_size.Binding = Binding("TextSize")
         col_size.Width = DataGridLength(100)
+        col_size.Tag = "TextSize"
         grid.Columns.Add(col_size)
-        
+
         col_font = DataGridTextColumn()
         col_font.Header = "Font"
         col_font.Binding = Binding("Font")
         col_font.Width = DataGridLength(150)
+        col_font.Tag = "Font"
         grid.Columns.Add(col_font)
-        
-        col_bold = DataGridTextColumn()
+
+        col_bold = DataGridCheckBoxColumn()
         col_bold.Header = "Bold"
         col_bold.Binding = Binding("Bold")
         col_bold.Width = DataGridLength(60)
+        col_bold.Tag = "Bold"
         grid.Columns.Add(col_bold)
-        
-        col_italic = DataGridTextColumn()
+
+        col_italic = DataGridCheckBoxColumn()
         col_italic.Header = "Italic"
         col_italic.Binding = Binding("Italic")
         col_italic.Width = DataGridLength(60)
+        col_italic.Tag = "Italic"
         grid.Columns.Add(col_italic)
 
         col_width_factor = DataGridTextColumn()
         col_width_factor.Header = "Width Factor"
         col_width_factor.Binding = Binding("WidthFactor")
         col_width_factor.Width = DataGridLength(90)
+        col_width_factor.Tag = "WidthFactor"
         grid.Columns.Add(col_width_factor)
 
         col_usage = DataGridTextColumn()
         col_usage.Header = "Usage"
         col_usage.Binding = Binding("Usage")
         col_usage.Width = DataGridLength(70)
+        col_usage.IsReadOnly = True
         grid.Columns.Add(col_usage)
 
         col_used_in = DataGridTextColumn()
         col_used_in.Header = "Used In"
         col_used_in.Binding = Binding("UsedIn")
         col_used_in.Width = DataGridLength(70)
+        col_used_in.IsReadOnly = True
         grid.Columns.Add(col_used_in)
 
         col_id = DataGridTextColumn()
         col_id.Header = "ID"
         col_id.Binding = Binding("ElemId")
         col_id.Width = DataGridLength(80)
+        col_id.IsReadOnly = True
         grid.Columns.Add(col_id)
-        
+
         grid.SelectionChanged += self._on_selection_changed
-        
+        grid.CellEditEnding += self._on_cell_edit_ending
+
         return grid
     
     def _build_datatable(self, items):
@@ -1544,8 +1664,8 @@ class TextNoteTypeManagerWindow(Window):
         dt.Columns.Add("Name", System.String)
         dt.Columns.Add("TextSize", System.String)
         dt.Columns.Add("Font", System.String)
-        dt.Columns.Add("Bold", System.String)
-        dt.Columns.Add("Italic", System.String)
+        dt.Columns.Add("Bold", System.Boolean)
+        dt.Columns.Add("Italic", System.Boolean)
         dt.Columns.Add("WidthFactor", System.String)
         dt.Columns.Add("Usage", System.Int32)
         dt.Columns.Add("UsedIn", System.Int32)
@@ -1556,8 +1676,8 @@ class TextNoteTypeManagerWindow(Window):
             row["Name"] = item.name
             row["TextSize"] = item.text_size
             row["Font"] = item.font
-            row["Bold"] = item.bold
-            row["Italic"] = item.italic
+            row["Bold"] = item.is_bold
+            row["Italic"] = item.is_italic
             row["WidthFactor"] = item.width_factor
             row["Usage"] = item.usage_count
             row["UsedIn"] = len(item.usage_locations)
@@ -1638,7 +1758,8 @@ class TextNoteTypeManagerWindow(Window):
         grid.Margin = Thickness(0, 8, 0, 0)
         
         tips = TextBlock()
-        tips.Text = "Click row to select | Use Batch Rename for multiple types"
+        tips.Text = ("Double-click a cell to edit Text Size / Font / Width Factor, "
+                     "tick Bold / Italic | Use Batch Rename for multiple types")
         tips.FontSize = 10
         tips.Foreground = Config.hex_to_brush(Config.TEXT_LIGHT)
         grid.Children.Add(tips)
@@ -1799,6 +1920,77 @@ class TextNoteTypeManagerWindow(Window):
             pass
         self._update_stats()
     
+    def _on_cell_edit_ending(self, sender, args):
+        """Push an edited cell back to Revit.
+
+        The write is deferred to the dispatcher: at this point the DataGrid is
+        still finishing its edit, and touching the bound row here would fight
+        with it."""
+        if args.EditAction != DataGridEditAction.Commit:
+            return
+        if self._suppress_cell_events:
+            return
+
+        field = args.Column.Tag
+        if not field:
+            return
+
+        editing = args.EditingElement
+        if isinstance(editing, CheckBox):
+            new_value = bool(editing.IsChecked)
+        else:
+            try:
+                new_value = editing.Text
+            except Exception:
+                return
+
+        row_view = args.Row.Item
+        self.Dispatcher.BeginInvoke(
+            DispatcherPriority.Background,
+            System.Action(lambda: self._commit_cell_edit(row_view, field, new_value)))
+
+    def _commit_cell_edit(self, row_view, field, new_value):
+        """Apply one cell edit, then show what Revit actually stored."""
+        try:
+            elem_id = row_view["ElemId"]
+        except Exception:
+            return
+
+        item = None
+        for candidate in self.filtered_items:
+            if candidate.id == elem_id:
+                item = candidate
+                break
+        if item is None:
+            return
+
+        ok, err = apply_text_type_edit(item, field, new_value)
+        if not ok:
+            MessageBox.Show(
+                "Could not set {} on '{}':\n\n{}".format(field, item.name, err),
+                "Edit failed", MessageBoxButton.OK, MessageBoxImage.Warning)
+
+        # Repaint the row from the element either way - on success Revit may
+        # have normalised the value, on failure the typed text must not stay.
+        item.reload()
+        self._suppress_cell_events = True
+        try:
+            row_view["TextSize"] = item.text_size
+            row_view["Font"] = item.font
+            row_view["Bold"] = item.is_bold
+            row_view["Italic"] = item.is_italic
+            row_view["WidthFactor"] = item.width_factor
+            # Assigning through a DataRowView opens an implicit edit; commit it
+            # or the row keeps the values pending.
+            row_view.EndEdit()
+        except Exception:
+            try:
+                row_view.CancelEdit()
+            except Exception:
+                pass
+        finally:
+            self._suppress_cell_events = False
+
     def _on_refresh(self, sender, args):
         self._load_data()
         MessageBox.Show("Data refreshed!", "Info", MessageBoxButton.OK, MessageBoxImage.Information)
