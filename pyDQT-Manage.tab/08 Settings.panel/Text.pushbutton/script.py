@@ -26,7 +26,6 @@ from System.Windows.Controls import (Grid, RowDefinition, ColumnDefinition, Bord
                                       DataGridTextColumn, DataGridCheckBoxColumn,
                                       DataGridEditAction,
                                       ScrollViewer, TabControl, TabItem, CheckBox)
-from System.Windows.Threading import DispatcherPriority
 from System.Windows.Media import SolidColorBrush
 from System.Windows.Data import Binding
 from System.Windows.Controls import DataGridLength
@@ -1917,12 +1916,31 @@ class TextNoteTypeManagerWindow(Window):
             pass
         self._update_stats()
     
+    def _display_value(self, item, field):
+        """The value the grid should show for a field, straight off the type."""
+        if field == "TextSize":
+            return item.text_size
+        if field == "Font":
+            return item.font
+        if field == "WidthFactor":
+            return item.width_factor
+        if field == "Bold":
+            return item.is_bold
+        if field == "Italic":
+            return item.is_italic
+        return None
+
     def _on_cell_edit_ending(self, sender, args):
         """Push an edited cell back to Revit.
 
-        The write is deferred to the dispatcher: at this point the DataGrid is
-        still finishing its edit, and touching the bound row here would fight
-        with it."""
+        Everything here runs SYNCHRONOUSLY and deliberately so. This window is
+        modal, so the handler is still nested inside the external command that
+        opened it and the Revit API context is valid - exactly like the Rename
+        button's Click handler. Deferring the write to the dispatcher (which is
+        what this used to do) let it run after ShowDialog had returned and the
+        command had ended: starting a Transaction with no API context, from a
+        Python callback whose scope was already being torn down, takes Revit
+        down with a fatal error instead of raising something catchable."""
         if args.EditAction != DataGridEditAction.Commit:
             return
         if self._suppress_cell_events:
@@ -1936,23 +1954,14 @@ class TextNoteTypeManagerWindow(Window):
             return
 
         editing = args.EditingElement
-        if isinstance(editing, CheckBox):
-            new_value = bool(editing.IsChecked)
-        else:
-            try:
-                new_value = editing.Text
-            except Exception:
-                return
-
-        row_view = args.Row.Item
-        self.Dispatcher.BeginInvoke(
-            DispatcherPriority.Background,
-            System.Action(lambda: self._commit_cell_edit(row_view, field, new_value)))
-
-    def _commit_cell_edit(self, row_view, field, new_value):
-        """Apply one cell edit, then show what Revit actually stored."""
+        is_check = isinstance(editing, CheckBox)
         try:
-            elem_id = row_view["ElemId"]
+            new_value = bool(editing.IsChecked) if is_check else editing.Text
+        except Exception:
+            return
+
+        try:
+            elem_id = args.Row.Item["ElemId"]
         except Exception:
             return
 
@@ -1970,24 +1979,22 @@ class TextNoteTypeManagerWindow(Window):
                 "Could not set {} on '{}':\n\n{}".format(field, item.name, err),
                 "Edit failed", MessageBoxButton.OK, MessageBoxImage.Warning)
 
-        # Repaint the row from the element either way - on success Revit may
-        # have normalised the value, on failure the typed text must not stay.
+        # Re-read the type and hand the authoritative value back to the editor
+        # before the grid commits it. On success that shows what Revit actually
+        # stored (it normalises "1.8" to "1.8000 mm"); on failure it puts the
+        # old value back so rejected text never sticks. Writing through the
+        # editing element rather than the bound row avoids fighting the edit
+        # the DataGrid is in the middle of committing.
         item.reload()
         self._suppress_cell_events = True
         try:
-            row_view["TextSize"] = item.text_size
-            row_view["Font"] = item.font
-            row_view["Bold"] = item.is_bold
-            row_view["Italic"] = item.is_italic
-            row_view["WidthFactor"] = item.width_factor
-            # Assigning through a DataRowView opens an implicit edit; commit it
-            # or the row keeps the values pending.
-            row_view.EndEdit()
+            value = self._display_value(item, field)
+            if is_check:
+                editing.IsChecked = bool(value)
+            else:
+                editing.Text = value if value is not None else ""
         except Exception:
-            try:
-                row_view.CancelEdit()
-            except Exception:
-                pass
+            pass
         finally:
             self._suppress_cell_events = False
 
