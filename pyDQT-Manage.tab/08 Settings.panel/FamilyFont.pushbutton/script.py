@@ -2,17 +2,24 @@
 """
 Family Font Manager
 
-Batch-changes the Text Font used inside 2D annotation families (Generic
-Annotations, Tags, Title Blocks, Symbols, Callout/Elevation/Grid/Level
-heads, View Titles, etc.) without opening each family one at a time.
+Batch-changes the Text Font (and optionally the Width Factor) used inside 2D
+annotation families (Generic Annotations, Tags, Title Blocks, Symbols,
+Callout/Elevation/Grid/Level heads, View Titles, etc.) without opening each
+family one at a time.
 
 METHOD: for every loadable family whose category is selected, the family is
-opened headlessly with Document.EditFamily(), every TextNoteType inside it
-has its Text Font parameter changed - TextNoteType is what both plain Text
-elements AND Label elements use for their appearance inside a family, so
-this covers a tag's visible text and a title block's labels too - then the
+opened headlessly with Document.EditFamily(), every element TYPE inside it
+that exposes a Text Font parameter has that parameter changed, then the
 family is reloaded into the project with Document.LoadFamily() and the
 temporary family document is discarded (never saved to disk).
+
+WHY "every type with a Text Font parameter" and not "every TextNoteType":
+a Label placed in a tag / title block / annotation family does NOT use a
+Text Note Type - it uses its own "Tag Label" system-family type, a different
+class. Collecting only TextNoteType silently misses every Label, which is
+usually the only visible text in a tag or a section head. Filtering on the
+presence of BuiltInParameter.TEXT_FONT catches Text Note Types, Tag Label
+types, and anything else Revit gives a font to, in every Revit version.
 
 Revit's screen may flicker as each family briefly becomes the active
 document while it is edited - that is EditFamily doing its job, not an
@@ -34,6 +41,8 @@ from pyrevit import revit, forms
 from pyrevit.forms import WPFWindow
 from Autodesk.Revit.DB import *
 from System.Collections.ObjectModel import ObservableCollection
+from System.Windows import RoutedEventHandler
+from System.Windows.Controls import CheckBox
 import clr
 clr.AddReference('System.Drawing')
 from System.Drawing.Text import InstalledFontCollection
@@ -127,6 +136,103 @@ def get_installed_fonts():
         return []
 
 
+def _param(element_type, bip):
+    try:
+        return element_type.get_Parameter(bip)
+    except:
+        return None
+
+
+def font_param(element_type):
+    """The Text Font parameter of a type, or None if it has no usable one."""
+    p = _param(element_type, BuiltInParameter.TEXT_FONT)
+    if p is None:
+        return None
+    try:
+        if p.StorageType != StorageType.String:
+            return None
+    except:
+        pass
+    return p
+
+
+def _resolve_width_bip():
+    """BuiltInParameter for Width Factor. Resolved defensively so that a
+    renamed/missing enum member degrades to the by-name lookup in
+    width_param() instead of throwing on every type."""
+    try:
+        return BuiltInParameter.TEXT_WIDTH_SCALE
+    except AttributeError:
+        return None
+
+
+_WIDTH_BIP = _resolve_width_bip()
+
+
+def _as_double_param(p):
+    if p is None:
+        return None
+    try:
+        if p.StorageType != StorageType.Double:
+            return None
+    except:
+        return None
+    return p
+
+
+def width_param(element_type):
+    """The Width Factor parameter of a type, or None if it has no usable
+    one. Not every font-bearing type exposes Width Factor."""
+    if _WIDTH_BIP is not None:
+        p = _as_double_param(_param(element_type, _WIDTH_BIP))
+        if p is not None:
+            return p
+    try:
+        return _as_double_param(element_type.LookupParameter("Width Factor"))
+    except:
+        return None
+
+
+def font_bearing_types(fam_doc):
+    """Every element TYPE in the family document that carries a Text Font
+    parameter. This is deliberately parameter-driven rather than class-
+    driven: Labels use "Tag Label" types, plain text uses TextNoteType, and
+    the two do not share a class - see the module docstring."""
+    found = []
+    for et in FilteredElementCollector(fam_doc).WhereElementIsElementType():
+        if font_param(et) is not None:
+            found.append(et)
+    return found
+
+
+def type_kind(element_type):
+    """Short human label for what sort of type this is, so the scan grid can
+    show "3 Text, 2 Label" instead of an opaque count."""
+    try:
+        if isinstance(element_type, TextNoteType):
+            return "Text"
+    except:
+        pass
+    try:
+        if isinstance(element_type, DimensionType):
+            return "Dim"
+    except:
+        pass
+    try:
+        if isinstance(element_type, TextElementType):
+            return "Label"
+    except:
+        pass
+    try:
+        return element_type.GetType().Name
+    except:
+        return "Type"
+
+
+def _fmt_width(value):
+    return "{0:.2f}".format(value)
+
+
 def collect_loadable_families():
     """Every loadable, non-in-place Family in the project, with its category
     and whether that category is a 2D annotation category."""
@@ -164,22 +270,29 @@ def group_categories(family_rows):
 
 
 def scan_family_fonts(fam):
-    """Open a family read-only and report its TextNoteTypes' current fonts.
-    No transaction: reading a parameter does not modify the family document,
-    so nothing here can leave a half-edited family behind."""
+    """Open a family read-only and report the fonts / width factors of every
+    font-bearing type inside it. No transaction: reading a parameter does not
+    modify the family document, so nothing here can leave a half-edited
+    family behind."""
     fam_doc = doc.EditFamily(fam)
     try:
         fonts = []
+        widths = []
+        kinds = {}
         count = 0
-        for tnt in FilteredElementCollector(fam_doc).OfClass(TextNoteType):
+        for et in font_bearing_types(fam_doc):
             count += 1
-            try:
-                p = tnt.get_Parameter(BuiltInParameter.TEXT_FONT)
-                if p and p.HasValue:
-                    fonts.append(p.AsString())
-            except:
-                pass
-        return count, fonts
+            k = type_kind(et)
+            kinds[k] = kinds.get(k, 0) + 1
+            fp = font_param(et)
+            if fp is not None and fp.HasValue:
+                value = fp.AsString()
+                if value:
+                    fonts.append(value)
+            wp = width_param(et)
+            if wp is not None and wp.HasValue:
+                widths.append(wp.AsDouble())
+        return count, fonts, widths, kinds
     finally:
         try:
             fam_doc.Close(False)
@@ -187,29 +300,41 @@ def scan_family_fonts(fam):
             pass
 
 
-def apply_family_font(fam, target_font, current_filter):
-    """Change TEXT_FONT on every TextNoteType in `fam` that matches
+def apply_family_font(fam, target_font, current_filter, width_factor):
+    """Set Text Font (when target_font is given) and/or Width Factor (when
+    width_factor is given) on every font-bearing type in `fam` that matches
     current_filter (None = every type, regardless of its current font).
     Reloads the family back into `doc` via LoadFamily, which commits its own
     transaction - so a failure on one family cannot roll back families
-    already applied. Returns the number of TextNoteTypes actually changed."""
+    already applied. Returns the number of types actually changed."""
     fam_doc = doc.EditFamily(fam)
     try:
         changed = 0
         t = Transaction(fam_doc, "DQT - Change text font")
         t.Start()
         try:
-            for tnt in FilteredElementCollector(fam_doc).OfClass(TextNoteType):
-                p = tnt.get_Parameter(BuiltInParameter.TEXT_FONT)
-                if p is None or p.IsReadOnly:
-                    continue
-                current = p.AsString() if p.HasValue else None
+            for et in font_bearing_types(fam_doc):
+                fp = font_param(et)
+                current = fp.AsString() if (fp is not None and fp.HasValue) else None
                 if current_filter and current != current_filter:
                     continue
-                if current == target_font:
-                    continue
-                p.Set(target_font)
-                changed += 1
+
+                touched = False
+                if target_font and fp is not None and not fp.IsReadOnly:
+                    if current != target_font:
+                        fp.Set(target_font)
+                        touched = True
+
+                if width_factor is not None:
+                    wp = width_param(et)
+                    if wp is not None and not wp.IsReadOnly:
+                        now = wp.AsDouble() if wp.HasValue else None
+                        if now is None or abs(now - width_factor) > 1e-9:
+                            wp.Set(width_factor)
+                            touched = True
+
+                if touched:
+                    changed += 1
             t.Commit()
         except Exception:
             if t.HasStarted() and not t.HasEnded():
@@ -238,15 +363,15 @@ class CategoryRow(object):
         self.name = name
         self.count = count
         self.selected = is_annotation
-        self.mark = "[x]" if is_annotation else "[ ]"
 
 
 class FamilyRow(object):
     def __init__(self, name, category):
         self.name = name
         self.category = category
-        self.type_count = 0
+        self.types_desc = "-"
         self.fonts_found = "-"
+        self.widths_found = "-"
         self.status = "not scanned"
 
 
@@ -258,7 +383,7 @@ _ALL_FONTS = "<All fonts>"
 # ============================================================================
 MAIN_XAML = """
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-        Title="Family Font Manager - DQT" Height="700" Width="1050"
+        Title="Family Font Manager - DQT" Height="770" Width="1160" FontSize="13.2"
         WindowStartupLocation="CenterScreen" Background="#FFFFFF" ResizeMode="CanResize">
     <Grid Margin="12">
         <Grid.RowDefinitions>
@@ -271,15 +396,15 @@ MAIN_XAML = """
         <Border Grid.Row="0" Background="#F0CC88" BorderBrush="#D4B87A" BorderThickness="0,0,0,2"
                 CornerRadius="5" Padding="12,8" Margin="0,0,0,10">
             <StackPanel>
-                <TextBlock Text="Family Font Manager" FontSize="17" FontWeight="Bold" Foreground="#5D4E37"/>
-                <TextBlock Text="Batch-change the Text Font used inside annotation, title block and tag families - no need to open each one by hand"
-                           FontSize="11" Foreground="#5D4E37" TextWrapping="Wrap"/>
+                <TextBlock Text="Family Font Manager" FontSize="18.7" FontWeight="Bold" Foreground="#5D4E37"/>
+                <TextBlock Text="Batch-change the Text Font and Width Factor used inside annotation, title block and tag families - Labels included, no need to open each one by hand"
+                           FontSize="12.1" Foreground="#5D4E37" TextWrapping="Wrap"/>
             </StackPanel>
         </Border>
 
         <Grid Grid.Row="1">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="290"/>
+                <ColumnDefinition Width="320"/>
                 <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
 
@@ -295,14 +420,15 @@ MAIN_XAML = """
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
 
-                    <TextBlock Grid.Row="0" Text="FAMILY CATEGORIES" FontSize="10" FontWeight="SemiBold"
+                    <TextBlock Grid.Row="0" Text="FAMILY CATEGORIES" FontSize="11" FontWeight="SemiBold"
                                Foreground="#5D4E37" Margin="0,0,0,6"/>
 
                     <DataGrid Grid.Row="1" Name="dataGridCategories" AutoGenerateColumns="False" IsReadOnly="True"
                               HeadersVisibility="Column" GridLinesVisibility="Horizontal" HorizontalGridLinesBrush="#E0E0E0"
-                              Background="White" BorderBrush="#D4B87A" BorderThickness="1" RowHeight="24"
+                              Background="White" BorderBrush="#D4B87A" BorderThickness="1" RowHeight="26"
                               AlternatingRowBackground="#FAF3E0" SelectionMode="Single" Margin="0,0,0,6">
                         <DataGrid.ColumnHeaderStyle>
                             <Style TargetType="DataGridColumnHeader">
@@ -313,26 +439,39 @@ MAIN_XAML = """
                             </Style>
                         </DataGrid.ColumnHeaderStyle>
                         <DataGrid.Columns>
-                            <DataGridTextColumn Header="" Binding="{Binding mark}" Width="28" FontFamily="Consolas"/>
+                            <DataGridTemplateColumn Header="" Width="34">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <CheckBox IsChecked="{Binding selected, Mode=OneWay}"
+                                                  HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
                             <DataGridTextColumn Header="Category" Binding="{Binding name}" Width="*"/>
-                            <DataGridTextColumn Header="#" Binding="{Binding count}" Width="35"/>
+                            <DataGridTextColumn Header="#" Binding="{Binding count}" Width="38"/>
                         </DataGrid.Columns>
                     </DataGrid>
 
                     <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,0,0,10">
-                        <Button Name="btnCatAnnotation" Content="Annotation only" Padding="6,3" Margin="0,0,4,0" Background="#F0CC88" FontSize="10"/>
-                        <Button Name="btnCatAll" Content="All" Padding="6,3" Margin="0,0,4,0" Background="White" FontSize="10" Width="35"/>
-                        <Button Name="btnCatNone" Content="None" Padding="6,3" Background="White" FontSize="10" Width="45"/>
+                        <Button Name="btnCatAnnotation" Content="Annotation only" Padding="6,3" Margin="0,0,4,0" Background="#F0CC88" FontSize="11"/>
+                        <Button Name="btnCatAll" Content="All" Padding="6,3" Margin="0,0,4,0" Background="White" FontSize="11" Width="40"/>
+                        <Button Name="btnCatNone" Content="None" Padding="6,3" Background="White" FontSize="11" Width="50"/>
                     </StackPanel>
 
-                    <TextBlock Grid.Row="3" Text="TARGET FONT" FontSize="10" FontWeight="SemiBold" Foreground="#5D4E37" Margin="0,0,0,4"/>
+                    <TextBlock Grid.Row="3" Text="TARGET FONT" FontSize="11" FontWeight="SemiBold" Foreground="#5D4E37" Margin="0,0,0,4"/>
                     <ComboBox Grid.Row="4" Name="cmbTargetFont" IsEditable="True" Padding="4" Margin="0,0,0,10"/>
 
-                    <TextBlock Grid.Row="5" Text="ONLY REPLACE CURRENT FONT (optional, after Scan)" FontSize="10"
-                               FontWeight="SemiBold" Foreground="#5D4E37" Margin="0,0,0,4" TextWrapping="Wrap"/>
-                    <ComboBox Grid.Row="6" Name="cmbCurrentFilter" Padding="4" Margin="0,0,0,10"/>
+                    <StackPanel Grid.Row="5" Orientation="Horizontal" Margin="0,0,0,10">
+                        <CheckBox Name="chkWidthFactor" Content="Also set Width Factor" VerticalAlignment="Center" Foreground="#5D4E37"/>
+                        <TextBox Name="txtWidthFactor" Text="1.00" Width="60" Margin="8,0,0,0" Padding="3,2"
+                                 BorderBrush="#D4B87A" VerticalContentAlignment="Center"/>
+                    </StackPanel>
 
-                    <Button Grid.Row="7" Name="btnScan" Content="Scan Selected Categories" Padding="8,6" Background="White"
+                    <TextBlock Grid.Row="6" Text="ONLY REPLACE CURRENT FONT (optional, after Scan)" FontSize="11"
+                               FontWeight="SemiBold" Foreground="#5D4E37" Margin="0,0,0,4" TextWrapping="Wrap"/>
+                    <ComboBox Grid.Row="7" Name="cmbCurrentFilter" Padding="4" Margin="0,0,0,10"/>
+
+                    <Button Grid.Row="8" Name="btnScan" Content="Scan Selected Categories" Padding="8,6" Background="White"
                             BorderBrush="#D4B87A" FontWeight="SemiBold" VerticalAlignment="Bottom"/>
                 </Grid>
             </Border>
@@ -345,7 +484,7 @@ MAIN_XAML = """
 
                 <DataGrid Grid.Row="0" Name="dataGridFamilies" AutoGenerateColumns="False" IsReadOnly="True"
                           HeadersVisibility="Column" GridLinesVisibility="Horizontal" HorizontalGridLinesBrush="#E0E0E0"
-                          Background="White" BorderBrush="#D4B87A" BorderThickness="1"
+                          Background="White" BorderBrush="#D4B87A" BorderThickness="1" RowHeight="26"
                           AlternatingRowBackground="#FAF3E0" SelectionMode="Extended">
                     <DataGrid.ColumnHeaderStyle>
                         <Style TargetType="DataGridColumnHeader">
@@ -357,15 +496,16 @@ MAIN_XAML = """
                     </DataGrid.ColumnHeaderStyle>
                     <DataGrid.Columns>
                         <DataGridTextColumn Header="Family" Binding="{Binding name}" Width="*"/>
-                        <DataGridTextColumn Header="Category" Binding="{Binding category}" Width="150"/>
-                        <DataGridTextColumn Header="Text Types" Binding="{Binding type_count}" Width="75"/>
-                        <DataGridTextColumn Header="Fonts Found" Binding="{Binding fonts_found}" Width="200"/>
-                        <DataGridTextColumn Header="Status" Binding="{Binding status}" Width="140"/>
+                        <DataGridTextColumn Header="Category" Binding="{Binding category}" Width="140"/>
+                        <DataGridTextColumn Header="Types" Binding="{Binding types_desc}" Width="135"/>
+                        <DataGridTextColumn Header="Fonts Found" Binding="{Binding fonts_found}" Width="180"/>
+                        <DataGridTextColumn Header="Width" Binding="{Binding widths_found}" Width="85"/>
+                        <DataGridTextColumn Header="Status" Binding="{Binding status}" Width="130"/>
                     </DataGrid.Columns>
                 </DataGrid>
 
                 <TextBlock Grid.Row="1" Name="txtSummary" Text="Select categories on the left, then click Scan to preview."
-                           Foreground="#666" Margin="0,6,0,0"/>
+                           Foreground="#666" Margin="0,6,0,0" TextWrapping="Wrap"/>
             </Grid>
         </Grid>
 
@@ -377,7 +517,7 @@ MAIN_XAML = """
             </StackPanel>
         </Border>
 
-        <TextBlock Grid.Row="3" Text="Dang Quoc Truong - DQT (c) 2026" Foreground="#5D4E37" FontSize="11"
+        <TextBlock Grid.Row="3" Text="Dang Quoc Truong - DQT (c) 2026" Foreground="#5D4E37" FontSize="12.1"
                    HorizontalAlignment="Right" Margin="0,6,4,0"/>
     </Grid>
 </Window>
@@ -406,6 +546,10 @@ class FamilyFontWindow(WPFWindow):
         self.cmbCurrentFilter.Items.Add(_ALL_FONTS)
         self.cmbCurrentFilter.SelectedIndex = 0
 
+        # The checkboxes live inside a cell template, so they are not fields
+        # on the window - catch their Click as it bubbles up to the grid.
+        self.dataGridCategories.AddHandler(
+            CheckBox.ClickEvent, RoutedEventHandler(self.on_category_checkbox))
         self.dataGridCategories.MouseDoubleClick += self.on_category_toggle
         self.btnCatAnnotation.Click += self.on_cat_annotation_only
         self.btnCatAll.Click += self.on_cat_all
@@ -421,33 +565,45 @@ class FamilyFontWindow(WPFWindow):
         n_annotation = sum(1 for r in self.family_rows_all if r["is_annotation"])
         self.txtSummary.Text = (
             "{} loadable family(ies) found, {} in 2D annotation categories. "
-            "Select categories on the left, then click Scan to preview.".format(
+            "Tick categories on the left, then click Scan to preview.".format(
                 len(self.family_rows_all), n_annotation))
 
     # -- category checklist -------------------------------------------------
+    def on_category_checkbox(self, sender, args):
+        """A checkbox in the category grid was clicked. The CheckBox is bound
+        OneWay, so the Python object is the single source of truth and is
+        updated here - no reliance on WPF writing back to a Python attr."""
+        box = None
+        for candidate in (args.OriginalSource, args.Source):
+            if isinstance(candidate, CheckBox):
+                box = candidate
+                break
+        if box is None:
+            return
+        row = box.DataContext
+        if isinstance(row, CategoryRow):
+            row.selected = bool(box.IsChecked)
+
     def on_category_toggle(self, sender, args):
         row = self.dataGridCategories.CurrentItem
-        if row is not None:
+        if row is not None and isinstance(row, CategoryRow):
             row.selected = not row.selected
-            row.mark = "[x]" if row.selected else "[ ]"
             self.dataGridCategories.Items.Refresh()
 
     def on_cat_annotation_only(self, sender, args):
+        annotation = self._annotation_category_names()
         for row in self.category_rows:
-            row.selected = row.name in self._annotation_category_names()
-            row.mark = "[x]" if row.selected else "[ ]"
+            row.selected = row.name in annotation
         self.dataGridCategories.Items.Refresh()
 
     def on_cat_all(self, sender, args):
         for row in self.category_rows:
             row.selected = True
-            row.mark = "[x]"
         self.dataGridCategories.Items.Refresh()
 
     def on_cat_none(self, sender, args):
         for row in self.category_rows:
             row.selected = False
-            row.mark = "[ ]"
         self.dataGridCategories.Items.Refresh()
 
     def _annotation_category_names(self):
@@ -460,6 +616,23 @@ class FamilyFontWindow(WPFWindow):
         cats = self._selected_categories()
         return [r for r in self.family_rows_all if r["category"] in cats]
 
+    def _read_width_factor(self):
+        """(ok, value) - value is None when the Width Factor box is off."""
+        if not self.chkWidthFactor.IsChecked:
+            return True, None
+        raw = (self.txtWidthFactor.Text or "").strip()
+        try:
+            value = float(raw)
+        except:
+            forms.alert("Width Factor must be a number, for example 0.8.",
+                        title="DQT - Family Font Manager")
+            return False, None
+        if value <= 0 or value > 10:
+            forms.alert("Width Factor must be between 0.01 and 10.",
+                        title="DQT - Family Font Manager")
+            return False, None
+        return True, value
+
     # -- scan (preview, read-only) ------------------------------------------
     def on_scan(self, sender, args):
         targets = self._selected_targets()
@@ -470,6 +643,7 @@ class FamilyFontWindow(WPFWindow):
 
         self.family_rows.Clear()
         fonts_seen = set()
+        kinds_seen = {}
         total_types = 0
         errors = 0
         _log("=" * 50)
@@ -489,13 +663,21 @@ class FamilyFontWindow(WPFWindow):
                 self.family_rows.Add(row)
                 continue
             try:
-                count, fonts = scan_family_fonts(fam)
-                row.type_count = count
+                count, fonts, widths, kinds = scan_family_fonts(fam)
+                breakdown = ", ".join(
+                    "{} {}".format(kinds[k], k) for k in sorted(kinds))
+                row.types_desc = ("{} ({})".format(count, breakdown)
+                                  if breakdown else str(count))
                 distinct = sorted(set(f for f in fonts if f))
                 row.fonts_found = ", ".join(distinct) if distinct else "-"
+                distinct_widths = sorted(set(round(w, 4) for w in widths))
+                row.widths_found = (", ".join(_fmt_width(w) for w in distinct_widths)
+                                    if distinct_widths else "-")
                 row.status = "scanned"
                 total_types += count
                 fonts_seen.update(distinct)
+                for k in kinds:
+                    kinds_seen[k] = kinds_seen.get(k, 0) + kinds[k]
             except Exception as ex:
                 row.status = "error: {}".format(ex)
                 errors += 1
@@ -504,8 +686,10 @@ class FamilyFontWindow(WPFWindow):
         print("DQT - Family Font: scan complete - {} type(s), {} distinct font(s), "
               "{} error(s)".format(total_types, len(fonts_seen), errors))
 
-        _log("SCAN done - {} type(s), {} distinct font(s), {} error(s)".format(
-            total_types, len(fonts_seen), errors))
+        _log("SCAN done - {} type(s) ({}), {} distinct font(s), {} error(s)".format(
+            total_types,
+            ", ".join("{} {}".format(kinds_seen[k], k) for k in sorted(kinds_seen)),
+            len(fonts_seen), errors))
 
         self.cmbCurrentFilter.Items.Clear()
         self.cmbCurrentFilter.Items.Add(_ALL_FONTS)
@@ -513,16 +697,26 @@ class FamilyFontWindow(WPFWindow):
             self.cmbCurrentFilter.Items.Add(f)
         self.cmbCurrentFilter.SelectedIndex = 0
 
+        kind_note = ", ".join("{} {}".format(kinds_seen[k], k)
+                              for k in sorted(kinds_seen))
         self.txtSummary.Text = (
-            "Scanned {} family(ies): {} text type(s), {} distinct font(s) found"
-            "{}.".format(len(targets), total_types, len(fonts_seen),
-                        ", {} error(s)".format(errors) if errors else ""))
+            "Scanned {} family(ies): {} font-bearing type(s){}, {} distinct "
+            "font(s) found{}.".format(
+                len(targets), total_types,
+                " ({})".format(kind_note) if kind_note else "",
+                len(fonts_seen),
+                ", {} error(s)".format(errors) if errors else ""))
 
     # -- apply ----------------------------------------------------------------
     def on_apply(self, sender, args):
         target_font = (self.cmbTargetFont.Text or "").strip()
-        if not target_font:
-            forms.alert("Type or pick a target font first.", title="DQT - Family Font Manager")
+        ok, width_factor = self._read_width_factor()
+        if not ok:
+            return
+        if not target_font and width_factor is None:
+            forms.alert("Pick a target font, or tick \"Also set Width Factor\" "
+                        "to change only the width factor.",
+                        title="DQT - Family Font Manager")
             return
 
         targets = self._selected_targets()
@@ -536,33 +730,42 @@ class FamilyFontWindow(WPFWindow):
         if sel and sel != _ALL_FONTS:
             current_filter = sel
 
-        filter_note = (' (only text types currently using "{}")'.format(current_filter)
+        changes = []
+        if target_font:
+            changes.append("Text Font -> \"{}\"".format(target_font))
+        if width_factor is not None:
+            changes.append("Width Factor -> {}".format(_fmt_width(width_factor)))
+        filter_note = (' (only types currently using "{}")'.format(current_filter)
                        if current_filter else "")
         msg = (
-            "Change Text Font to \"{}\" across {} family(ies) in {} selected "
-            "category(ies){}.\n\n"
+            "{} across {} family(ies) in {} selected category(ies){}.\n\n"
+            "This covers Text Note Types AND the Label types used by tags, "
+            "title blocks and section heads.\n\n"
             "Each family is briefly opened and reloaded in the background - "
             "Revit's screen may flicker between families, this needs no "
             "interaction.\n\n"
             "SAVE the model before continuing.\n\nProceed?"
-        ).format(target_font, len(targets), len(self._selected_categories()), filter_note)
+        ).format(" and ".join(changes), len(targets),
+                 len(self._selected_categories()), filter_note)
 
         if not forms.alert(msg, title="DQT - Family Font Manager", ok=True, cancel=True):
             return
 
         # Record the request and close - the batch runs in main(), after
         # ShowDialog() returns, never while this modal window is still open.
-        self.apply_requested = (targets, target_font, current_filter)
+        self.apply_requested = (targets, target_font, current_filter, width_factor)
         self.Close()
 
     def on_close(self, sender, args):
         self.Close()
 
 
-def _run_batch(targets, target_font, current_filter):
+def _run_batch(targets, target_font, current_filter, width_factor):
     _log("=" * 50)
-    _log("RUN start - {} family(ies), target font '{}', filter {}".format(
-        len(targets), target_font, current_filter or "<all>"))
+    _log("RUN start - {} family(ies), font '{}', width {}, filter {}".format(
+        len(targets), target_font or "<unchanged>",
+        _fmt_width(width_factor) if width_factor is not None else "<unchanged>",
+        current_filter or "<all>"))
 
     processed = 0
     changed_families = 0
@@ -571,9 +774,15 @@ def _run_batch(targets, target_font, current_filter):
     failed = 0
     fail_details = []
 
+    changes = []
+    if target_font:
+        changes.append("font \"{}\"".format(target_font))
+    if width_factor is not None:
+        changes.append("width factor {}".format(_fmt_width(width_factor)))
+
     print("\n" + "=" * 60)
-    print("DQT - FAMILY FONT: changing {} family(ies) to \"{}\"{}".format(
-        len(targets), target_font,
+    print("DQT - FAMILY FONT: setting {} on {} family(ies){}".format(
+        " and ".join(changes), len(targets),
         " (filter: current font = \"{}\")".format(current_filter) if current_filter else ""))
     print("Black-box log: {}".format(_LOG_PATH))
     print("=" * 60)
@@ -593,12 +802,12 @@ def _run_batch(targets, target_font, current_filter):
             continue
         processed += 1
         try:
-            changed = apply_family_font(fam, target_font, current_filter)
+            changed = apply_family_font(fam, target_font, current_filter, width_factor)
             if changed:
                 changed_families += 1
                 total_types_changed += changed
-            print("  OK: {} text type(s) changed".format(changed))
-            _log("family {} (id {}): {} text type(s) changed".format(
+            print("  OK: {} type(s) changed".format(changed))
+            _log("family {} (id {}): {} type(s) changed".format(
                 t["name"], t["id"], changed))
         except Exception as ex:
             failed += 1
@@ -624,7 +833,7 @@ def _run_batch(targets, target_font, current_filter):
         "Family Font Change Complete!\n\n"
         "Families processed  : {}\n"
         "Families changed    : {}\n"
-        "Text types changed  : {}\n"
+        "Types changed (text + label) : {}\n"
         "Skipped (not editable/invalid) : {}\n"
         "Failed              : {}\n\n"
         "Log: {}"
@@ -641,13 +850,15 @@ def _run_batch(targets, target_font, current_filter):
 
 def main():
     proceed = forms.alert(
-        "Batch-change the Text Font used inside 2D annotation families "
-        "(Generic Annotations, Tags, Title Blocks, Symbols, view/section/"
-        "grid/level heads, etc.) without opening each family by hand.\n\n"
+        "Batch-change the Text Font and Width Factor used inside 2D "
+        "annotation families (Generic Annotations, Tags, Title Blocks, "
+        "Symbols, view/section/grid/level heads, etc.) without opening each "
+        "family by hand.\n\n"
         "Method: each selected family is opened in the background "
-        "(Document.EditFamily), every Text Note Type inside it gets the new "
-        "font, then it is reloaded into the project. This also changes "
-        "Label text, since Labels use the family's Text Note Types too.\n\n"
+        "(Document.EditFamily), every type inside it that has a Text Font "
+        "parameter is updated, then it is reloaded into the project. This "
+        "covers plain Text Note Types AND the \"Tag Label\" types that Labels "
+        "in tags, title blocks and section heads actually use.\n\n"
         "SAVE your model first.\n\n"
         "Click OK to open the tool.",
         title="Family Font Manager", ok=True, cancel=True)
@@ -658,8 +869,8 @@ def main():
     window.ShowDialog()
 
     if window.apply_requested:
-        targets, target_font, current_filter = window.apply_requested
-        _run_batch(targets, target_font, current_filter)
+        targets, target_font, current_filter, width_factor = window.apply_requested
+        _run_batch(targets, target_font, current_filter, width_factor)
 
 
 if __name__ == "__main__":
