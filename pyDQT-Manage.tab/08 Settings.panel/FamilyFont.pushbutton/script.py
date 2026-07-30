@@ -190,9 +190,9 @@ def scan_family_fonts(fam):
 def apply_family_font(fam, target_font, current_filter):
     """Change TEXT_FONT on every TextNoteType in `fam` that matches
     current_filter (None = every type, regardless of its current font).
-    Reloads the family back into `doc` in its own transaction so a failure
-    on one family cannot roll back families already applied. Returns the
-    number of TextNoteTypes actually changed."""
+    Reloads the family back into `doc` via LoadFamily, which commits its own
+    transaction - so a failure on one family cannot roll back families
+    already applied. Returns the number of TextNoteTypes actually changed."""
     fam_doc = doc.EditFamily(fam)
     try:
         changed = 0
@@ -217,15 +217,11 @@ def apply_family_font(fam, target_font, current_filter):
             raise
 
         if changed:
-            t2 = Transaction(doc, "DQT - Reload family {}".format(get_name(fam)))
-            t2.Start()
-            try:
-                fam_doc.LoadFamily(doc, _OverwriteLoadOptions())
-                t2.Commit()
-            except Exception:
-                if t2.HasStarted() and not t2.HasEnded():
-                    t2.RollBack()
-                raise
+            # LoadFamily manages its own transaction on `doc` internally -
+            # `doc` must have NO open transaction when this is called, or
+            # Revit raises "document must not be modifiable before calling
+            # LoadFamily". Do not wrap this call in a Transaction(doc, ...).
+            fam_doc.LoadFamily(doc, _OverwriteLoadOptions())
         return changed
     finally:
         try:
