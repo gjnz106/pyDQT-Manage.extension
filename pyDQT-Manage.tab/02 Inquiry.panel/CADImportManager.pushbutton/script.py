@@ -3,9 +3,9 @@
 Author: Dang Quoc Truong (DQT)
 
 Lists every CAD file imported or linked into the model (ImportInstance
-elements) with its file name, link type, creator, workset and host level,
-so a stray or oversized CAD file can be found and selected without hunting
-through every view.
+elements) with its file name, link type, creator, workset, host level and
+the view it was placed into, so a stray or oversized CAD file can be found
+and selected without hunting through every view.
 """
 __title__ = "CAD Import\nManager"
 __author__ = "DQT"
@@ -43,6 +43,7 @@ class CADImportItem(object):
         self.created_by = "-"
         self.workset = "-"
         self.level = "-"
+        self.view_name = "-"
         self.element = None
 
 
@@ -171,6 +172,22 @@ def _get_level(doc, elem):
     return "-"
 
 
+def _get_view_name(doc, elem):
+    """The view this CAD file was placed into, or "All views" when it was
+    imported/linked without being restricted to one view (OwnerViewId is
+    invalid in that case). Never raises."""
+    try:
+        owner_id = elem.OwnerViewId
+        if owner_id is not None and _eid_int(owner_id) > 0:
+            view = doc.GetElement(owner_id)
+            name = getattr(view, "Name", None) if view else None
+            if name:
+                return name
+    except:
+        pass
+    return "All views"
+
+
 def _link_status_suffix(doc, elem, is_linked):
     """" (Unloaded)" / " (Not Found)" for a CAD Link whose external file
     is not currently loaded - empty string for an Import (no external file
@@ -216,6 +233,7 @@ def get_cad_imports(doc):
             item.created_by = _get_created_by(doc, elem)
             item.workset = _get_workset(doc, elem)
             item.level = _get_level(doc, elem)
+            item.view_name = _get_view_name(doc, elem)
             items.append(item)
         except:
             continue
@@ -229,7 +247,7 @@ MAIN_XAML = """
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="CAD Import Manager - DQT"
-        Height="650" Width="1050"
+        Height="650" Width="1190"
         WindowStartupLocation="CenterScreen"
         Background="#FEF8E7">
     <Grid Margin="12">
@@ -282,7 +300,7 @@ MAIN_XAML = """
             <Border Grid.Column="0" Background="White" BorderBrush="#D4B87A" BorderThickness="1" CornerRadius="4" Padding="8" Margin="0,0,8,0">
                 <StackPanel>
                     <TextBlock Text="SEARCH" FontSize="9" FontWeight="SemiBold" Margin="0,0,0,4"/>
-                    <TextBox x:Name="txtSearch" Padding="6,4" Margin="0,0,0,10" ToolTip="Name, creator or workset"/>
+                    <TextBox x:Name="txtSearch" Padding="6,4" Margin="0,0,0,10" ToolTip="Name, creator, workset or view"/>
                     <TextBlock Text="TYPE" FontSize="9" FontWeight="SemiBold" Margin="0,0,0,4"/>
                     <ComboBox x:Name="cmbFilter" Padding="6,4" Margin="0,0,0,10" SelectedIndex="0">
                         <ComboBoxItem Content="All"/>
@@ -307,6 +325,7 @@ MAIN_XAML = """
                     <DataGridTextColumn Header="Type" Binding="{Binding link_type}" Width="70" SortMemberPath="link_type"/>
                     <DataGridTextColumn Header="Created By" Binding="{Binding created_by}" Width="120" SortMemberPath="created_by"/>
                     <DataGridTextColumn Header="Workset" Binding="{Binding workset}" Width="120" SortMemberPath="workset"/>
+                    <DataGridTextColumn Header="View" Binding="{Binding view_name}" Width="160" SortMemberPath="view_name"/>
                     <DataGridTextColumn Header="Level" Binding="{Binding level}" Width="100" SortMemberPath="level"/>
                 </DataGrid.Columns>
             </DataGrid>
@@ -391,8 +410,9 @@ class CADImportManagerWindow(WPFWindow):
                 continue
             if fi == 2 and not item.link_type.startswith("Link"):
                 continue
-            if search and search not in "{} {} {}".format(
-                    item.name, item.created_by, item.workset).lower():
+            if search and search not in "{} {} {} {}".format(
+                    item.name, item.created_by, item.workset,
+                    item.view_name).lower():
                 continue
             self.filtered.append(item)
         self.update_grid()
@@ -565,12 +585,12 @@ class CADImportManagerWindow(WPFWindow):
         if dlg.ShowDialog() == DialogResult.OK:
             try:
                 with codecs.open(dlg.FileName, 'w', 'utf-8-sig') as f:
-                    f.write("ID,File Name,Type,Created By,Workset,Level\n")
+                    f.write("ID,File Name,Type,Created By,Workset,View,Level\n")
                     for item in current_items:
-                        f.write('{},"{}",{},{},{},{}\n'.format(
+                        f.write('{},"{}",{},{},{},"{}",{}\n'.format(
                             item.element_id, item.name.replace('"', '""'),
                             item.link_type, item.created_by, item.workset,
-                            item.level))
+                            item.view_name.replace('"', '""'), item.level))
                 forms.alert("Exported {} row(s).".format(len(current_items)),
                             title="DQT - CAD Import Manager")
             except Exception as ex:
