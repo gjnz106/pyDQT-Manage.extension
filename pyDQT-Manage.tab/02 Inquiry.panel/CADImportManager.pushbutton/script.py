@@ -171,6 +171,35 @@ def _get_level(doc, elem):
     return "-"
 
 
+def _link_status_suffix(doc, elem, is_linked):
+    """" (Unloaded)" / " (Not Found)" for a CAD Link whose external file
+    is not currently loaded - empty string for an Import (no external file
+    to be unloaded) or a normally loaded Link.
+
+    This is what actually explains Revit's "No good view could be found"
+    popup on Zoom To: an unloaded/missing link has no geometry anywhere in
+    the model for ShowElements to navigate to. Flagging it here means the
+    tool can skip calling ShowElements on it and explain why, instead of
+    letting that native dialog surprise the user."""
+    if not is_linked:
+        return ""
+    try:
+        cad_type = doc.GetElement(elem.GetTypeId())
+        efr = cad_type.GetExternalFileReference() if cad_type else None
+        if efr is None:
+            return ""
+        name = str(efr.GetLinkedFileStatus())
+        if "." in name:
+            name = name.rsplit(".", 1)[-1]     # enum str() can be qualified
+        if name and name != "Loaded":
+            pretty = "".join(" " + c if c.isupper() else c
+                              for c in name).strip()
+            return " ({})".format(pretty)
+    except:
+        pass
+    return ""
+
+
 def get_cad_imports(doc):
     items = []
     collector = FilteredElementCollector(doc).OfClass(ImportInstance) \
@@ -181,7 +210,9 @@ def get_cad_imports(doc):
             item.element = elem
             item.element_id = _eid_int(elem.Id)
             item.name = _cad_type_name(doc, elem)
-            item.link_type = "Link" if _is_linked(doc, elem) else "Import"
+            is_linked = _is_linked(doc, elem)
+            item.link_type = ("Link" if is_linked else "Import") \
+                + _link_status_suffix(doc, elem, is_linked)
             item.created_by = _get_created_by(doc, elem)
             item.workset = _get_workset(doc, elem)
             item.level = _get_level(doc, elem)
@@ -258,7 +289,7 @@ MAIN_XAML = """
                         <ComboBoxItem Content="Import only"/>
                         <ComboBoxItem Content="Link only"/>
                     </ComboBox>
-                    <TextBlock Text="Double-click a row to select and zoom to that file." FontSize="9" Foreground="#888" TextWrapping="Wrap" Margin="0,6,0,0"/>
+                    <TextBlock Text="Double-click ID to copy it. Double-click elsewhere on a row to select + zoom to that file." FontSize="9" Foreground="#888" TextWrapping="Wrap" Margin="0,6,0,0"/>
                 </StackPanel>
             </Border>
 
@@ -271,7 +302,7 @@ MAIN_XAML = """
                       GridLinesVisibility="Horizontal" HorizontalGridLinesBrush="#EEE"
                       RowBackground="White" AlternatingRowBackground="#FFFDF5">
                 <DataGrid.Columns>
-                    <DataGridTextColumn Header="ID" Binding="{Binding element_id}" Width="70" SortMemberPath="element_id"/>
+                    <DataGridTextColumn x:Name="colId" Header="ID" Binding="{Binding element_id}" Width="70" SortMemberPath="element_id"/>
                     <DataGridTextColumn Header="File Name" Binding="{Binding name}" Width="*" SortMemberPath="name"/>
                     <DataGridTextColumn Header="Type" Binding="{Binding link_type}" Width="70" SortMemberPath="link_type"/>
                     <DataGridTextColumn Header="Created By" Binding="{Binding created_by}" Width="120" SortMemberPath="created_by"/>
@@ -340,8 +371,8 @@ class CADImportManagerWindow(WPFWindow):
 
     def update_ui(self):
         self.txtTotal.Text = str(len(self.items))
-        self.txtImports.Text = str(len([i for i in self.items if i.link_type == "Import"]))
-        self.txtLinks.Text = str(len([i for i in self.items if i.link_type == "Link"]))
+        self.txtImports.Text = str(len([i for i in self.items if i.link_type.startswith("Import")]))
+        self.txtLinks.Text = str(len([i for i in self.items if i.link_type.startswith("Link")]))
         self.txtSelected.Text = "0"
         self.update_grid()
 
@@ -356,9 +387,9 @@ class CADImportManagerWindow(WPFWindow):
 
         self.filtered = []
         for item in self.items:
-            if fi == 1 and item.link_type != "Import":
+            if fi == 1 and not item.link_type.startswith("Import"):
                 continue
-            if fi == 2 and item.link_type != "Link":
+            if fi == 2 and not item.link_type.startswith("Link"):
                 continue
             if search and search not in "{} {} {}".format(
                     item.name, item.created_by, item.workset).lower():
@@ -375,17 +406,45 @@ class CADImportManagerWindow(WPFWindow):
             ids.Add(ElementId(item.element_id))
         return ids
 
+    def _cell_under(self, source):
+        """Walk up the visual tree from a click's OriginalSource to find the
+        DataGridCell it landed in, so double-click can behave differently
+        for the ID column than for the rest of the row."""
+        try:
+            from System.Windows.Media import VisualTreeHelper
+            from System.Windows.Controls import DataGridCell
+        except:
+            return None
+        node = source
+        while node is not None and not isinstance(node, DataGridCell):
+            try:
+                node = VisualTreeHelper.GetParent(node)
+            except:
+                return None
+        return node
+
+    def _copy_id(self, item):
+        text = str(item.element_id)
+        try:
+            from System.Windows import Clipboard
+            Clipboard.SetText(text)
+        except Exception:
+            try:
+                from System.Windows.Forms import Clipboard as WFClipboard
+                WFClipboard.SetText(text)
+            except Exception as ex:
+                forms.alert("Could not copy ID to clipboard: {}".format(ex),
+                            title="DQT - CAD Import Manager")
+
     def on_double_click(self, s, e):
         if self.dataGrid.SelectedItems.Count != 1:
             return
         item = self.dataGrid.SelectedItem
-        ids = List[ElementId]()
-        ids.Add(ElementId(item.element_id))
-        try:
-            self.uidoc.ShowElements(ids)
-            self.uidoc.Selection.SetElementIds(ids)
-        except:
-            pass
+        cell = self._cell_under(e.OriginalSource)
+        if cell is not None and cell.Column is self.colId:
+            self._copy_id(item)
+            return
+        self._navigate_and_select([item])
 
     def select_all(self, s, e):
         self.dataGrid.SelectAll()
@@ -397,8 +456,8 @@ class CADImportManagerWindow(WPFWindow):
         self.load_data()
         self.on_filter(None, None)
         self.txtTotal.Text = str(len(self.items))
-        self.txtImports.Text = str(len([i for i in self.items if i.link_type == "Import"]))
-        self.txtLinks.Text = str(len([i for i in self.items if i.link_type == "Link"]))
+        self.txtImports.Text = str(len([i for i in self.items if i.link_type.startswith("Import")]))
+        self.txtLinks.Text = str(len([i for i in self.items if i.link_type.startswith("Link")]))
 
     def select_in_model(self, s, e):
         if self.dataGrid.SelectedItems.Count == 0:
@@ -413,12 +472,83 @@ class CADImportManagerWindow(WPFWindow):
         if self.dataGrid.SelectedItems.Count == 0:
             forms.alert("Select at least one CAD file first.", title="DQT - CAD Import Manager")
             return
-        ids = self._selected_ids()
+        self._navigate_and_select([item for item in self.dataGrid.SelectedItems])
+
+    def _navigate_and_select(self, items):
+        """Select the given rows and, where possible, switch straight to a
+        view that actually contains them, instead of asking Revit to search
+        for one.
+
+        UIDocument.ShowElements pops Revit's OWN native "No good view could
+        be found" Task Dialog for an element it cannot resolve a view for -
+        that dialog is not a catchable managed exception, so wrapping
+        ShowElements in try/except does nothing to stop it. The two things
+        that actually trigger it here are handled directly instead:
+          - a CAD Link whose external file is unloaded/missing has no
+            geometry anywhere to zoom to - that is flagged up front via
+            link_type (see _link_status_suffix) and ShowElements is never
+            called for it.
+          - a single element placed into one specific view is shown by
+            switching the active view to it directly, which always
+            succeeds and needs no search at all.
+        Anything else still goes through ShowElements as before - that path
+        was not reported broken, and this only narrows the failure mode
+        this was written for."""
+        ids = List[ElementId]()
+        for item in items:
+            ids.Add(ElementId(item.element_id))
+
         try:
-            self.uidoc.ShowElements(ids)
             self.uidoc.Selection.SetElementIds(ids)
         except Exception as ex:
             forms.alert(str(ex), title="DQT - CAD Import Manager")
+            return
+
+        broken = [i for i in items if i.link_type.startswith("Link (")]
+        ok_items = [i for i in items if i not in broken]
+
+        if len(ok_items) == 1:
+            item = ok_items[0]
+            el = self.doc.GetElement(ElementId(item.element_id))
+            owner_id = None
+            try:
+                owner_id = el.OwnerViewId if el else None
+            except:
+                owner_id = None
+            if owner_id is not None and _eid_int(owner_id) > 0:
+                owner_view = self.doc.GetElement(owner_id)
+                if owner_view is not None:
+                    try:
+                        self.uidoc.ActiveView = owner_view
+                        self.uidoc.Selection.SetElementIds(ids)
+                        self.uidoc.RefreshActiveView()
+                    except:
+                        pass
+                    if broken:
+                        self._warn_unreachable(broken)
+                    return
+
+        if ok_items:
+            ok_ids = List[ElementId]()
+            for item in ok_items:
+                ok_ids.Add(ElementId(item.element_id))
+            try:
+                self.uidoc.ShowElements(ok_ids)
+            except:
+                pass
+
+        if broken:
+            self._warn_unreachable(broken)
+
+    def _warn_unreachable(self, broken):
+        lines = ["{} - {}".format(i.name, i.link_type) for i in broken[:8]]
+        more = "" if len(broken) <= 8 else "\n... and {} more".format(len(broken) - 8)
+        forms.alert(
+            "Selected, but Revit has no geometry to zoom to for {} CAD "
+            "link(s) that are not currently loaded:\n\n{}{}\n\n"
+            "Reload them from Manage Links first if you need to see "
+            "them.".format(len(broken), "\n".join(lines), more),
+            title="DQT - CAD Import Manager")
 
     def export_csv(self, s, e):
         current_items = [item for item in self.dataGrid.Items]
