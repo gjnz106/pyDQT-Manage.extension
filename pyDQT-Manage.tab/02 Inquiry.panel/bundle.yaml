@@ -6,3 +6,4 @@ layout:
   - Material List
   - InPlaceModel
   - WorksetChecker
+  - CADImportManager
