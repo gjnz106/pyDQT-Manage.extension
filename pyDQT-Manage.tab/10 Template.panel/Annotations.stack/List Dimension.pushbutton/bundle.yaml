@@ -1,0 +1,8 @@
+title: "List\nDimension"
+tooltip: |
+  Draw a labelled sample dimension for every Linear Dimension Type in the project.
+
+  Angular / Radial / Diameter / Spot dimension types need different reference
+  geometry per style and are reported as skipped rather than guessed at.
+
+  Matches the chilizer-ported Template tools - by Dang Quoc Truong (DQT)
