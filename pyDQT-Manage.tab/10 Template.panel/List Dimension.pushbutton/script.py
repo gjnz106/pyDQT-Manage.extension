@@ -160,6 +160,8 @@ components = [
     TextBox(name="spacing", Text="1000"),
     Label("Dimension Span [mm]"),
     TextBox(name="span", Text="2000"),
+    Label("Label Gap [mm]"),
+    TextBox(name="label_gap", Text="200"),
     Button("Select")
 ]
 form = FlexForm("List Dimension", components)
@@ -170,13 +172,14 @@ text_style = form.values["textstyle_combobox"]
 try:
     row_gap = tu.display_to_internal(float(form.values["spacing"]), doc)
     span = tu.display_to_internal(float(form.values["span"]), doc)
+    label_gap = tu.display_to_internal(float(form.values["label_gap"]), doc)
 except ValueError:
-    forms.alert("Row spacing / span must be numbers.", exitscript=True)
+    forms.alert("Row spacing / span / label gap must be numbers.", exitscript=True)
 
 scale = float(view.Scale) / 100
 row_gap = row_gap * scale
 span = span * scale
-label_offset = DB.XYZ(0, 1.5 * scale, 0)
+label_gap = label_gap * scale
 
 location = tu.pick_point_or_exit("Pick point for the dimension list")
 
@@ -193,7 +196,13 @@ with revit.Transaction(tu.DQT_TXN + "List Dimension"):
             skipped.append((name, reason))
         else:
             placed += 1
-            tu.place_label(name, location.Add(label_offset), view, text_style.Id)
+            # To the right of the dimension's own end, clear of its tick
+            # marks and measured-value text - placing the label above the
+            # dimension instead put it right where a type with a large
+            # Text Size renders its value, so the two overlapped.
+            label_position = DB.XYZ(location.X + span + label_gap,
+                                     location.Y, location.Z)
+            tu.place_label(name, label_position, view, text_style.Id)
 
         location = DB.XYZ(location.X, location.Y - row_gap, location.Z)
 
