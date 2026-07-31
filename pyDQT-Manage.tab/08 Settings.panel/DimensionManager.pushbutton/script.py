@@ -41,6 +41,9 @@ class DimensionTypeSummary(object):
         self.type_id = 0
         self.name = "<Unnamed>"
         self.style = "-"            # "Linear" / "Angular" / ... best-effort
+        self.text_size = "-"
+        self.text_font = "-"
+        self.width_factor = "-"
         self.instance_count = 0
         self.created_by = "-"
         self.workset = "-"
@@ -82,6 +85,91 @@ def _dim_type_style(dt):
     nothing here depends on getting this right, it is purely informational."""
     try:
         return str(dt.StyleType)
+    except:
+        pass
+    return "-"
+
+
+def _resolve_bip(name):
+    """A BuiltInParameter by member name, or None if this Revit build
+    doesn't have it - degrades to the by-name LookupParameter fallback in
+    _param_by_bip_or_name() instead of throwing on every type."""
+    try:
+        return getattr(BuiltInParameter, name)
+    except AttributeError:
+        return None
+
+
+# Resolved once: the same "Text" appearance parameters this suite's
+# FamilyFont tool already relies on (TEXT_FONT, TEXT_WIDTH_SCALE), plus
+# TEXT_SIZE which List Text Styles already reads directly off
+# TextNoteType - Dimension Types expose the same shared "Text" group.
+_BIP_TEXT_SIZE = _resolve_bip("TEXT_SIZE")
+_BIP_TEXT_FONT = _resolve_bip("TEXT_FONT")
+_BIP_WIDTH_FACTOR = _resolve_bip("TEXT_WIDTH_SCALE")
+
+
+def _param_by_bip_or_name(elem, bip, display_name):
+    """A parameter found first by BuiltInParameter, falling back to a
+    by-name lookup for whichever a given Revit build exposes it as -
+    mirrors the same defensive resolution this suite's FamilyFont tool
+    already relies on for these exact Text-appearance parameters."""
+    if bip is not None:
+        try:
+            p = elem.get_Parameter(bip)
+            if p is not None:
+                return p
+        except:
+            pass
+    try:
+        return elem.LookupParameter(display_name)
+    except:
+        return None
+
+
+def _dim_text_size(dt):
+    """Text Size, unit-formatted (e.g. "2.5 mm") - "-" if this type has no
+    usable Text Size parameter."""
+    p = _param_by_bip_or_name(dt, _BIP_TEXT_SIZE, "Text Size")
+    if p is None:
+        return "-"
+    try:
+        val = p.AsValueString()
+        if val:
+            return val
+    except:
+        pass
+    return "-"
+
+
+def _dim_text_font(dt):
+    """Text Font name - "-" if this type has no usable Text Font parameter."""
+    p = _param_by_bip_or_name(dt, _BIP_TEXT_FONT, "Text Font")
+    if p is None:
+        return "-"
+    try:
+        val = p.AsString()
+        if val:
+            return val
+    except:
+        pass
+    return "-"
+
+
+def _dim_width_factor(dt):
+    """Width Factor - "-" if this type has no usable Width Factor
+    parameter (not every dimension style has one)."""
+    p = _param_by_bip_or_name(dt, _BIP_WIDTH_FACTOR, "Width Factor")
+    if p is None:
+        return "-"
+    try:
+        val = p.AsValueString()
+        if val:
+            return val
+    except:
+        pass
+    try:
+        return str(round(p.AsDouble(), 3))
     except:
         pass
     return "-"
@@ -139,6 +227,9 @@ def get_dimension_types(doc):
             item.type_id = _eid_int(dt.Id)
             item.name = _dim_type_name(dt)
             item.style = _dim_type_style(dt)
+            item.text_size = _dim_text_size(dt)
+            item.text_font = _dim_text_font(dt)
+            item.width_factor = _dim_width_factor(dt)
             item.instance_count = counts.get(item.type_id, 0)
             item.instance_ids = instances_of.get(item.type_id, [])
             item.created_by = _get_created_by(doc, dt)
@@ -382,7 +473,7 @@ MAIN_XAML = """
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Dimension Manager - DQT"
-        Height="620" Width="1020"
+        Height="620" Width="1280"
         WindowStartupLocation="CenterScreen"
         Background="#FEF8E7">
     <Grid Margin="12">
@@ -431,7 +522,7 @@ MAIN_XAML = """
             <Border Grid.Column="0" Background="White" BorderBrush="#D4B87A" BorderThickness="1" CornerRadius="4" Padding="8" Margin="0,0,8,0">
                 <StackPanel>
                     <TextBlock Text="SEARCH" FontSize="9" FontWeight="SemiBold" Margin="0,0,0,4"/>
-                    <TextBox x:Name="txtSearch" Padding="6,4" Margin="0,0,0,10" ToolTip="Name, style, creator or workset"/>
+                    <TextBox x:Name="txtSearch" Padding="6,4" Margin="0,0,0,10" ToolTip="Name, style, font, creator or workset"/>
                     <TextBlock Text="Select a type and click Detail to see which view each instance is used in." FontSize="9" Foreground="#888" TextWrapping="Wrap" Margin="0,6,0,0"/>
                 </StackPanel>
             </Border>
@@ -448,6 +539,9 @@ MAIN_XAML = """
                     <DataGridTextColumn x:Name="colId" Header="ID" Binding="{Binding type_id}" Width="70" SortMemberPath="type_id"/>
                     <DataGridTextColumn Header="Name" Binding="{Binding name}" Width="*" SortMemberPath="name"/>
                     <DataGridTextColumn Header="Style" Binding="{Binding style}" Width="90" SortMemberPath="style"/>
+                    <DataGridTextColumn Header="Text Size" Binding="{Binding text_size}" Width="80" SortMemberPath="text_size"/>
+                    <DataGridTextColumn Header="Text Font" Binding="{Binding text_font}" Width="130" SortMemberPath="text_font"/>
+                    <DataGridTextColumn Header="Width Factor" Binding="{Binding width_factor}" Width="90" SortMemberPath="width_factor"/>
                     <DataGridTextColumn Header="Instances" Binding="{Binding instance_count}" Width="80" SortMemberPath="instance_count"/>
                     <DataGridTextColumn Header="Created By" Binding="{Binding created_by}" Width="120" SortMemberPath="created_by"/>
                     <DataGridTextColumn Header="Workset" Binding="{Binding workset}" Width="120" SortMemberPath="workset"/>
@@ -530,8 +624,9 @@ class DimensionManagerWindow(WPFWindow):
         search = self.txtSearch.Text.lower().strip() if self.txtSearch.Text else ""
         self.filtered = []
         for item in self.items:
-            if search and search not in "{} {} {} {}".format(
-                    item.name, item.style, item.created_by, item.workset).lower():
+            if search and search not in "{} {} {} {} {}".format(
+                    item.name, item.style, item.text_font, item.created_by,
+                    item.workset).lower():
                 continue
             self.filtered.append(item)
         self.update_grid()
@@ -682,11 +777,14 @@ class DimensionManagerWindow(WPFWindow):
         if dlg.ShowDialog() == DialogResult.OK:
             try:
                 with codecs.open(dlg.FileName, 'w', 'utf-8-sig') as f:
-                    f.write("ID,Name,Style,Instances,Created By,Workset\n")
+                    f.write("ID,Name,Style,Text Size,Text Font,Width Factor,"
+                            "Instances,Created By,Workset\n")
                     for item in current_items:
-                        f.write('{},"{}",{},{},{},{}\n'.format(
+                        f.write('{},"{}",{},{},"{}",{},{},{},{}\n'.format(
                             item.type_id, item.name.replace('"', '""'),
-                            item.style, item.instance_count,
+                            item.style, item.text_size,
+                            item.text_font.replace('"', '""'),
+                            item.width_factor, item.instance_count,
                             item.created_by, item.workset))
                 forms.alert("Exported {} row(s).".format(len(current_items)),
                             title="DQT - Dimension Manager")
