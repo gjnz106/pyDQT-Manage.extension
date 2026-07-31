@@ -343,6 +343,7 @@ MAIN_XAML = """
                     <Button x:Name="btnSelectInModel" Content="Select in Model" Padding="10,5" Margin="2" Background="#F0CC88"/>
                     <Button x:Name="btnZoom" Content="Zoom To" Padding="10,5" Margin="2" Background="#F0CC88"/>
                     <Button x:Name="btnExportCSV" Content="Export CSV" Padding="10,5" Margin="2" Background="White"/>
+                    <Button x:Name="btnDelete" Content="Delete" Padding="10,5" Margin="2" Background="#FF6B6B" Foreground="White"/>
                     <Button x:Name="btnClose" Content="Close" Padding="10,5" Margin="2" Background="White"/>
                 </StackPanel>
             </Grid>
@@ -379,6 +380,7 @@ class CADImportManagerWindow(WPFWindow):
         self.btnSelectInModel.Click += self.select_in_model
         self.btnZoom.Click += self.zoom_to
         self.btnExportCSV.Click += self.export_csv
+        self.btnDelete.Click += self.delete_selected
         self.btnClose.Click += self.close_window
 
         self.load_data()
@@ -595,6 +597,59 @@ class CADImportManagerWindow(WPFWindow):
                             title="DQT - CAD Import Manager")
             except Exception as ex:
                 forms.alert(str(ex), title="DQT - CAD Import Manager")
+
+    def delete_selected(self, s, e):
+        if self.dataGrid.SelectedItems.Count == 0:
+            forms.alert("Select at least one CAD file first.", title="DQT - CAD Import Manager")
+            return
+
+        selected = [item for item in self.dataGrid.SelectedItems]
+        count = len(selected)
+        imports_n = len([i for i in selected if i.link_type.startswith("Import")])
+        links_n = len([i for i in selected if i.link_type.startswith("Link")])
+
+        msg = ("Delete {} CAD file(s) from this model?\n\n"
+               "{} Import(s), {} Link(s)\n\n"
+               "This removes them from the model - Undo (Ctrl+Z) restores "
+               "them right after if needed.").format(count, imports_n, links_n)
+        if not forms.alert(msg, title="DQT - CAD Import Manager: Confirm Delete",
+                           yes=True, no=True):
+            return
+
+        deleted, failed = self._delete_items(selected)
+
+        result = "Deleted {} of {} CAD file(s).".format(deleted, count)
+        if failed:
+            lines = failed[:8]
+            more = "" if len(failed) <= 8 else "\n... and {} more".format(len(failed) - 8)
+            result += "\n\nCould not delete:\n{}{}".format("\n".join(lines), more)
+        forms.alert(result, title="DQT - CAD Import Manager")
+
+        self.refresh(s, e)
+
+    def _delete_items(self, items):
+        """Delete these CAD import elements in one transaction. Returns
+        (deleted_count, failure_descriptions).
+
+        Each element is deleted individually inside the same transaction,
+        rather than as one batch, so a single element Revit refuses to
+        delete (a pinned one, say) does not stop the rest from going -
+        matching how the rest of this suite treats a bad element as a
+        per-item failure, not a reason to abandon the whole operation."""
+        deleted = 0
+        failed = []
+        try:
+            with revit.Transaction("DQT - Delete CAD Import(s)"):
+                for item in items:
+                    try:
+                        self.doc.Delete(ElementId(item.element_id))
+                        deleted += 1
+                    except Exception as ex:
+                        failed.append("{} (ID {}) - {}".format(
+                            item.name, item.element_id, ex))
+        except Exception as ex:
+            failed.append("transaction failed: {}".format(ex))
+        return deleted, failed
 
     def close_window(self, s, e):
         self.Close()
