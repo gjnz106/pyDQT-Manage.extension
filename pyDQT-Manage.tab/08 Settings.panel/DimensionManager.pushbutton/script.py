@@ -14,6 +14,17 @@ __author__ = "DQT"
 import clr
 clr.AddReference('RevitAPI')
 clr.AddReference('RevitAPIUI')
+clr.AddReference('System')
+clr.AddReference('PresentationFramework')
+for _asm in ("System.Data", "System.Data.Common"):
+    try:
+        clr.AddReference(_asm)
+    except Exception:
+        pass
+
+import System
+from System.Data import DataTable
+from System.Windows.Controls import DataGridEditAction
 
 from pyrevit import revit, forms, script, HOST_APP, DB
 from pyrevit.forms import WPFWindow
@@ -48,6 +59,7 @@ class DimensionTypeSummary(object):
         self.created_by = "-"
         self.workset = "-"
         self.instance_ids = []      # ElementId of every placed instance
+        self.element = None         # the DimensionType itself, for inline edits
 
 
 class DimensionInstanceDetail(object):
@@ -107,6 +119,13 @@ def _resolve_bip(name):
 _BIP_TEXT_SIZE = _resolve_bip("TEXT_SIZE")
 _BIP_TEXT_FONT = _resolve_bip("TEXT_FONT")
 _BIP_WIDTH_FACTOR = _resolve_bip("TEXT_WIDTH_SCALE")
+
+# Grid column binding path -> (BuiltInParameter, display name) it writes to.
+EDITABLE_FIELDS = {
+    "text_size": (_BIP_TEXT_SIZE, "Text Size"),
+    "text_font": (_BIP_TEXT_FONT, "Text Font"),
+    "width_factor": (_BIP_WIDTH_FACTOR, "Width Factor"),
+}
 
 
 def _param_by_bip_or_name(elem, bip, display_name):
@@ -175,6 +194,60 @@ def _dim_width_factor(dt):
     return "-"
 
 
+def apply_dimension_type_edit(doc, item, field, value):
+    """Write one edited grid cell back to its DimensionType.
+
+    Returns (ok, error_message). Text Size and Width Factor are written with
+    SetValueString so Revit parses them in the project's display units -
+    typing "2.5" in a millimetre project must mean 2.5 mm, not 2.5 feet."""
+    spec = EDITABLE_FIELDS.get(field)
+    if spec is None:
+        return False, "unknown field '{}'".format(field)
+    bip, display_name = spec
+
+    dt = item.element
+    if dt is None:
+        return False, "this dimension type no longer exists - refresh and try again"
+
+    param = _param_by_bip_or_name(dt, bip, display_name)
+    if param is None:
+        return False, "this type has no {} parameter".format(display_name)
+    if param.IsReadOnly:
+        return False, "{} is read-only on this type".format(display_name)
+
+    t = DB.Transaction(doc, "DQT - Edit Dimension Type")
+    t.Start()
+    try:
+        text = str(value).strip() if value is not None else ""
+        if not text:
+            raise Exception("{} cannot be empty".format(display_name))
+
+        if field == "text_font":
+            param.Set(text)
+
+        elif field == "text_size":
+            if not param.SetValueString(text):
+                raise Exception(
+                    "'{}' is not a valid text size - type a number in the "
+                    "project's units (e.g. 2.5)".format(text))
+
+        elif field == "width_factor":
+            if not param.SetValueString(text):
+                # Width factor is a plain ratio, so a raw number is safe here.
+                try:
+                    param.Set(float(text))
+                except ValueError:
+                    raise Exception("'{}' is not a number".format(text))
+
+        t.Commit()
+        return True, None
+
+    except Exception as ex:
+        if t.HasStarted() and not t.HasEnded():
+            t.RollBack()
+        return False, str(ex)
+
+
 def _get_created_by(doc, elem):
     """Who created this element, from worksharing tooltip info.
 
@@ -225,6 +298,7 @@ def get_dimension_types(doc):
         try:
             item = DimensionTypeSummary()
             item.type_id = _eid_int(dt.Id)
+            item.element = dt
             item.name = _dim_type_name(dt)
             item.style = _dim_type_style(dt)
             item.text_size = _dim_text_size(dt)
@@ -523,28 +597,28 @@ MAIN_XAML = """
                 <StackPanel>
                     <TextBlock Text="SEARCH" FontSize="9" FontWeight="SemiBold" Margin="0,0,0,4"/>
                     <TextBox x:Name="txtSearch" Padding="6,4" Margin="0,0,0,10" ToolTip="Name, style, font, creator or workset"/>
-                    <TextBlock Text="Select a type and click Detail to see which view each instance is used in." FontSize="9" Foreground="#888" TextWrapping="Wrap" Margin="0,6,0,0"/>
+                    <TextBlock Text="Double-click Text Size / Text Font / Width Factor to edit directly - Enter commits the change to the model. Select a type and click Detail to see which view each instance is used in." FontSize="9" Foreground="#888" TextWrapping="Wrap" Margin="0,6,0,0"/>
                 </StackPanel>
             </Border>
 
             <!-- DataGrid -->
             <DataGrid Grid.Column="1" x:Name="dataGrid"
-                      AutoGenerateColumns="False" IsReadOnly="True"
+                      AutoGenerateColumns="False" IsReadOnly="False"
                       SelectionMode="Extended" SelectionUnit="FullRow"
                       CanUserSortColumns="True"
                       Background="White" BorderBrush="#D4B87A"
                       GridLinesVisibility="Horizontal" HorizontalGridLinesBrush="#EEE"
                       RowBackground="White" AlternatingRowBackground="#FFFDF5">
                 <DataGrid.Columns>
-                    <DataGridTextColumn x:Name="colId" Header="ID" Binding="{Binding type_id}" Width="70" SortMemberPath="type_id"/>
-                    <DataGridTextColumn Header="Name" Binding="{Binding name}" Width="*" SortMemberPath="name"/>
-                    <DataGridTextColumn Header="Style" Binding="{Binding style}" Width="90" SortMemberPath="style"/>
-                    <DataGridTextColumn Header="Text Size" Binding="{Binding text_size}" Width="80" SortMemberPath="text_size"/>
-                    <DataGridTextColumn Header="Text Font" Binding="{Binding text_font}" Width="130" SortMemberPath="text_font"/>
-                    <DataGridTextColumn Header="Width Factor" Binding="{Binding width_factor}" Width="90" SortMemberPath="width_factor"/>
-                    <DataGridTextColumn Header="Instances" Binding="{Binding instance_count}" Width="80" SortMemberPath="instance_count"/>
-                    <DataGridTextColumn Header="Created By" Binding="{Binding created_by}" Width="120" SortMemberPath="created_by"/>
-                    <DataGridTextColumn Header="Workset" Binding="{Binding workset}" Width="120" SortMemberPath="workset"/>
+                    <DataGridTextColumn x:Name="colId" Header="ID" Binding="{Binding type_id}" Width="70" SortMemberPath="type_id" IsReadOnly="True"/>
+                    <DataGridTextColumn Header="Name" Binding="{Binding name}" Width="*" SortMemberPath="name" IsReadOnly="True"/>
+                    <DataGridTextColumn Header="Style" Binding="{Binding style}" Width="90" SortMemberPath="style" IsReadOnly="True"/>
+                    <DataGridTextColumn x:Name="colTextSize" Header="Text Size" Binding="{Binding text_size}" Width="80" SortMemberPath="text_size"/>
+                    <DataGridTextColumn x:Name="colTextFont" Header="Text Font" Binding="{Binding text_font}" Width="130" SortMemberPath="text_font"/>
+                    <DataGridTextColumn x:Name="colWidthFactor" Header="Width Factor" Binding="{Binding width_factor}" Width="90" SortMemberPath="width_factor"/>
+                    <DataGridTextColumn Header="Instances" Binding="{Binding instance_count}" Width="80" SortMemberPath="instance_count" IsReadOnly="True"/>
+                    <DataGridTextColumn Header="Created By" Binding="{Binding created_by}" Width="120" SortMemberPath="created_by" IsReadOnly="True"/>
+                    <DataGridTextColumn Header="Workset" Binding="{Binding workset}" Width="120" SortMemberPath="workset" IsReadOnly="True"/>
                 </DataGrid.Columns>
             </DataGrid>
         </Grid>
@@ -587,10 +661,12 @@ class DimensionManagerWindow(WPFWindow):
         self.uidoc = revit.uidoc
         self.items = []
         self.filtered = []
+        self._suppress_cell_events = False
 
         self.txtSearch.TextChanged += self.on_filter
         self.dataGrid.SelectionChanged += self.on_selection
         self.dataGrid.MouseDoubleClick += self.on_double_click
+        self.dataGrid.CellEditEnding += self.on_cell_edit_ending
 
         self.btnSelectAll.Click += self.select_all
         self.btnClear.Click += self.select_none
@@ -615,10 +691,39 @@ class DimensionManagerWindow(WPFWindow):
         self.txtSelected.Text = "0"
         self.update_grid()
 
+    def _build_datatable(self, items):
+        """Build a System.Data.DataTable from the item list - the pattern
+        this suite's Text Note Type Manager already relies on for a stable,
+        two-way editable DataGrid binding (plain IronPython objects bound
+        directly had edit-commit bugs there)."""
+        dt = DataTable("DimensionTypes")
+        dt.Columns.Add("type_id", System.Int64)
+        dt.Columns.Add("name", System.String)
+        dt.Columns.Add("style", System.String)
+        dt.Columns.Add("text_size", System.String)
+        dt.Columns.Add("text_font", System.String)
+        dt.Columns.Add("width_factor", System.String)
+        dt.Columns.Add("instance_count", System.Int32)
+        dt.Columns.Add("created_by", System.String)
+        dt.Columns.Add("workset", System.String)
+
+        for item in items:
+            row = dt.NewRow()
+            row["type_id"] = item.type_id
+            row["name"] = item.name
+            row["style"] = item.style
+            row["text_size"] = item.text_size
+            row["text_font"] = item.text_font
+            row["width_factor"] = item.width_factor
+            row["instance_count"] = item.instance_count
+            row["created_by"] = item.created_by
+            row["workset"] = item.workset
+            dt.Rows.Add(row)
+        return dt
+
     def update_grid(self):
-        self.dataGrid.Items.Clear()
-        for item in self.filtered:
-            self.dataGrid.Items.Add(item)
+        dt = self._build_datatable(self.filtered)
+        self.dataGrid.ItemsSource = dt.DefaultView
 
     def on_filter(self, s, e):
         search = self.txtSearch.Text.lower().strip() if self.txtSearch.Text else ""
@@ -661,9 +766,28 @@ class DimensionManagerWindow(WPFWindow):
                 forms.alert("Could not copy ID to clipboard: {}".format(ex),
                             title="DQT - Dimension Manager")
 
+    def _resolve_selected_items(self):
+        """Selected grid rows (DataRowView) resolved back to
+        DimensionTypeSummary objects by type_id - never by row/list index,
+        since CanUserSortColumns means the grid's row order can differ from
+        self.filtered's load order once the user sorts a column."""
+        by_id = {}
+        for item in self.filtered:
+            by_id[item.type_id] = item
+        selected = []
+        for row_view in self.dataGrid.SelectedItems:
+            try:
+                tid = row_view["type_id"]
+            except Exception:
+                continue
+            item = by_id.get(tid)
+            if item is not None:
+                selected.append(item)
+        return selected
+
     def _selected_instance_ids(self):
         ids = List[ElementId]()
-        for item in self.dataGrid.SelectedItems:
+        for item in self._resolve_selected_items():
             for eid in item.instance_ids:
                 ids.Add(eid)
         return ids
@@ -671,8 +795,15 @@ class DimensionManagerWindow(WPFWindow):
     def on_double_click(self, s, e):
         if self.dataGrid.SelectedItems.Count != 1:
             return
-        item = self.dataGrid.SelectedItem
         cell = self._cell_under(e.OriginalSource)
+        if cell is not None and (cell.Column is self.colTextSize or
+                                  cell.Column is self.colTextFont or
+                                  cell.Column is self.colWidthFactor):
+            return  # editable cell - let the DataGrid enter edit mode
+        selected = self._resolve_selected_items()
+        if len(selected) != 1:
+            return
+        item = selected[0]
         if cell is not None and cell.Column is self.colId:
             self._copy_id(item)
             return
@@ -725,7 +856,10 @@ class DimensionManagerWindow(WPFWindow):
             forms.alert("Select exactly one dimension type to see its detail.",
                         title="DQT - Dimension Manager")
             return
-        item = self.dataGrid.SelectedItem
+        selected = self._resolve_selected_items()
+        if len(selected) != 1:
+            return
+        item = selected[0]
         if item.instance_count == 0:
             forms.alert("'{}' has no placed instances in this model.".format(item.name),
                         title="DQT - Dimension Manager")
@@ -739,7 +873,10 @@ class DimensionManagerWindow(WPFWindow):
             forms.alert("Select exactly one dimension type to rename.",
                         title="DQT - Dimension Manager")
             return
-        item = self.dataGrid.SelectedItem
+        selected = self._resolve_selected_items()
+        if len(selected) != 1:
+            return
+        item = selected[0]
         new_name = forms.ask_for_string(
             default=item.name, prompt="New name:",
             title="DQT - Rename Dimension Type")
@@ -762,8 +899,75 @@ class DimensionManagerWindow(WPFWindow):
         if ok:
             self.refresh(s, e)
 
+    def on_cell_edit_ending(self, sender, args):
+        """Push an edited Text Size / Text Font / Width Factor cell back to
+        its DimensionType.
+
+        Runs SYNCHRONOUSLY and deliberately so. This window is modal, so the
+        handler is still nested inside the external command that opened it
+        and the Revit API context is valid - exactly like the Rename
+        button's Click handler. Deferring the write to the WPF Dispatcher
+        would let it run after ShowDialog() has returned and the command has
+        ended: starting a Transaction with no API context, from a callback
+        whose scope is already being torn down, takes Revit down with a
+        fatal error instead of raising something catchable."""
+        if args.EditAction != DataGridEditAction.Commit:
+            return
+        if self._suppress_cell_events:
+            return
+
+        try:
+            field = args.Column.Binding.Path.Path
+        except Exception:
+            return
+        if field not in EDITABLE_FIELDS:
+            return
+
+        editing = args.EditingElement
+        try:
+            new_value = editing.Text
+        except Exception:
+            return
+
+        try:
+            type_id = args.Row.Item["type_id"]
+        except Exception:
+            return
+
+        item = None
+        for candidate in self.filtered:
+            if candidate.type_id == type_id:
+                item = candidate
+                break
+        if item is None:
+            return
+
+        ok, err = apply_dimension_type_edit(self.doc, item, field, new_value)
+        if not ok:
+            forms.alert("Could not set {} on '{}':\n\n{}".format(field, item.name, err),
+                        title="DQT - Dimension Manager")
+
+        # Re-read the type and hand the authoritative value back to the
+        # editor before the grid commits it. On success that shows what
+        # Revit actually stored (it normalises "1.8" to "1.8000 mm"); on
+        # failure it puts the old value back so rejected text never sticks.
+        if field == "text_size":
+            item.text_size = _dim_text_size(item.element)
+        elif field == "text_font":
+            item.text_font = _dim_text_font(item.element)
+        elif field == "width_factor":
+            item.width_factor = _dim_width_factor(item.element)
+
+        self._suppress_cell_events = True
+        try:
+            editing.Text = getattr(item, field)
+        except Exception:
+            pass
+        finally:
+            self._suppress_cell_events = False
+
     def export_csv(self, s, e):
-        current_items = [item for item in self.dataGrid.Items]
+        current_items = list(self.filtered)
         if not current_items:
             forms.alert("No data to export.", title="DQT - Dimension Manager")
             return
