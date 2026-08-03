@@ -796,15 +796,21 @@ class DimensionManagerWindow(WPFWindow):
         if self.dataGrid.SelectedItems.Count != 1:
             return
         cell = self._cell_under(e.OriginalSource)
-        if cell is not None and (cell.Column is self.colTextSize or
-                                  cell.Column is self.colTextFont or
-                                  cell.Column is self.colWidthFactor):
+        if cell is None:
+            # Can't tell which column was clicked - e.g. the second click of
+            # the double-click landed on the edit TextBox WPF already
+            # swapped in for an editable cell. Do nothing rather than risk
+            # treating an edit attempt as a navigate/zoom request.
+            return
+        if (cell.Column is self.colTextSize or
+                cell.Column is self.colTextFont or
+                cell.Column is self.colWidthFactor):
             return  # editable cell - let the DataGrid enter edit mode
         selected = self._resolve_selected_items()
         if len(selected) != 1:
             return
         item = selected[0]
-        if cell is not None and cell.Column is self.colId:
+        if cell.Column is self.colId:
             self._copy_id(item)
             return
         ids = self._selected_instance_ids()
@@ -944,7 +950,8 @@ class DimensionManagerWindow(WPFWindow):
 
         ok, err = apply_dimension_type_edit(self.doc, item, field, new_value)
         if not ok:
-            forms.alert("Could not set {} on '{}':\n\n{}".format(field, item.name, err),
+            display_name = EDITABLE_FIELDS.get(field, (None, field))[1]
+            forms.alert("Could not set {} on '{}':\n\n{}".format(display_name, item.name, err),
                         title="DQT - Dimension Manager")
 
         # Re-read the type and hand the authoritative value back to the
