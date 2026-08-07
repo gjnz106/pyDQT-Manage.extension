@@ -34,6 +34,14 @@ from System.Collections.Generic import List
 import codecs
 import datetime
 
+# Shared batch rename dialog (extension lib/). Imported softly: it powers one
+# button, so a broken install should not stop the whole manager from opening -
+# the button reports it instead.
+try:
+    from batch_rename_dialog import BatchRenameDialog
+except ImportError:
+    BatchRenameDialog = None
+
 get_elementid_value = get_elementid_value_func()
 
 
@@ -60,6 +68,15 @@ class DimensionTypeSummary(object):
         self.workset = "-"
         self.instance_ids = []      # ElementId of every placed instance
         self.element = None         # the DimensionType itself, for inline edits
+
+    @property
+    def Element(self):
+        """Capitalised alias of .element.
+
+        The shared BatchRenameDialog reads names and ids off wrapper objects
+        through item.Element, so exposing it here lets the dimension summaries
+        be handed to that dialog unchanged."""
+        return self.element
 
 
 class DimensionInstanceDetail(object):
@@ -339,10 +356,14 @@ def get_dimension_instance_details(doc, type_summary):
     return rows
 
 
-def _rename_type(doc, dt, new_name):
+def _rename_type(doc, dt, new_name, alert=True):
     """Rename a DimensionType, the version-safe way this suite already
     relies on for other element types (Element.Name.SetValue first, plain
-    .Name as the fallback for whichever a given Revit build refuses)."""
+    .Name as the fallback for whichever a given Revit build refuses).
+
+    Batch callers pass alert=False: one popup per failing type would be
+    unusable, so the reason goes to the output window and the caller reports
+    the totals once at the end."""
     try:
         DB.Element.Name.SetValue(dt, new_name)
         return True
@@ -352,8 +373,115 @@ def _rename_type(doc, dt, new_name):
         dt.Name = new_name
         return True
     except Exception as ex:
-        forms.alert("Could not rename: {}".format(ex), title="DQT - Dimension Manager")
+        if alert:
+            forms.alert("Could not rename: {}".format(ex), title="DQT - Dimension Manager")
+        else:
+            print("  Could not rename: {}".format(ex))
         return False
+
+
+def _info_or_none(value):
+    """Grid placeholders ('-', blank) must not end up as literal name
+    segments, so they read as 'no information' to the rename dialog."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text or text == "-":
+        return None
+    return text
+
+
+def _open_batch_rename(doc, items, parent):
+    """Show the shared batch rename dialog, flavoured for dimension types.
+
+    The subclass is built here rather than at module level because
+    BatchRenameDialog is an optional import, and subclassing None would take
+    the whole Dimension Manager down over a feature that is one button."""
+
+    class DimensionBatchRenameDialog(BatchRenameDialog):
+        """Dimension types in the shared find/replace, prefix/suffix,
+        segments and custom-position dialog the other managers use.
+
+        The Type/Segments tab is fed the three attributes that actually tell
+        one dimension type from another, and renaming goes through
+        _rename_type() rather than the base class's plain .Name assignment -
+        Element.Name.SetValue is the form that works across the Revit builds
+        this suite supports, and it is what the single Rename button uses."""
+
+        def __init__(self, doc, selected_items, parent):
+            self.manager = parent
+            BatchRenameDialog.__init__(self, doc, selected_items, parent)
+            self.Title = "Batch Rename Dimension Types - {} selected".format(
+                len(selected_items))
+
+        def get_type_info(self, item):
+            return _info_or_none(getattr(item, "style", None))
+
+        def get_size_info(self, item):
+            return _info_or_none(getattr(item, "text_size", None))
+
+        def get_segment_info(self, item):
+            return _info_or_none(getattr(item, "text_font", None))
+
+        def apply_batch_rename(self):
+            from batch_rename_dialog import sanitize_revit_name
+
+            success = 0
+            skipped = 0
+            errors = 0
+
+            print("\n" + "=" * 60)
+            print("DQT - BATCH RENAME DIMENSION TYPES ({} selected)".format(
+                len(self.selected_items)))
+            print("=" * 60)
+
+            try:
+                with revit.Transaction("DQT - Batch Rename Dimension Types"):
+                    for item in self.selected_items:
+                        old_name = item.name
+                        new_name = sanitize_revit_name(
+                            self.apply_rename_rules(item, old_name))
+
+                        if not new_name or new_name == old_name:
+                            skipped += 1
+                            continue
+
+                        # Renames already applied in this transaction are
+                        # visible to the check, so two rules collapsing onto
+                        # the same name is caught here rather than left for
+                        # Revit to reject halfway through.
+                        if self.check_name_conflict(new_name, item):
+                            print("  '{}' -> '{}' skipped: name already in use".format(
+                                old_name, new_name))
+                            skipped += 1
+                            continue
+
+                        print("  '{}' -> '{}'".format(old_name, new_name))
+                        if _rename_type(self.doc, item.element, new_name,
+                                        alert=False):
+                            success += 1
+                        else:
+                            errors += 1
+            except Exception as ex:
+                print("Batch rename failed, nothing was changed: {}".format(ex))
+                success, skipped, errors = 0, 0, len(self.selected_items)
+
+            print("-" * 60)
+            print("{} renamed, {} skipped, {} failed".format(
+                success, skipped, errors))
+
+            self.show_results(success, skipped, errors)
+
+            if self.manager is not None:
+                try:
+                    self.manager.refresh(None, None)
+                except Exception as ex:
+                    print("Could not refresh the manager window: {}".format(ex))
+
+            self.result = True
+            self.Close()
+
+    DimensionBatchRenameDialog(doc, items, parent).ShowDialog()
 
 
 def _navigate_to(uidoc, doc, ids):
@@ -636,6 +764,7 @@ MAIN_XAML = """
                     <Button x:Name="btnZoom" Content="Zoom To" Padding="10,5" Margin="2" Background="#F0CC88"/>
                     <Button x:Name="btnDetail" Content="Detail" Padding="10,5" Margin="2" Background="#F0CC88" FontWeight="SemiBold"/>
                     <Button x:Name="btnRename" Content="Rename" Padding="10,5" Margin="2" Background="White"/>
+                    <Button x:Name="btnBatchRename" Content="Batch Rename" Padding="10,5" Margin="2" Background="White"/>
                     <Button x:Name="btnExportCSV" Content="Export CSV" Padding="10,5" Margin="2" Background="White"/>
                     <Button x:Name="btnClose" Content="Close" Padding="10,5" Margin="2" Background="White"/>
                 </StackPanel>
@@ -675,6 +804,7 @@ class DimensionManagerWindow(WPFWindow):
         self.btnZoom.Click += self.zoom_to
         self.btnDetail.Click += self.show_detail
         self.btnRename.Click += self.rename_selected
+        self.btnBatchRename.Click += self.batch_rename_selected
         self.btnExportCSV.Click += self.export_csv
         self.btnClose.Click += self.close_window
 
@@ -904,6 +1034,30 @@ class DimensionManagerWindow(WPFWindow):
 
         if ok:
             self.refresh(s, e)
+
+    def batch_rename_selected(self, s, e):
+        if BatchRenameDialog is None:
+            forms.alert(
+                "The shared batch rename dialog could not be loaded from the "
+                "extension's lib folder.\n\n"
+                "Single Rename still works.",
+                title="DQT - Dimension Manager")
+            return
+
+        if self.dataGrid.SelectedItems.Count == 0:
+            forms.alert("Select one or more dimension types to batch rename.",
+                        title="DQT - Dimension Manager")
+            return
+
+        selected = [item for item in self._resolve_selected_items()
+                    if item.element is not None]
+        if not selected:
+            forms.alert("The selected dimension types no longer exist - "
+                        "refresh and try again.",
+                        title="DQT - Dimension Manager")
+            return
+
+        _open_batch_rename(self.doc, selected, self)
 
     def on_cell_edit_ending(self, sender, args):
         """Push an edited Text Size / Text Font / Width Factor cell back to
