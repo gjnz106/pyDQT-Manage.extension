@@ -6,7 +6,8 @@ Lists every Dimension Type with how many instances are placed, so an
 unused type (a purge candidate) or a heavily-used one is visible at a
 glance. Selecting a type and clicking Detail shows exactly which view
 each of its instances lives in - every Dimension is view-specific, so
-that lookup is always instant, unlike Model Groups.
+that lookup is always instant, unlike Model Groups. Rename, Batch Rename
+and Delete Type act on the selected types directly from the grid.
 """
 __title__ = "Dimension\nManager"
 __author__ = "DQT"
@@ -765,6 +766,7 @@ MAIN_XAML = """
                     <Button x:Name="btnDetail" Content="Detail" Padding="10,5" Margin="2" Background="#F0CC88" FontWeight="SemiBold"/>
                     <Button x:Name="btnRename" Content="Rename" Padding="10,5" Margin="2" Background="White"/>
                     <Button x:Name="btnBatchRename" Content="Batch Rename" Padding="10,5" Margin="2" Background="White"/>
+                    <Button x:Name="btnDeleteType" Content="Delete Type" Padding="10,5" Margin="2" Background="#FFCDD2"/>
                     <Button x:Name="btnExportCSV" Content="Export CSV" Padding="10,5" Margin="2" Background="White"/>
                     <Button x:Name="btnClose" Content="Close" Padding="10,5" Margin="2" Background="White"/>
                 </StackPanel>
@@ -805,6 +807,7 @@ class DimensionManagerWindow(WPFWindow):
         self.btnDetail.Click += self.show_detail
         self.btnRename.Click += self.rename_selected
         self.btnBatchRename.Click += self.batch_rename_selected
+        self.btnDeleteType.Click += self.delete_types_selected
         self.btnExportCSV.Click += self.export_csv
         self.btnClose.Click += self.close_window
 
@@ -1058,6 +1061,77 @@ class DimensionManagerWindow(WPFWindow):
             return
 
         _open_batch_rename(self.doc, selected, self)
+
+    def delete_types_selected(self, s, e):
+        """Delete the selected dimension types. Deleting a type that still
+        has placed instances deletes those instances too - that is Revit's
+        own cascade behaviour for element types, not something this tool
+        does explicitly - so the confirmation spells it out before anything
+        happens."""
+        if self.dataGrid.SelectedItems.Count == 0:
+            forms.alert("Select one or more dimension types to delete.",
+                        title="DQT - Dimension Manager")
+            return
+
+        selected = [item for item in self._resolve_selected_items()
+                    if item.element is not None]
+        if not selected:
+            forms.alert("The selected dimension types no longer exist - "
+                        "refresh and try again.",
+                        title="DQT - Dimension Manager")
+            return
+
+        total_instances = sum(item.instance_count for item in selected)
+        names = ", ".join(item.name for item in selected[:5])
+        if len(selected) > 5:
+            names += ", ... (+{} more)".format(len(selected) - 5)
+
+        message = "Delete {} dimension type(s)?\n\n{}\n\n".format(len(selected), names)
+        if total_instances:
+            message += ("This also deletes {} placed dimension instance(s) "
+                        "that use these types, across every view. This "
+                        "cannot be undone from this dialog.").format(total_instances)
+        else:
+            message += "None of the selected types have placed instances."
+
+        if not forms.alert(message, title="DQT - Delete Dimension Types",
+                           yes=True, no=True, warn_icon=True):
+            return
+
+        deleted = 0
+        failed = []
+        try:
+            with revit.Transaction("DQT - Delete Dimension Types"):
+                for item in selected:
+                    try:
+                        # Document.Delete returns the ids it actually removed
+                        # (including cascaded instances) rather than raising
+                        # when Revit silently refuses - e.g. the last
+                        # remaining type in a family. An empty result is
+                        # exactly that case, so it is reported as a failure
+                        # too even though nothing threw.
+                        removed = self.doc.Delete(ElementId(item.type_id))
+                        if removed is not None and removed.Count > 0:
+                            deleted += 1
+                        else:
+                            failed.append("{} (nothing was removed - Revit "
+                                          "may require at least one type "
+                                          "of this kind)".format(item.name))
+                    except Exception as ex:
+                        failed.append("{}: {}".format(item.name, ex))
+        except Exception as ex:
+            forms.alert("Delete failed, nothing was changed: {}".format(ex),
+                        title="DQT - Dimension Manager")
+            return
+
+        message = "{} dimension type(s) deleted.".format(deleted)
+        if failed:
+            message += "\n\nNot deleted ({}):\n".format(len(failed)) + "\n".join(failed[:10])
+            if len(failed) > 10:
+                message += "\n..."
+        forms.alert(message, title="DQT - Dimension Manager")
+
+        self.refresh(s, e)
 
     def on_cell_edit_ending(self, sender, args):
         """Push an edited Text Size / Text Font / Width Factor cell back to
