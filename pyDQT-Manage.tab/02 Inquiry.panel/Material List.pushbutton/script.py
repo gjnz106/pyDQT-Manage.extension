@@ -1071,6 +1071,7 @@ class MaterialManagerWindow(Window):
         self.filtered_items = []
 
         self.txt_total = None
+        self.txt_visible = None
         self.txt_selected = None
         self.txt_used = None
         self.txt_unused = None
@@ -1155,28 +1156,39 @@ class MaterialManagerWindow(Window):
         grid = Grid()
         grid.Margin = Thickness(0, 0, 0, 10)
 
-        for i in range(4):
-            grid.ColumnDefinitions.Add(ColumnDefinition(Width=GridLength(1, GridUnitType.Star)))
+        # VISIBLE sits beside TOTAL because the two are read together: how many
+        # materials the model holds, and how many the current search and filters
+        # leave on screen. Without it the only way to count a filtered set was
+        # to select it and read SELECTED, which also counts ticks left over
+        # outside the filter.
+        cards = [
+            ("TOTAL", None),
+            ("VISIBLE", Config.BLUE_COLOR),
+            ("SELECTED", Config.SECONDARY_COLOR),
+            ("IN USE", Config.SUCCESS_COLOR),
+            ("UNUSED", Config.WARNING_COLOR),
+        ]
+        last_index = len(cards) - 1
 
-        card1, self.txt_total = self._create_card("TOTAL", "0", 0)
-        Grid.SetColumn(card1, 0)
-        grid.Children.Add(card1)
+        for _ in cards:
+            grid.ColumnDefinitions.Add(
+                ColumnDefinition(Width=GridLength(1, GridUnitType.Star)))
 
-        card2, self.txt_selected = self._create_card("SELECTED", "0", 1, Config.SECONDARY_COLOR)
-        Grid.SetColumn(card2, 1)
-        grid.Children.Add(card2)
+        value_blocks = []
+        for index, (label, value_color) in enumerate(cards):
+            card, value_text = self._create_card(
+                label, "0", index, value_color, last_index)
+            Grid.SetColumn(card, index)
+            grid.Children.Add(card)
+            value_blocks.append(value_text)
 
-        card3, self.txt_used = self._create_card("IN USE", "0", 2, Config.SUCCESS_COLOR)
-        Grid.SetColumn(card3, 2)
-        grid.Children.Add(card3)
-
-        card4, self.txt_unused = self._create_card("UNUSED", "0", 3, Config.WARNING_COLOR)
-        Grid.SetColumn(card4, 3)
-        grid.Children.Add(card4)
+        (self.txt_total, self.txt_visible, self.txt_selected,
+         self.txt_used, self.txt_unused) = value_blocks
 
         return grid
 
-    def _create_card(self, label, value, margin_index, value_color=None):
+    def _create_card(self, label, value, margin_index, value_color=None,
+                     last_index=3):
         border = Border()
         border.Background = _brush(Config.WHITE)
         border.BorderBrush = _brush(Config.BORDER_COLOR)
@@ -1186,7 +1198,7 @@ class MaterialManagerWindow(Window):
 
         if margin_index == 0:
             border.Margin = Thickness(0, 0, 4, 0)
-        elif margin_index == 3:
+        elif margin_index == last_index:
             border.Margin = Thickness(4, 0, 0, 0)
         else:
             border.Margin = Thickness(4, 0, 4, 0)
@@ -1599,9 +1611,18 @@ class MaterialManagerWindow(Window):
 
         self.data_grid.ItemsSource = ObservableCollection[object](self.filtered_items)
 
+        # Refresh the counters here rather than relying on the SelectionChanged
+        # that replacing ItemsSource happens to raise: WPF does not raise it
+        # when nothing was selected before or after, which would leave VISIBLE
+        # showing the previous filter's count.
+        self._update_stats()
+
     def _update_stats(self):
         if self.txt_total:
             self.txt_total.Text = str(len(self.all_items))
+
+        if self.txt_visible:
+            self.txt_visible.Text = str(len(self.filtered_items))
 
         if self.txt_selected:
             selected = sum(1 for item in self.all_items if item.is_selected)
