@@ -1,0 +1,24 @@
+title: "Purge\nFamilies"
+author: Dang Quoc Truong (DQT)
+name: PurgeFamilies
+tooltip: >
+  Batch purge every .rfa family in a folder
+
+  Opens each family, deletes unused elements, saves it back and
+  reopens it - repeating until Revit reports nothing purgeable left.
+
+  Why the reopen matters:
+  - Revit finalises part of its reference bookkeeping on save
+  - Some elements only become purgeable after the file is written
+    and read back, so a single-pass purge always leaves a remainder
+
+  Features:
+  - Verified result: Success only when 0 purgeable elements remain
+  - Partial status reports exactly how many are still held
+  - Optional removal of .0001 backup files
+  - Excel log with purged / remaining / size before-after
+
+  Requires Revit 2024 or newer (Document.GetUnusedElements).
+  Files are overwritten in place - back up first.
+
+  Copyright (c) 2026 Dang Quoc Truong (DQT)
