@@ -21,7 +21,7 @@ from Autodesk.Revit.DB import *
 from Autodesk.Revit.DB.Architecture import StairsType, RailingType
 from System.Collections.Generic import List
 import System
-import re, datetime, codecs, os
+import re, datetime, codecs, os, json
 
 # ============================================================================
 # REVIT VERSION COMPATIBILITY
@@ -49,7 +49,160 @@ def _eid_int(element_id):
 class Config:
     warn_size_kb = 1024
     err_size_kb = 5120
-    patterns = [r'^[A-Z]{2,4}_.*', r'^FAM_.*', r'^.*_v\d+$']
+
+
+# ============================================================================
+# NAMING CONVENTION RULES
+#
+# One rule = one category + one test its family names must satisfy, e.g.
+# Doors must start with "LB_WH_DOR_". Rules are per project, because the
+# convention is a project standard, and are stored as JSON next to this
+# script so a set can be exported once and imported by the rest of the team.
+# ============================================================================
+NAMING_RULES_DIR = os.path.join(os.path.dirname(__file__), "naming_rules")
+
+RULE_MODES = ["Prefix", "Suffix", "Contains", "Regex"]
+
+
+def _rules_project_key(doc):
+    """Filename-safe key for the active project. Falls back to the title for
+    an unsaved document, so rules still persist for the session's work."""
+    key = ""
+    try:
+        path = doc.PathName
+        if path:
+            # Split on both separators rather than trusting os.path.basename:
+            # a cloud model's PathName is a URI ("BIM 360://.../Model.rvt"),
+            # not a local path.
+            leaf = re.split(r'[\\/]', path)[-1]
+            key = os.path.splitext(leaf)[0]
+    except Exception:
+        pass
+    if not key:
+        try:
+            key = doc.Title or ""
+        except Exception:
+            key = ""
+    if not key:
+        key = "untitled"
+    return re.sub(r'[^A-Za-z0-9_.-]', '_', key)[:120]
+
+
+def rules_file_for(doc):
+    return os.path.join(NAMING_RULES_DIR, _rules_project_key(doc) + ".json")
+
+
+def load_naming_rules(doc):
+    """Rules saved for this project, or an empty list. A corrupt or
+    hand-edited file must not stop the whole Family Manager from opening."""
+    path = rules_file_for(doc)
+    if not os.path.exists(path):
+        return []
+    try:
+        with codecs.open(path, 'r', 'utf-8') as f:
+            data = json.load(f)
+        return normalise_rules(data.get("rules", []))
+    except Exception:
+        return []
+
+
+def save_naming_rules(doc, rules):
+    """Persist rules for this project. Returns (ok, error_message)."""
+    try:
+        if not os.path.exists(NAMING_RULES_DIR):
+            os.makedirs(NAMING_RULES_DIR)
+        payload = {
+            "project": _rules_project_key(doc),
+            "saved": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "rules": rules,
+        }
+        with codecs.open(rules_file_for(doc), 'w', 'utf-8') as f:
+            json.dump(payload, f, indent=2, ensure_ascii=False)
+        return True, ""
+    except Exception as ex:
+        return False, str(ex)
+
+
+def normalise_rules(raw_rules):
+    """Keep only well-formed rules, so an imported file cannot inject
+    half-built entries into the checker."""
+    clean = []
+    for item in raw_rules or []:
+        try:
+            category = (item.get("category") or "").strip()
+            pattern = (item.get("pattern") or "").strip()
+            mode = (item.get("mode") or "Prefix").strip()
+        except AttributeError:
+            continue
+        if not category or not pattern:
+            continue
+        if mode not in RULE_MODES:
+            mode = "Prefix"
+        clean.append({"category": category, "mode": mode, "pattern": pattern})
+    return clean
+
+
+def rule_error(rule):
+    """Why this rule cannot run, or None. Only Regex can be malformed, and a
+    bad one must be reported rather than failing every family it touches."""
+    if rule.get("mode") == "Regex":
+        try:
+            re.compile(rule.get("pattern", ""))
+        except Exception as ex:
+            return "invalid regex: {}".format(ex)
+    return None
+
+
+def name_matches_rule(name, rule):
+    """True when the family name satisfies the rule. Matching is
+    case-sensitive: a naming standard that accepts 'lb_wh_dor_' as well as
+    'LB_WH_DOR_' is not a standard."""
+    name = name or ""
+    pattern = rule.get("pattern", "")
+    mode = rule.get("mode", "Prefix")
+
+    if mode == "Prefix":
+        return name.startswith(pattern)
+    if mode == "Suffix":
+        return name.endswith(pattern)
+    if mode == "Contains":
+        return pattern in name
+    if mode == "Regex":
+        try:
+            return re.search(pattern, name) is not None
+        except Exception:
+            return False
+    return False
+
+
+def run_naming_check(families, rules):
+    """Check family names against the rules.
+
+    Returns (findings, unchecked_categories) where findings is one entry per
+    rule - {rule, checked, failed(list of names), error} - and
+    unchecked_categories lists categories present in the model that no rule
+    covers, so gaps in the rule set are visible rather than silently passing."""
+    findings = []
+    covered = set()
+
+    for rule in rules:
+        covered.add(rule["category"])
+        error = rule_error(rule)
+        matching = [f for f in families if f.category_name == rule["category"]]
+        failed = []
+        if error is None:
+            failed = [f.family_name for f in matching
+                      if not name_matches_rule(f.family_name, rule)]
+        findings.append({
+            "rule": rule,
+            "checked": len(matching),
+            "failed": failed,
+            "error": error,
+        })
+
+    unchecked = sorted({f.category_name for f in families
+                        if f.category_name and f.category_name not in covered})
+    return findings, unchecked
 
 # ============================================================================
 # HELPER FUNCTIONS
@@ -368,6 +521,16 @@ class FamilyData(object):
         self.is_unused = False
         self.family_type = "Loadable"  # "Loadable", "System", "In-Place", "Model Groups"
         self.family_type_display = "Loadable"
+
+class NamingRuleRow(object):
+    """Grid row for one naming rule. The rules themselves stay plain dicts so
+    they serialise straight to JSON; WPF binds to attributes, so they are
+    wrapped for display."""
+    def __init__(self, rule):
+        self.category = rule.get("category", "")
+        self.mode = rule.get("mode", "Prefix")
+        self.pattern = rule.get("pattern", "")
+
 
 class FamilyTypeData(object):
     def __init__(self):
@@ -947,25 +1110,60 @@ MAIN_XAML = """
                 </Grid>
             </TabItem>
             
-            <TabItem Header="  Health Check  " Padding="12,6">
+            <TabItem Header="  Naming Check  " Padding="12,6">
                 <Grid Margin="8">
                     <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="160"/>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="*"/>
                         <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
-                    <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
-                        <Button Name="btnRunHealth" Content="Run Health Check" Padding="12,6" Background="#F0CC88" FontWeight="SemiBold"/>
-                        <TextBlock Name="txtHealthStatus" Text="Click to analyze..." VerticalAlignment="Center" Margin="15,0,0,0" Foreground="#666"/>
+
+                    <TextBlock Text="RULE" FontSize="9" FontWeight="SemiBold" Foreground="#5D4E37" Margin="0,0,0,4"/>
+
+                    <Border Grid.Row="1" Background="White" BorderBrush="#D4B87A" BorderThickness="1" CornerRadius="4" Padding="8" Margin="0,0,0,8">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="Category" VerticalAlignment="Center" Foreground="#333" Margin="0,0,6,0"/>
+                            <ComboBox Name="cmbRuleCategory" Width="180" Height="26" VerticalContentAlignment="Center"/>
+                            <TextBlock Text="Must" VerticalAlignment="Center" Foreground="#333" Margin="12,0,6,0"/>
+                            <ComboBox Name="cmbRuleMode" Width="100" Height="26" VerticalContentAlignment="Center"/>
+                            <TextBox Name="txtRulePattern" Width="220" Height="26" Margin="8,0,0,0" VerticalContentAlignment="Center" ToolTip="e.g. LB_WH_DOR_"/>
+                            <Button Name="btnAddRule" Content="Add / Update" Padding="12,4" Margin="8,0,0,0" Background="#F0CC88" FontWeight="SemiBold"/>
+                        </StackPanel>
+                    </Border>
+
+                    <DataGrid Grid.Row="2" Name="dgRules" AutoGenerateColumns="False" IsReadOnly="True"
+                              HeadersVisibility="Column" GridLinesVisibility="All"
+                              Background="White" RowBackground="White" AlternatingRowBackground="#FAF3E0"
+                              BorderBrush="#D4B87A" BorderThickness="1"
+                              HorizontalGridLinesBrush="#E0E0E0" VerticalGridLinesBrush="#E0E0E0"
+                              SelectionMode="Single">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Category" Binding="{Binding category}" Width="220"/>
+                            <DataGridTextColumn Header="Must" Binding="{Binding mode}" Width="100"/>
+                            <DataGridTextColumn Header="Pattern" Binding="{Binding pattern}" Width="*"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+
+                    <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,8,0,10">
+                        <Button Name="btnRunNaming" Content="Run Naming Check" Padding="12,6" Background="#F0CC88" FontWeight="SemiBold"/>
+                        <TextBlock Name="txtNamingStatus" Text="Add a rule, then run the check." VerticalAlignment="Center" Margin="15,0,0,0" Foreground="#666"/>
+                        <Button Name="btnRemoveRule" Content="Remove Rule" Padding="8,4" Margin="15,0,0,0" Background="White"/>
+                        <Button Name="btnImportRules" Content="Import Rules" Padding="8,4" Margin="6,0,0,0" Background="White"/>
+                        <Button Name="btnExportRules" Content="Export Rules" Padding="8,4" Margin="6,0,0,0" Background="White"/>
                     </StackPanel>
-                    <Border Grid.Row="1" Background="White" BorderBrush="#D4B87A" BorderThickness="1" CornerRadius="4" Padding="10">
+
+                    <Border Grid.Row="4" Background="White" BorderBrush="#D4B87A" BorderThickness="1" CornerRadius="4" Padding="10">
                         <ScrollViewer VerticalScrollBarVisibility="Auto">
-                            <StackPanel Name="healthPanel">
+                            <StackPanel Name="namingPanel">
                                 <TextBlock Text="Results will appear here..." Foreground="#999" FontStyle="Italic"/>
                             </StackPanel>
                         </ScrollViewer>
                     </Border>
-                    <Button Grid.Row="2" Name="btnExportHealth" Content="Export Report" Padding="8,4" Background="White" HorizontalAlignment="Right" Margin="0,8,0,0" IsEnabled="False"/>
+
+                    <Button Grid.Row="5" Name="btnExportNaming" Content="Export Report" Padding="8,4" Background="White" HorizontalAlignment="Right" Margin="0,8,0,0" IsEnabled="False"/>
                 </Grid>
             </TabItem>
         </TabControl>
@@ -1434,10 +1632,16 @@ class FamilyManagerWindow(WPFWindow):
         self.cur_type_params = None
         self.cur_params = []
         self._param_types = []
-        
+
+        # Naming check - rules are per project and reload with the document
+        self.naming_rules = load_naming_rules(self.doc)
+        self.naming_findings = []
+        self.naming_unchecked = []
+
         self._setup_events()
         self.load_data()
         self.update_ui()
+        self._init_naming_ui()
     
     def _setup_events(self):
         # Tab 1 - Families
@@ -1485,9 +1689,13 @@ class FamilyManagerWindow(WPFWindow):
         self.btnImportParams.Click += self.import_params
         self.btnCompareParams.Click += self.compare_params
         
-        # Tab 4 - Health
-        self.btnRunHealth.Click += self.run_health
-        self.btnExportHealth.Click += self.export_health
+        # Tab 4 - Naming Check
+        self.btnAddRule.Click += self.add_or_update_rule
+        self.btnRemoveRule.Click += self.remove_rule
+        self.btnImportRules.Click += self.import_rules
+        self.btnExportRules.Click += self.export_rules
+        self.btnRunNaming.Click += self.run_naming
+        self.btnExportNaming.Click += self.export_naming
     
     def get_current_tab(self):
         """Get current active tab index"""
@@ -2387,107 +2595,299 @@ th{background:#F0CC88}</style></head>
         
         CompareDialog(types, self.doc).ShowDialog()
     
-    # ==================== HEALTH CHECK ====================
-    def run_health(self, sender, args):
-        self.txtHealthStatus.Text = "Analyzing..."
-        self.healthPanel.Children.Clear()
-        
-        results = []
-        
-        # Large families (estimated size > 5MB)
-        large = [f for f in self.items if f.estimated_size_kb >= Config.err_size_kb]
-        if large:
-            results.append(("Large Families ({})".format(len(large)), [f.family_name for f in large[:10]], "#FF9800"))
-        
-        # Unused families
-        unused = [f for f in self.items if f.is_unused and not f.is_in_place]
-        if unused:
-            results.append(("Unused Families ({})".format(len(unused)), [f.family_name for f in unused[:10]], "#2196F3"))
-        
-        # Non-standard names (only for Loadable families)
-        bad = [f for f in self.items if f.family_type == "Loadable" and not any(re.match(p, f.family_name) for p in Config.patterns)]
-        if bad:
-            results.append(("Non-Standard Names ({})".format(len(bad)), [f.family_name for f in bad[:10]], "#9C27B0"))
-        
-        # In-Place families
-        inp = [f for f in self.items if f.is_in_place]
-        if inp:
-            results.append(("In-Place Families ({})".format(len(inp)), [f.family_name for f in inp[:10]], "#FF5722"))
-        
-        if not results:
+    # ==================== NAMING CHECK ====================
+    def _init_naming_ui(self):
+        """Fill the rule editor once the model data is loaded."""
+        self.cmbRuleMode.Items.Clear()
+        for mode in RULE_MODES:
+            self.cmbRuleMode.Items.Add(mode)
+        self.cmbRuleMode.SelectedIndex = 0
+
+        self._refresh_rule_categories()
+        self._refresh_rule_grid()
+
+        if self.naming_rules:
+            self.txtNamingStatus.Text = "{} rule(s) loaded for this project.".format(
+                len(self.naming_rules))
+
+    def _refresh_rule_categories(self):
+        """Categories actually present in the model, so a rule can only be
+        written against something this project contains."""
+        current = self.cmbRuleCategory.SelectedItem
+        self.cmbRuleCategory.Items.Clear()
+        for cat in sorted(self.cats.keys()):
+            self.cmbRuleCategory.Items.Add(cat)
+        if current is not None:
+            for i in range(self.cmbRuleCategory.Items.Count):
+                if self.cmbRuleCategory.Items[i] == current:
+                    self.cmbRuleCategory.SelectedIndex = i
+                    return
+        if self.cmbRuleCategory.Items.Count:
+            self.cmbRuleCategory.SelectedIndex = 0
+
+    def _refresh_rule_grid(self):
+        self.dgRules.Items.Clear()
+        for rule in self.naming_rules:
+            self.dgRules.Items.Add(NamingRuleRow(rule))
+
+    def _persist_rules(self):
+        ok, err = save_naming_rules(self.doc, self.naming_rules)
+        if not ok:
+            forms.alert("Could not save the rules:\n{}".format(err),
+                        title="Naming Check")
+
+    def add_or_update_rule(self, sender, args):
+        """One rule per category - adding a second for the same category
+        replaces the first, so the grid can never hold two rules that
+        contradict each other."""
+        category = self.cmbRuleCategory.SelectedItem
+        mode = self.cmbRuleMode.SelectedItem or "Prefix"
+        pattern = (self.txtRulePattern.Text or "").strip()
+
+        if not category:
+            forms.alert("Pick a category first.", title="Naming Check")
+            return
+        if not pattern:
+            forms.alert("Enter the text the family name must match, "
+                        "e.g. LB_WH_DOR_", title="Naming Check")
+            return
+
+        candidate = {"category": category, "mode": mode, "pattern": pattern}
+        error = rule_error(candidate)
+        if error:
+            forms.alert("That rule cannot run - {}".format(error),
+                        title="Naming Check")
+            return
+
+        replaced = False
+        for rule in self.naming_rules:
+            if rule["category"] == category:
+                rule["mode"] = mode
+                rule["pattern"] = pattern
+                replaced = True
+                break
+        if not replaced:
+            self.naming_rules.append(candidate)
+
+        self._refresh_rule_grid()
+        self._persist_rules()
+        self.txtNamingStatus.Text = "{} rule for {}.".format(
+            "Updated" if replaced else "Added", category)
+
+    def remove_rule(self, sender, args):
+        row = self.dgRules.SelectedItem
+        if row is None:
+            forms.alert("Select a rule in the list to remove.",
+                        title="Naming Check")
+            return
+        self.naming_rules = [r for r in self.naming_rules
+                             if r["category"] != row.category]
+        self._refresh_rule_grid()
+        self._persist_rules()
+        self.txtNamingStatus.Text = "Removed the rule for {}.".format(row.category)
+
+    def import_rules(self, sender, args):
+        from System.Windows.Forms import OpenFileDialog, DialogResult
+        dlg = OpenFileDialog()
+        dlg.Filter = "JSON|*.json"
+        if dlg.ShowDialog() != DialogResult.OK:
+            return
+        try:
+            with codecs.open(dlg.FileName, 'r', 'utf-8') as f:
+                data = json.load(f)
+            imported = normalise_rules(data.get("rules", data))
+        except Exception as ex:
+            forms.alert("Could not read that file:\n{}".format(ex),
+                        title="Naming Check")
+            return
+
+        if not imported:
+            forms.alert("No usable rules in that file.", title="Naming Check")
+            return
+
+        by_category = {}
+        for rule in self.naming_rules:
+            by_category[rule["category"]] = rule
+        for rule in imported:
+            by_category[rule["category"]] = rule
+        self.naming_rules = [by_category[k] for k in sorted(by_category.keys())]
+
+        self._refresh_rule_grid()
+        self._persist_rules()
+        self.txtNamingStatus.Text = "Imported {} rule(s).".format(len(imported))
+
+    def export_rules(self, sender, args):
+        if not self.naming_rules:
+            forms.alert("There are no rules to export.", title="Naming Check")
+            return
+        from System.Windows.Forms import SaveFileDialog, DialogResult
+        dlg = SaveFileDialog()
+        dlg.Filter = "JSON|*.json"
+        dlg.FileName = "DQT_naming_rules.json"
+        if dlg.ShowDialog() != DialogResult.OK:
+            return
+        try:
+            payload = {
+                "project": _rules_project_key(self.doc),
+                "saved": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "rules": self.naming_rules,
+            }
+            with codecs.open(dlg.FileName, 'w', 'utf-8') as f:
+                json.dump(payload, f, indent=2, ensure_ascii=False)
+            forms.alert("Rules exported. Team members can load this with "
+                        "Import Rules.", title="Naming Check")
+        except Exception as ex:
+            forms.alert("Could not export:\n{}".format(ex), title="Naming Check")
+
+    def run_naming(self, sender, args):
+        self.namingPanel.Children.Clear()
+
+        if not self.naming_rules:
+            self.txtNamingStatus.Text = "No rules defined."
             tb = System.Windows.Controls.TextBlock()
-            tb.Text = "All families look healthy!"
-            tb.Foreground = System.Windows.Media.Brushes.Green
-            tb.FontWeight = System.Windows.FontWeights.SemiBold
-            self.healthPanel.Children.Add(tb)
-        else:
-            for title, items, color in results:
-                title_tb = System.Windows.Controls.TextBlock()
-                title_tb.Text = title
-                title_tb.FontWeight = System.Windows.FontWeights.SemiBold
-                title_tb.Margin = System.Windows.Thickness(0, 10, 0, 4)
-                try:
-                    title_tb.Foreground = System.Windows.Media.BrushConverter().ConvertFromString(color)
-                except:
-                    pass
-                self.healthPanel.Children.Add(title_tb)
-                
-                for item in items:
-                    item_tb = System.Windows.Controls.TextBlock()
-                    item_tb.Text = "  - " + item
-                    item_tb.Foreground = System.Windows.Media.Brushes.Gray
-                    self.healthPanel.Children.Add(item_tb)
-        
-        total_issues = sum(len(r[1]) for r in results)
-        self.txtHealthStatus.Text = "Found {} issues".format(total_issues)
-        self.btnExportHealth.IsEnabled = len(results) > 0
-    
-    def export_health(self, sender, args):
+            tb.Text = ("Add a rule first - pick a category, choose Prefix, and "
+                       "type the required text, e.g. LB_WH_DOR_ for Doors.")
+            tb.Foreground = System.Windows.Media.Brushes.Gray
+            tb.TextWrapping = System.Windows.TextWrapping.Wrap
+            self.namingPanel.Children.Add(tb)
+            self.btnExportNaming.IsEnabled = False
+            return
+
+        self.txtNamingStatus.Text = "Checking..."
+        findings, unchecked = run_naming_check(self.items, self.naming_rules)
+        self.naming_findings = findings
+        self.naming_unchecked = unchecked
+
+        total_failed = sum(len(f["failed"]) for f in findings)
+        total_checked = sum(f["checked"] for f in findings)
+
+        for finding in findings:
+            rule = finding["rule"]
+            header = System.Windows.Controls.TextBlock()
+            header.FontWeight = System.Windows.FontWeights.SemiBold
+            header.Margin = System.Windows.Thickness(0, 10, 0, 4)
+
+            if finding["error"]:
+                header.Text = "{} - rule cannot run ({})".format(
+                    rule["category"], finding["error"])
+                colour = "#FF5722"
+            elif finding["checked"] == 0:
+                header.Text = "{} - no families in this category".format(
+                    rule["category"])
+                colour = "#999999"
+            elif not finding["failed"]:
+                header.Text = u"{} - all {} pass  [{} {}]".format(
+                    rule["category"], finding["checked"],
+                    rule["mode"].lower(), rule["pattern"])
+                colour = "#2E7D32"
+            else:
+                header.Text = u"{} - {} of {} fail  [{} {}]".format(
+                    rule["category"], len(finding["failed"]), finding["checked"],
+                    rule["mode"].lower(), rule["pattern"])
+                colour = "#C62828"
+
+            try:
+                header.Foreground = System.Windows.Media.BrushConverter().ConvertFromString(colour)
+            except:
+                pass
+            self.namingPanel.Children.Add(header)
+
+            for name in finding["failed"][:50]:
+                item_tb = System.Windows.Controls.TextBlock()
+                item_tb.Text = "  - " + name
+                item_tb.Foreground = System.Windows.Media.Brushes.Gray
+                self.namingPanel.Children.Add(item_tb)
+
+            if len(finding["failed"]) > 50:
+                more = System.Windows.Controls.TextBlock()
+                more.Text = "  ... and {} more".format(len(finding["failed"]) - 50)
+                more.Foreground = System.Windows.Media.Brushes.Gray
+                more.FontStyle = System.Windows.FontStyles.Italic
+                self.namingPanel.Children.Add(more)
+
+        if unchecked:
+            gap = System.Windows.Controls.TextBlock()
+            gap.Text = "Not covered by any rule ({}): {}".format(
+                len(unchecked), ", ".join(unchecked[:15])
+                + (" ..." if len(unchecked) > 15 else ""))
+            gap.Margin = System.Windows.Thickness(0, 14, 0, 0)
+            gap.TextWrapping = System.Windows.TextWrapping.Wrap
+            gap.FontStyle = System.Windows.FontStyles.Italic
+            gap.Foreground = System.Windows.Media.Brushes.Gray
+            self.namingPanel.Children.Add(gap)
+
+        self.txtNamingStatus.Text = "{} of {} checked family(ies) fail.".format(
+            total_failed, total_checked)
+        self.btnExportNaming.IsEnabled = True
+
+    def export_naming(self, sender, args):
+        if not getattr(self, "naming_findings", None):
+            forms.alert("Run the check first.", title="Naming Check")
+            return
+
         from System.Windows.Forms import SaveFileDialog, DialogResult
         dlg = SaveFileDialog()
         dlg.Filter = "HTML|*.html"
-        dlg.FileName = "Health_Report.html"
-        
+        dlg.FileName = "Naming_Check_Report.html"
         if dlg.ShowDialog() != DialogResult.OK:
             return
-        
+
+        def esc(text):
+            return (str(text).replace("&", "&amp;").replace("<", "&lt;")
+                    .replace(">", "&gt;"))
+
         try:
-            # Count issues
-            large_count = len([f for f in self.items if f.estimated_size_kb >= Config.err_size_kb])
-            unused_count = len([f for f in self.items if f.is_unused])
-            nonstandard_count = len([f for f in self.items if f.family_type == "Loadable" and not any(re.match(p, f.family_name) for p in Config.patterns)])
-            inplace_count = len([f for f in self.items if f.is_in_place])
-            
-            html = """<!DOCTYPE html><html><head><meta charset="UTF-8">
-<style>body{font-family:Arial;padding:20px}h1{color:#F0CC88}</style></head>
-<body><h1>Family Health Report</h1>
-<p>Generated: {}</p>
-<p>Total families: {}</p>
-<h2>Summary</h2>
-<ul>
-<li>Large: {}</li>
-<li>Unused: {}</li>
-<li>Non-standard names: {}</li>
-<li>In-Place: {}</li>
-</ul>
-<p style="color:#888;margin-top:30px">(c) Dang Quoc Truong (DQT)</p>
-</body></html>""".format(
+            total_failed = sum(len(f["failed"]) for f in self.naming_findings)
+            total_checked = sum(f["checked"] for f in self.naming_findings)
+
+            blocks = []
+            for finding in self.naming_findings:
+                rule = finding["rule"]
+                if finding["error"]:
+                    blocks.append("<h2>{} <small>rule cannot run: {}</small></h2>".format(
+                        esc(rule["category"]), esc(finding["error"])))
+                    continue
+                blocks.append(
+                    "<h2>{} <small>must {} <code>{}</code></small></h2>"
+                    "<p>{} of {} fail</p>".format(
+                        esc(rule["category"]), esc(rule["mode"].lower()),
+                        esc(rule["pattern"]), len(finding["failed"]),
+                        finding["checked"]))
+                if finding["failed"]:
+                    blocks.append("<ul>" + "".join(
+                        "<li>{}</li>".format(esc(n)) for n in finding["failed"]
+                    ) + "</ul>")
+
+            if self.naming_unchecked:
+                blocks.append("<h2>Not covered by any rule</h2><p>{}</p>".format(
+                    esc(", ".join(self.naming_unchecked))))
+
+            html = (
+                '<!DOCTYPE html><html><head><meta charset="UTF-8">'
+                '<style>body{font-family:Arial;padding:20px;color:#333}'
+                'h1{color:#5D4E37}h2{color:#5D4E37;margin-bottom:2px}'
+                'small{font-weight:normal;color:#888}'
+                'code{background:#FAF3E0;padding:1px 4px}'
+                'li{color:#C62828}</style></head><body>'
+                '<h1>Family Naming Check</h1>'
+                '<p>Project: {}<br/>Generated: {}</p>'
+                '<p><b>{}</b> of <b>{}</b> checked families fail their rule.</p>'
+                '{}'
+                '<p style="color:#888;margin-top:30px">'
+                'Dang Quoc Truong - DQT (c) 2026</p>'
+                '</body></html>'
+            ).format(
+                esc(_rules_project_key(self.doc)),
                 datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
-                len(self.items),
-                large_count,
-                unused_count,
-                nonstandard_count,
-                inplace_count
-            )
-            
+                total_failed, total_checked, "".join(blocks))
+
             with codecs.open(dlg.FileName, 'w', 'utf-8') as f:
                 f.write(html)
-            
+
             forms.alert("Report saved!", title="Done")
             os.startfile(dlg.FileName)
         except Exception as ex:
             forms.alert("Error: {}".format(str(ex)), title="Error")
-
 
 # ============================================================================
 # MAIN
