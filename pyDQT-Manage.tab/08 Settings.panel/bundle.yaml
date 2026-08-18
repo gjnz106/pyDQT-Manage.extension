@@ -6,5 +6,6 @@ layout:
   - Line Pattern
   - Text
   - DimensionManager
+  - WallLayerManager
   - Hatching
   - ColorSplasher
