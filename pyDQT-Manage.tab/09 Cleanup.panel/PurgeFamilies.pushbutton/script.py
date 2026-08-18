@@ -891,9 +891,8 @@ class PurgeFamiliesWindow(Window):
         self.rb_case_upper = _radio("UPPER", "case")
         self.rb_case_lower = _radio("lower", "case")
         self.rb_case_title = _radio("Title", "case")
-        self.rb_case_sentence = _radio("Sentence", "case")
         for rb in (self.rb_case_none, self.rb_case_upper, self.rb_case_lower,
-                   self.rb_case_title, self.rb_case_sentence):
+                   self.rb_case_title):
             row2.Children.Add(rb)
 
         caption = _tb("Keep first", size=10, color=CLR_MUTED)
@@ -935,7 +934,7 @@ class PurgeFamiliesWindow(Window):
                     self.txt_suffix, self.txt_keep):
             box.TextChanged += self._on_rename_option_changed
         for rb in (self.rb_case_none, self.rb_case_upper, self.rb_case_lower,
-                   self.rb_case_title, self.rb_case_sentence):
+                   self.rb_case_title):
             rb.Checked += self._on_rename_option_changed
         self.chk_remove_spaces.Checked += self._on_rename_option_changed
         self.chk_remove_spaces.Unchecked += self._on_rename_option_changed
@@ -1282,8 +1281,6 @@ class PurgeFamiliesWindow(Window):
             mode = "lower"
         elif self.rb_case_title.IsChecked:
             mode = "title"
-        elif self.rb_case_sentence.IsChecked:
-            mode = "sentence"
         else:
             mode = "none"
 
