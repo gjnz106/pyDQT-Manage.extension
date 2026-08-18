@@ -51,9 +51,16 @@ from System.Windows import (
 )
 from System.Windows.Controls import (
     DockPanel, StackPanel, Border, ScrollViewer,
-    TextBlock, TextBox, Button, CheckBox,
+    TextBlock, TextBox, Button, CheckBox, RadioButton,
     ListBox, ListBoxItem, ProgressBar,
     Orientation, ScrollBarVisibility, SelectionMode
+)
+
+# Shared with Family Manager's rename dialog - one source for how a new name
+# is built, so the two tools cannot drift apart.
+from dqt_name_ops import (
+    is_revit_backup as _is_revit_backup,
+    plan_renames, apply_renames,
 )
 from System.Windows.Media import SolidColorBrush, Color, FontFamily
 
@@ -89,19 +96,6 @@ FONT_UI   = FontFamily("Segoe UI")
 FONT_MONO = FontFamily("Consolas")
 
 FOOTER_TEXT = "Dang Quoc Truong - DQT (c) 2026"
-
-
-# ---------------------------------------------------------------------------
-#  Revit backup file patterns:  FamilyName.0001.rfa  /  ProjectName.0042.rvt
-# ---------------------------------------------------------------------------
-_BACKUP_RFA_RE = re.compile(r'^.+\.\d{4}\.rfa$', re.IGNORECASE)
-_BACKUP_RVT_RE = re.compile(r'^.+\.\d{4}\.rvt$', re.IGNORECASE)
-
-
-def _is_revit_backup(filename):
-    """True for Revit automatic backups only - FamilyName.0001.rfa and
-    ProjectName.0042.rvt. A plain FamilyName.rfa never matches."""
-    return bool(_BACKUP_RFA_RE.match(filename) or _BACKUP_RVT_RE.match(filename))
 
 
 # ===========================================================================
@@ -628,6 +622,46 @@ def _num_box(value, width=38):
     return t
 
 
+def _labelled_box(label, width, tooltip=None):
+    """A small caption with its text box, as one horizontal unit."""
+    panel = StackPanel()
+    panel.Orientation = Orientation.Horizontal
+    panel.Margin = Thickness(0, 0, 14, 0)
+
+    caption = _tb(label, size=10, color=CLR_MUTED)
+    caption.VerticalAlignment = VerticalAlignment.Center
+    caption.Margin = Thickness(0, 0, 5, 0)
+    panel.Children.Add(caption)
+
+    box = TextBox()
+    box.Width = width
+    box.Height = 26
+    box.FontSize = 11
+    box.FontFamily = FONT_UI
+    box.BorderBrush = SolidColorBrush(CLR_BORDER)
+    box.BorderThickness = Thickness(1)
+    box.Padding = Thickness(4, 0, 4, 0)
+    box.VerticalContentAlignment = VerticalAlignment.Center
+    if tooltip:
+        box.ToolTip = tooltip
+    panel.Children.Add(box)
+    return panel, box
+
+
+def _radio(label, group, checked=False):
+    r = RadioButton()
+    r.Content = label
+    r.GroupName = group
+    r.IsChecked = checked
+    r.FontSize = 11
+    r.FontFamily = FONT_UI
+    r.Foreground = SolidColorBrush(CLR_TEXT)
+    r.VerticalAlignment = VerticalAlignment.Center
+    r.Margin = Thickness(0, 0, 12, 0)
+    r.Cursor = System.Windows.Input.Cursors.Hand
+    return r
+
+
 def _read_int(text_box, default, low, high):
     try:
         return max(low, min(high, int(text_box.Text.strip())))
@@ -642,10 +676,10 @@ class PurgeFamiliesWindow(Window):
 
     def __init__(self):
         self.Title = "Batch Purge Families v1.0 - DQT"
-        self.Width = 860
-        self.Height = 720
-        self.MinWidth = 700
-        self.MinHeight = 580
+        self.Width = 900
+        self.Height = 820
+        self.MinWidth = 760
+        self.MinHeight = 600
         self.WindowStartupLocation = System.Windows.WindowStartupLocation.CenterScreen
         self.ResizeMode = System.Windows.ResizeMode.CanResize
         self.Background = SolidColorBrush(CLR_BG)
@@ -812,9 +846,101 @@ class PurgeFamiliesWindow(Window):
         body.Margin = Thickness(15)
         body.Children.Add(self._make_card_folder())
         body.Children.Add(self._make_card_scan())
+        body.Children.Add(self._make_card_rename())
         body.Children.Add(self._make_card_progress())
         body.Children.Add(self._make_card_actions())
         return body
+
+    def _make_card_rename(self):
+        sp = StackPanel()
+        sp.Orientation = Orientation.Vertical
+        sp.Children.Add(_section_lbl("Rename files (optional)"))
+
+        note = _tb("A loadable family is named by its file, so renaming the .rfa "
+                   "renames the family - no need to open anything. Families "
+                   "already loaded into a project keep their old name until "
+                   "they are reloaded.",
+                   size=10, color=CLR_MUTED, wrap=True)
+        note.Margin = Thickness(0, 0, 0, 8)
+        sp.Children.Add(note)
+
+        row1 = StackPanel()
+        row1.Orientation = Orientation.Horizontal
+        row1.Margin = Thickness(0, 0, 0, 8)
+        panel, self.txt_find = _labelled_box(
+            "Find:", 100, "Text to remove or replace in every name")
+        row1.Children.Add(panel)
+        panel, self.txt_replace = _labelled_box("Replace:", 100)
+        row1.Children.Add(panel)
+        panel, self.txt_prefix = _labelled_box("Prefix:", 110, "e.g. LB_WH_DOR_")
+        row1.Children.Add(panel)
+        panel, self.txt_suffix = _labelled_box("Suffix:", 100)
+        row1.Children.Add(panel)
+        sp.Children.Add(row1)
+
+        row2 = StackPanel()
+        row2.Orientation = Orientation.Horizontal
+        row2.Margin = Thickness(0, 0, 0, 10)
+
+        caption = _tb("Case:", size=10, color=CLR_MUTED)
+        caption.VerticalAlignment = VerticalAlignment.Center
+        caption.Margin = Thickness(0, 0, 8, 0)
+        row2.Children.Add(caption)
+
+        self.rb_case_none = _radio("None", "case", checked=True)
+        self.rb_case_upper = _radio("UPPER", "case")
+        self.rb_case_lower = _radio("lower", "case")
+        self.rb_case_title = _radio("Title", "case")
+        for rb in (self.rb_case_none, self.rb_case_upper,
+                   self.rb_case_lower, self.rb_case_title):
+            row2.Children.Add(rb)
+
+        caption = _tb("Keep first", size=10, color=CLR_MUTED)
+        caption.VerticalAlignment = VerticalAlignment.Center
+        caption.Margin = Thickness(6, 0, 5, 0)
+        row2.Children.Add(caption)
+
+        self.txt_keep = _num_box(0, width=34)
+        self.txt_keep.ToolTip = ("Leading characters forced to UPPERCASE and left "
+                                 "out of the conversion, so a project prefix "
+                                 "survives it. 5 turns Lb_wh_Ano into LB_WH_Ano.")
+        row2.Children.Add(self.txt_keep)
+
+        caption = _tb("chars UPPER", size=10, color=CLR_MUTED)
+        caption.VerticalAlignment = VerticalAlignment.Center
+        caption.Margin = Thickness(5, 0, 18, 0)
+        row2.Children.Add(caption)
+
+        self.chk_remove_spaces = _chk("Remove spaces")
+        row2.Children.Add(self.chk_remove_spaces)
+        sp.Children.Add(row2)
+
+        row3 = StackPanel()
+        row3.Orientation = Orientation.Horizontal
+
+        self.btn_rename = _btn("Rename Files", CLR_HEADER, CLR_ACCENT,
+                               h=30, bold=True)
+        self.btn_rename.Padding = Thickness(16, 0, 16, 0)
+        row3.Children.Add(self.btn_rename)
+
+        self.lbl_rename_status = _tb("Set an option to preview the new names.",
+                                     size=10, color=CLR_MUTED)
+        self.lbl_rename_status.VerticalAlignment = VerticalAlignment.Center
+        self.lbl_rename_status.Margin = Thickness(12, 0, 0, 0)
+        row3.Children.Add(self.lbl_rename_status)
+        sp.Children.Add(row3)
+
+        for box in (self.txt_find, self.txt_replace, self.txt_prefix,
+                    self.txt_suffix, self.txt_keep):
+            box.TextChanged += self._on_rename_option_changed
+        for rb in (self.rb_case_none, self.rb_case_upper,
+                   self.rb_case_lower, self.rb_case_title):
+            rb.Checked += self._on_rename_option_changed
+        self.chk_remove_spaces.Checked += self._on_rename_option_changed
+        self.chk_remove_spaces.Unchecked += self._on_rename_option_changed
+        self.btn_rename.Click += self.on_rename
+
+        return _card(sp, margin=(0, 0, 0, 10))
 
     def _make_card_folder(self):
         sp = StackPanel()
@@ -1039,6 +1165,19 @@ class PurgeFamiliesWindow(Window):
             "  Delete backup files  Remove *.0001.rfa / *.0001.rvt copies.\n"
             "  Export Excel log     Save the result table in the folder.\n"
             "\n"
+            "RENAME FILES\n"
+            "  A loadable family is named by its file, so renaming the .rfa\n"
+            "  renames the family - nothing has to be opened, which is why\n"
+            "  this runs instantly even on hundreds of files.\n"
+            "  Find/Replace, Prefix, Suffix, Case and Remove spaces all\n"
+            "  combine in one pass. The list previews every old -> new name\n"
+            "  before you commit, and Rename Files asks again first.\n"
+            "  Skipped files say why: two files resolving to the same name,\n"
+            "  a name already taken, or characters Windows will not accept.\n"
+            "  Renaming is independent of purging - run either, or both.\n"
+            "  Families already loaded into a project keep their old name\n"
+            "  until they are reloaded.\n"
+            "\n"
             "NOTE  Files are overwritten in place. Back up first if needed.\n"
             "\n"
             + FOOTER_TEXT,
@@ -1080,15 +1219,6 @@ class PurgeFamiliesWindow(Window):
                     self.family_files.append(fp)
 
         self.family_files.sort()
-        self.list_files.Items.Clear()
-
-        for fp in self.family_files:
-            size_kb = os.path.getsize(fp) // 1024
-            rel = os.path.relpath(fp, folder)
-            item = ListBoxItem()
-            item.Content = "  [{:>7} KB]  {}".format(size_kb, rel)
-            item.Padding = Thickness(2, 1, 2, 1)
-            self.list_files.Items.Add(item)
 
         count = len(self.family_files)
         self.lbl_count.Text = str(count)
@@ -1096,10 +1226,165 @@ class PurgeFamiliesWindow(Window):
         self.summary_border.Visibility = Visibility.Collapsed
 
         if count == 0:
+            self.list_files.Items.Clear()
             self.lbl_status.Text = "No .rfa files found in this folder."
         else:
+            self._refresh_rename_preview()
             self.lbl_status.Text = (
                 "Found {} .rfa file(s). Click 'Start Purge' to continue.".format(count))
+
+    # -- file list rendering ------------------------------------------------
+    def _relative(self, path):
+        try:
+            return os.path.relpath(path, self.txt_folder.Text)
+        except Exception:
+            return os.path.basename(path)
+
+    def _show_file_list(self):
+        """The plain scan listing - size and path, no rename applied."""
+        self.list_files.Items.Clear()
+        for fp in self.family_files:
+            try:
+                size_kb = os.path.getsize(fp) // 1024
+            except Exception:
+                size_kb = 0
+            item = ListBoxItem()
+            item.Content = "  [{:>7} KB]  {}".format(size_kb, self._relative(fp))
+            item.Padding = Thickness(2, 1, 2, 1)
+            self.list_files.Items.Add(item)
+
+    def _add_plan_row(self, entry, done=False):
+        item = ListBoxItem()
+        item.Padding = Thickness(2, 1, 2, 1)
+        where = os.path.dirname(self._relative(entry["path"]))
+        where = (where + os.sep) if where and where != "." else ""
+
+        if entry["status"] in ("rename", "renamed"):
+            item.Content = u"  {}  {}{}  ->  {}".format(
+                u"✔" if done else u"→", where, entry["old"], entry["new"])
+            item.Foreground = SolidColorBrush(CLR_APPLY_TEXT)
+        elif entry["status"] == "unchanged":
+            item.Content = u"     {}{}  (no change)".format(where, entry["old"])
+            item.Foreground = SolidColorBrush(CLR_MUTED)
+        else:
+            item.Content = u"  ✘  {}{}  skipped: {}".format(
+                where, entry["old"], entry["reason"])
+            item.Foreground = SolidColorBrush(CLR_WARN_TEXT)
+
+        self.list_files.Items.Add(item)
+
+    # -- rename -------------------------------------------------------------
+    def _rename_options(self):
+        if self.rb_case_upper.IsChecked:
+            mode = "upper"
+        elif self.rb_case_lower.IsChecked:
+            mode = "lower"
+        elif self.rb_case_title.IsChecked:
+            mode = "title"
+        else:
+            mode = "none"
+
+        return {
+            "find": self.txt_find.Text or "",
+            "replace": self.txt_replace.Text or "",
+            "prefix": self.txt_prefix.Text or "",
+            "suffix": self.txt_suffix.Text or "",
+            "case_mode": mode,
+            "keep_upper": _read_int(self.txt_keep, 0, 0, 200),
+            "remove_spaces": bool(self.chk_remove_spaces.IsChecked),
+        }
+
+    def _has_rename_options(self, options=None):
+        o = options or self._rename_options()
+        return bool(o["find"] or o["prefix"] or o["suffix"]
+                    or o["case_mode"] != "none" or o["keep_upper"]
+                    or o["remove_spaces"])
+
+    def _on_rename_option_changed(self, sender, e):
+        try:
+            self._refresh_rename_preview()
+        except Exception:
+            pass
+
+    def _refresh_rename_preview(self):
+        """Show what the current options would do. Nothing touches disk here."""
+        if not self.family_files:
+            return
+
+        options = self._rename_options()
+        if not self._has_rename_options(options):
+            self._show_file_list()
+            self.lbl_rename_status.Text = "Set an option to preview the new names."
+            return
+
+        plan = plan_renames(self.family_files, **options)
+        self.list_files.Items.Clear()
+        for entry in plan:
+            self._add_plan_row(entry)
+
+        will = sum(1 for entry in plan if entry["status"] == "rename")
+        skipped = sum(1 for entry in plan if entry["status"] == "skip")
+        self.lbl_rename_status.Text = "{} to rename, {} skipped.".format(will, skipped)
+
+    def on_rename(self, sender, e):
+        if not self.family_files:
+            MessageBox.Show("Scan a folder first.", "Notice",
+                            MessageBoxButton.OK, MessageBoxImage.Warning)
+            return
+
+        options = self._rename_options()
+        if not self._has_rename_options(options):
+            MessageBox.Show("Set at least one rename option first.", "Notice",
+                            MessageBoxButton.OK, MessageBoxImage.Warning)
+            return
+
+        plan = plan_renames(self.family_files, **options)
+        will = [entry for entry in plan if entry["status"] == "rename"]
+        if not will:
+            MessageBox.Show("These options change nothing that can be renamed.\n\n"
+                            "Check the list for the reason each file was skipped.",
+                            "Notice", MessageBoxButton.OK, MessageBoxImage.Information)
+            return
+
+        sample = "\n".join(u"  {}  ->  {}".format(entry["old"], entry["new"])
+                           for entry in will[:8])
+        if len(will) > 8:
+            sample += u"\n  ... and {} more".format(len(will) - 8)
+
+        confirm = MessageBox.Show(
+            u"Rename {} file(s) on disk?\n\n{}\n\n"
+            u"This renames the .rfa files themselves and cannot be undone.".format(
+                len(will), sample),
+            "Confirm Rename", MessageBoxButton.YesNo, MessageBoxImage.Warning)
+        if confirm != MessageBoxResult.Yes:
+            return
+
+        renamed, failures = apply_renames(plan)
+
+        # The scanned paths have moved; keep the list pointing at real files.
+        self.family_files = sorted(entry["path"] for entry in plan)
+
+        self.list_files.Items.Clear()
+        for entry in plan:
+            self._add_plan_row(entry, done=True)
+
+        skipped = sum(1 for entry in plan if entry["status"] == "skip")
+        self.lbl_rename_status.Text = (
+            "Renamed {}, skipped {}. The options are still set - clear them "
+            "before running again.".format(renamed, skipped))
+        self.lbl_status.Text = "Renamed {} file(s).".format(renamed)
+
+        message = ["RENAME COMPLETE", "",
+                   "Renamed : {}".format(renamed),
+                   "Skipped : {}".format(skipped)]
+        if failures:
+            message += ["", "Could not be renamed:"]
+            message += ["  {} - {}".format(name, reason)
+                        for name, reason in failures[:10]]
+            if len(failures) > 10:
+                message.append("  ... and {} more".format(len(failures) - 10))
+        MessageBox.Show("\n".join(message), "Result",
+                        MessageBoxButton.OK, MessageBoxImage.Information)
 
     def on_run(self, sender, e):
         if not self.family_files:
@@ -1119,6 +1404,10 @@ class PurgeFamiliesWindow(Window):
         self.btn_export.IsEnabled = False
         self.summary_border.Visibility = Visibility.Collapsed
         self.results = []
+
+        # Rebuild the listing so its rows line up with family_files - a rename
+        # preview or a completed rename leaves it in a different order.
+        self._show_file_list()
 
         max_passes = _read_int(self.txt_passes, 10, 1, 50)
         max_cycles = _read_int(self.txt_cycles, 3, 1, 10)
