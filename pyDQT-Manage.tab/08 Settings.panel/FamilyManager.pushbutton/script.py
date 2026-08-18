@@ -1195,7 +1195,7 @@ MAIN_XAML = """
 # NEW: Enhanced Rename Dialog with Prefix/Suffix
 RENAME_XAML = """
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-        Title="Rename" Height="500" Width="500" WindowStartupLocation="CenterOwner" Background="#FEF8E7" ResizeMode="NoResize">
+        Title="Rename" Height="580" Width="560" WindowStartupLocation="CenterOwner" Background="#FEF8E7" ResizeMode="NoResize">
     <Grid Margin="15">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -1252,10 +1252,24 @@ RENAME_XAML = """
             <!-- Option 4: Case Conversion -->
             <TextBlock Text="Option 4: Case Conversion:" Margin="0,0,0,4" FontWeight="SemiBold"/>
             <StackPanel Orientation="Horizontal" Margin="0,0,0,5">
-                <RadioButton Name="rbCaseNone" Content="None" IsChecked="True" Margin="0,0,15,0"/>
-                <RadioButton Name="rbCaseUpper" Content="UPPERCASE" Margin="0,0,15,0"/>
-                <RadioButton Name="rbCaseLower" Content="lowercase" Margin="0,0,15,0"/>
+                <RadioButton Name="rbCaseNone" Content="None" IsChecked="True" Margin="0,0,12,0"/>
+                <RadioButton Name="rbCaseUpper" Content="UPPERCASE" Margin="0,0,12,0"/>
+                <RadioButton Name="rbCaseLower" Content="lowercase" Margin="0,0,12,0"/>
                 <RadioButton Name="rbCaseTitle" Content="Title Case"/>
+            </StackPanel>
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                <TextBlock Text="Keep first" VerticalAlignment="Center" FontSize="10" Foreground="#666"/>
+                <TextBox Name="txtCaseKeep" Text="0" Width="36" Margin="6,0,6,0" Padding="2"
+                         TextAlignment="Center" VerticalContentAlignment="Center"
+                         ToolTip="Leading characters forced to UPPERCASE and left out of the conversion. e.g. 5 turns Lb_wh_Ano into LB_WH_Ano"/>
+                <TextBlock Text="characters UPPERCASE (0 = off)" VerticalAlignment="Center" FontSize="10" Foreground="#666"/>
+            </StackPanel>
+
+            <!-- Option 5: Cleanup -->
+            <TextBlock Text="Option 5: Cleanup:" Margin="0,0,0,4" FontWeight="SemiBold"/>
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,5">
+                <CheckBox Name="chkRemoveSpaces" Content="Remove spaces" VerticalAlignment="Center"
+                          ToolTip="Delete every space from the name. Runs after the case conversion, so Title Case + Remove spaces turns CALLOUT HEAD into CalloutHead."/>
             </StackPanel>
         </StackPanel>
         
@@ -1372,6 +1386,54 @@ COMPARE_XAML = """
 # ============================================================================
 # DIALOG CLASSES
 # ============================================================================
+def title_case_name(name):
+    """Capitalise each word, treating underscore, hyphen and space as
+    separators and leaving the separators exactly where they were.
+
+    The previous version title-cased the underscore-separated parts and then
+    searched them back into the original string, so any word separated by a
+    space was missed - LBM_CALLOUT HEAD came back as Lbm_Callout head."""
+    return re.sub(r'[^_\-\s]+',
+                  lambda m: m.group(0)[:1].upper() + m.group(0)[1:].lower(),
+                  name or "")
+
+
+def convert_case(name, mode, keep_upper=0):
+    """Apply a case conversion, optionally forcing the first keep_upper
+    characters to UPPERCASE and leaving them out of the conversion, so a
+    project prefix survives it: keep_upper=5 turns Lb_wh_Ano into LB_WH_Ano.
+
+    Every conversion preserves length, so the kept head splices back by index.
+    keep_upper works on its own too - with no conversion selected it just
+    uppercases the prefix."""
+    name = name or ""
+
+    if mode == "upper":
+        converted = name.upper()
+    elif mode == "lower":
+        converted = name.lower()
+    elif mode == "title":
+        converted = title_case_name(name)
+    else:
+        converted = name
+
+    try:
+        keep = int(keep_upper or 0)
+    except (TypeError, ValueError):
+        keep = 0
+    keep = max(0, min(keep, len(name)))
+    if keep:
+        converted = name[:keep].upper() + converted[keep:]
+    return converted
+
+
+def strip_spaces(name):
+    """Remove every space, including the non-breaking space that copy-paste
+    from Excel or a PDF leaves behind - it is invisible in the grid but makes
+    two names that look identical compare as different."""
+    return re.sub(u'[\\s ]+', '', name or "")
+
+
 class RenameDialog(WPFWindow):
     """Enhanced Rename Dialog with New Name, Prefix/Suffix, Find/Replace, and Case Conversion"""
     def __init__(self, items, is_types=False, rename_family=False):
@@ -1399,7 +1461,10 @@ class RenameDialog(WPFWindow):
         self.rbCaseUpper.Checked += self.update_preview
         self.rbCaseLower.Checked += self.update_preview
         self.rbCaseTitle.Checked += self.update_preview
-        
+        self.txtCaseKeep.TextChanged += self.update_preview
+        self.chkRemoveSpaces.Checked += self.update_preview
+        self.chkRemoveSpaces.Unchecked += self.update_preview
+
         self.btnCancel.Click += self.on_cancel
         self.btnApply.Click += self.on_apply
         
@@ -1448,37 +1513,40 @@ class RenameDialog(WPFWindow):
         suffix = (self.txtSuffix.Text or "")
         find_text = self.txtFind.Text or ""
         has_case = not self.rbCaseNone.IsChecked
-        
-        if not new_name and not prefix and not suffix and not find_text and not has_case:
-            forms.alert("Enter at least one rename option:\n- New name\n- Prefix/Suffix\n- Find/Replace\n- Case conversion", title="Info")
+        keeps_upper = self._keep_upper() > 0
+        drops_spaces = bool(self.chkRemoveSpaces.IsChecked)
+
+        if not (new_name or prefix or suffix or find_text or has_case
+                or keeps_upper or drops_spaces):
+            forms.alert("Enter at least one rename option:\n- New name\n"
+                        "- Prefix/Suffix\n- Find/Replace\n- Case conversion\n"
+                        "- Keep first N characters UPPERCASE\n- Remove spaces",
+                        title="Info")
             return
         
         self.result = True
         self.Close()
     
-    def apply_case(self, name):
-        """Apply case conversion to name"""
+    def _case_mode(self):
         if self.rbCaseUpper.IsChecked:
-            return name.upper()
-        elif self.rbCaseLower.IsChecked:
-            return name.lower()
-        elif self.rbCaseTitle.IsChecked:
-            # Title Case: capitalize first letter of each word
-            # Handle underscore and hyphen as word separators
-            result = []
-            for part in name.replace('-', '_').split('_'):
-                if part:
-                    result.append(part[0].upper() + part[1:].lower() if len(part) > 1 else part.upper())
-            # Reconstruct with original separators
-            final = name
-            idx = 0
-            for part in result:
-                start = final.lower().find(part.lower(), idx)
-                if start >= 0:
-                    final = final[:start] + part + final[start+len(part):]
-                    idx = start + len(part)
-            return final
-        return name
+            return "upper"
+        if self.rbCaseLower.IsChecked:
+            return "lower"
+        if self.rbCaseTitle.IsChecked:
+            return "title"
+        return "none"
+
+    def _keep_upper(self):
+        """How many leading characters stay UPPERCASE. Anything that is not a
+        positive whole number means the option is off, so a half-typed value
+        cannot mangle the preview."""
+        try:
+            return max(0, int((self.txtCaseKeep.Text or "0").strip()))
+        except (TypeError, ValueError):
+            return 0
+
+    def apply_case(self, name):
+        return convert_case(name, self._case_mode(), self._keep_upper())
     
     def get_new_name(self, name, fam_name="", idx=0):
         """Calculate new name based on options (priority: New Name > Prefix/Suffix > Find/Replace > Case)"""
@@ -1504,7 +1572,12 @@ class RenameDialog(WPFWindow):
         
         # Option 4: Case conversion (applied last, can combine with other options)
         result = self.apply_case(result)
-        
+
+        # Option 5: Cleanup - after the case conversion, so Title Case plus
+        # Remove spaces gives CalloutHead rather than Callouthead.
+        if self.chkRemoveSpaces.IsChecked:
+            result = strip_spaces(result)
+
         return result
 
 
