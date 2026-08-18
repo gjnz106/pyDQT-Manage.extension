@@ -1199,7 +1199,7 @@ MAIN_XAML = """
 # NEW: Enhanced Rename Dialog with Prefix/Suffix
 RENAME_XAML = """
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-        Title="Rename" Height="580" Width="560" WindowStartupLocation="CenterOwner" Background="#FEF8E7" ResizeMode="NoResize">
+        Title="Rename" Height="580" Width="620" WindowStartupLocation="CenterOwner" Background="#FEF8E7" ResizeMode="NoResize">
     <Grid Margin="15">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -1259,7 +1259,8 @@ RENAME_XAML = """
                 <RadioButton Name="rbCaseNone" Content="None" IsChecked="True" Margin="0,0,12,0"/>
                 <RadioButton Name="rbCaseUpper" Content="UPPERCASE" Margin="0,0,12,0"/>
                 <RadioButton Name="rbCaseLower" Content="lowercase" Margin="0,0,12,0"/>
-                <RadioButton Name="rbCaseTitle" Content="Title Case"/>
+                <RadioButton Name="rbCaseTitle" Content="Title Case" Margin="0,0,12,0"/>
+                <RadioButton Name="rbCaseSentence" Content="Sentence case"/>
             </StackPanel>
             <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
                 <TextBlock Text="Keep first" VerticalAlignment="Center" FontSize="10" Foreground="#666"/>
@@ -1417,6 +1418,7 @@ class RenameDialog(WPFWindow):
         self.rbCaseUpper.Checked += self.update_preview
         self.rbCaseLower.Checked += self.update_preview
         self.rbCaseTitle.Checked += self.update_preview
+        self.rbCaseSentence.Checked += self.update_preview
         self.txtCaseKeep.TextChanged += self.update_preview
         self.chkRemoveSpaces.Checked += self.update_preview
         self.chkRemoveSpaces.Unchecked += self.update_preview
@@ -1490,6 +1492,8 @@ class RenameDialog(WPFWindow):
             return "lower"
         if self.rbCaseTitle.IsChecked:
             return "title"
+        if self.rbCaseSentence.IsChecked:
+            return "sentence"
         return "none"
 
     def _keep_upper(self):
