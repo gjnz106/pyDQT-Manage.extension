@@ -1,0 +1,23 @@
+title: "Wall Layer\nManager"
+author: Dang Quoc Truong (DQT)
+name: WallLayerManager
+tooltip: >
+  List and batch-edit the layers of Basic wall types
+
+  Shows every layer of every Basic wall type in one table:
+  function, material, thickness, whether it sits inside the core,
+  and which layer carries the structural material.
+
+  Batch change:
+  - Tick the layers you want (double-click a row, or Tick all visible)
+  - Pick the new Function and Apply
+  - e.g. turn Structure [1] into Substrate [2] across many types at once
+
+  Notes:
+  - This edits wall TYPES, so every wall using them changes too
+  - Curtain and Stacked walls are skipped - only Basic walls have an
+    editable compound structure
+  - Revit's own validator decides what is allowed; a type it refuses is
+    left untouched and reported with the reason
+
+  Copyright (c) 2026 Dang Quoc Truong (DQT)
