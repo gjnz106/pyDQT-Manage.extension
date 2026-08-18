@@ -23,6 +23,10 @@ from System.Collections.Generic import List
 import System
 import re, datetime, codecs, os, json
 
+# Shared with Purge Families' folder rename - one source for how a new name is
+# built, so the two tools cannot drift apart.
+from dqt_name_ops import title_case_name, convert_case, strip_spaces
+
 # ============================================================================
 # REVIT VERSION COMPATIBILITY
 # ============================================================================
@@ -1386,54 +1390,6 @@ COMPARE_XAML = """
 # ============================================================================
 # DIALOG CLASSES
 # ============================================================================
-def title_case_name(name):
-    """Capitalise each word, treating underscore, hyphen and space as
-    separators and leaving the separators exactly where they were.
-
-    The previous version title-cased the underscore-separated parts and then
-    searched them back into the original string, so any word separated by a
-    space was missed - LBM_CALLOUT HEAD came back as Lbm_Callout head."""
-    return re.sub(r'[^_\-\s]+',
-                  lambda m: m.group(0)[:1].upper() + m.group(0)[1:].lower(),
-                  name or "")
-
-
-def convert_case(name, mode, keep_upper=0):
-    """Apply a case conversion, optionally forcing the first keep_upper
-    characters to UPPERCASE and leaving them out of the conversion, so a
-    project prefix survives it: keep_upper=5 turns Lb_wh_Ano into LB_WH_Ano.
-
-    Every conversion preserves length, so the kept head splices back by index.
-    keep_upper works on its own too - with no conversion selected it just
-    uppercases the prefix."""
-    name = name or ""
-
-    if mode == "upper":
-        converted = name.upper()
-    elif mode == "lower":
-        converted = name.lower()
-    elif mode == "title":
-        converted = title_case_name(name)
-    else:
-        converted = name
-
-    try:
-        keep = int(keep_upper or 0)
-    except (TypeError, ValueError):
-        keep = 0
-    keep = max(0, min(keep, len(name)))
-    if keep:
-        converted = name[:keep].upper() + converted[keep:]
-    return converted
-
-
-def strip_spaces(name):
-    """Remove every space, including the non-breaking space that copy-paste
-    from Excel or a PDF leaves behind - it is invisible in the grid but makes
-    two names that look identical compare as different."""
-    return re.sub(u'[\\s ]+', '', name or "")
-
-
 class RenameDialog(WPFWindow):
     """Enhanced Rename Dialog with New Name, Prefix/Suffix, Find/Replace, and Case Conversion"""
     def __init__(self, items, is_types=False, rename_family=False):
