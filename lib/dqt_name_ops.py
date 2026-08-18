@@ -13,7 +13,7 @@ All rights reserved.
 import os
 import re
 
-CASE_MODES = ["none", "upper", "lower", "title"]
+CASE_MODES = ["none", "upper", "lower", "title", "sentence"]
 
 # Characters Windows refuses in a file name.
 INVALID_FILENAME_CHARS = '\\/:*?"<>|'
@@ -37,6 +37,22 @@ def title_case_name(name):
                   name or "")
 
 
+def sentence_case_name(name):
+    """Capitalise the first letter of the whole name and lower the rest.
+
+    Unlike Title Case, which capitalises every word, this produces exactly one
+    capital: LBM_CALLOUT HEAD becomes Lbm_callout head. The capital goes on the
+    first *letter*, not on character zero, so a name starting with an
+    underscore or a digit is still capitalised where a reader expects it -
+    _lb_wh becomes _Lb_wh."""
+    lowered = (name or "").lower()
+    match = re.search(r'[^\W\d_]', lowered, re.UNICODE)
+    if not match:
+        return lowered
+    i = match.start()
+    return lowered[:i] + lowered[i].upper() + lowered[i + 1:]
+
+
 def convert_case(name, mode, keep_upper=0):
     """Apply a case conversion, optionally forcing the first keep_upper
     characters to UPPERCASE and leaving them out of the conversion, so a
@@ -53,6 +69,8 @@ def convert_case(name, mode, keep_upper=0):
         converted = name.lower()
     elif mode == "title":
         converted = title_case_name(name)
+    elif mode == "sentence":
+        converted = sentence_case_name(name)
     else:
         converted = name
 
