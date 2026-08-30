@@ -19,6 +19,29 @@ from Autodesk.Revit.DB import (
 )
 from Autodesk.Revit import DB
 
+# Import compatibility helper
+try:
+    from revit_utils import _eid_int
+except:
+    # Fallback if revit_utils not available
+    def _eid_int(element_id):
+        """Get ElementId integer value - works for Revit 2024-2027"""
+        if element_id is None:
+            return -1
+        try:
+            # Revit 2026+ uses .Value
+            if hasattr(element_id, 'Value'):
+                return element_id.Value
+        except:
+            pass
+        try:
+            # Revit 2024/2025 uses .IntegerValue
+            if hasattr(element_id, 'IntegerValue'):
+                return element_id.IntegerValue
+        except:
+            pass
+        return -1
+
 try:
     from purge_scanner import BasePurgeScanner
 except:
@@ -109,7 +132,7 @@ class UnusedSchedulesScanner(BasePurgeScanner):
                             view = self.doc.GetElement(view_id)
                             # Check if view is a schedule
                             if isinstance(view, ViewSchedule):
-                                schedules_on_sheets.add(view_id.IntegerValue)
+                                schedules_on_sheets.add(_eid_int(view_id))
                 except:
                     continue
             
@@ -137,7 +160,7 @@ class UnusedSchedulesScanner(BasePurgeScanner):
                         pass
                     
                     # If not on any sheet, it's unused
-                    if schedule.Id.IntegerValue not in schedules_on_sheets:
+                    if _eid_int(schedule.Id) not in schedules_on_sheets:
                         schedule_type = "Schedule"
                         try:
                             # Try to get schedule type
@@ -202,7 +225,7 @@ class LegendViewsScanner(BasePurgeScanner):
                         viewport = self.doc.GetElement(vp_id)
                         if viewport:
                             view_id = viewport.ViewId
-                            views_on_sheets.add(view_id.IntegerValue)
+                            views_on_sheets.add(_eid_int(view_id))
                 except:
                     continue
             
@@ -218,7 +241,7 @@ class LegendViewsScanner(BasePurgeScanner):
                         continue
                     
                     # If not on any sheet, it's unused
-                    if legend.Id.IntegerValue not in views_on_sheets:
+                    if _eid_int(legend.Id) not in views_on_sheets:
                         item = self.create_item_dict(legend, {
                             'type': 'Legend View',
                             'status': 'Not on any sheet'

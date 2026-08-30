@@ -17,6 +17,29 @@ from Autodesk.Revit.DB import (
 )
 from Autodesk.Revit import DB
 
+# Import compatibility helper
+try:
+    from revit_utils import _eid_int
+except:
+    # Fallback if revit_utils not available
+    def _eid_int(element_id):
+        """Get ElementId integer value - works for Revit 2024-2027"""
+        if element_id is None:
+            return -1
+        try:
+            # Revit 2026+ uses .Value
+            if hasattr(element_id, 'Value'):
+                return element_id.Value
+        except:
+            pass
+        try:
+            # Revit 2024/2025 uses .IntegerValue
+            if hasattr(element_id, 'IntegerValue'):
+                return element_id.IntegerValue
+        except:
+            pass
+        return -1
+
 try:
     from purge_scanner import BasePurgeScanner
 except:
@@ -102,8 +125,8 @@ class WallTypeScanner(BasePurgeScanner):
                     
                     wall_type_id = wall.GetTypeId()
                     if wall_type_id and wall_type_id != ElementId.InvalidElementId:
-                        usage_dict[wall_type_id.IntegerValue] = \
-                            usage_dict.get(wall_type_id.IntegerValue, 0) + 1
+                        usage_dict[_eid_int(wall_type_id)] = \
+                            usage_dict.get(_eid_int(wall_type_id), 0) + 1
                 except:
                     continue
             
@@ -115,7 +138,7 @@ class WallTypeScanner(BasePurgeScanner):
                         continue
                     
                     # Get type ID
-                    type_id = wall_type.Id.IntegerValue
+                    type_id = _eid_int(wall_type.Id)
                     
                     # Check if used
                     if type_id in usage_dict:
@@ -152,7 +175,7 @@ class WallTypeScanner(BasePurgeScanner):
                 return True
             
             # Check ID range (system types typically have ID < 100)
-            if wall_type.Id.IntegerValue < 100:
+            if _eid_int(wall_type.Id) < 100:
                 return True
             
             # Check name pattern
@@ -250,8 +273,8 @@ class FloorTypeScanner(BasePurgeScanner):
                     
                     floor_type_id = floor.GetTypeId()
                     if floor_type_id and floor_type_id != ElementId.InvalidElementId:
-                        usage_dict[floor_type_id.IntegerValue] = \
-                            usage_dict.get(floor_type_id.IntegerValue, 0) + 1
+                        usage_dict[_eid_int(floor_type_id)] = \
+                            usage_dict.get(_eid_int(floor_type_id), 0) + 1
                 except:
                     continue
             
@@ -263,7 +286,7 @@ class FloorTypeScanner(BasePurgeScanner):
                         continue
                     
                     # Get type ID
-                    type_id = floor_type.Id.IntegerValue
+                    type_id = _eid_int(floor_type.Id)
                     
                     # Check if used
                     if type_id in usage_dict:
@@ -301,7 +324,7 @@ class FloorTypeScanner(BasePurgeScanner):
                 return True
             
             # Check ID range
-            if floor_type.Id.IntegerValue < 100:
+            if _eid_int(floor_type.Id) < 100:
                 return True
             
             # Check name pattern
@@ -396,8 +419,8 @@ class RoofTypeScanner(BasePurgeScanner):
                     
                     roof_type_id = roof.GetTypeId()
                     if roof_type_id and roof_type_id != ElementId.InvalidElementId:
-                        usage_dict[roof_type_id.IntegerValue] = \
-                            usage_dict.get(roof_type_id.IntegerValue, 0) + 1
+                        usage_dict[_eid_int(roof_type_id)] = \
+                            usage_dict.get(_eid_int(roof_type_id), 0) + 1
                 except:
                     continue
             
@@ -409,7 +432,7 @@ class RoofTypeScanner(BasePurgeScanner):
                         continue
                     
                     # Get type ID
-                    type_id = roof_type.Id.IntegerValue
+                    type_id = _eid_int(roof_type.Id)
                     
                     # Check if used
                     if type_id in usage_dict:
@@ -447,7 +470,7 @@ class RoofTypeScanner(BasePurgeScanner):
                 return True
             
             # Check ID range
-            if roof_type.Id.IntegerValue < 100:
+            if _eid_int(roof_type.Id) < 100:
                 return True
             
             # Check name pattern

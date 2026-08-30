@@ -10,6 +10,29 @@ __author__ = "Dang Quoc Truong (DQT)"
 
 from Autodesk.Revit.DB import FilteredElementCollector
 
+# Import compatibility helper
+try:
+    from revit_utils import _eid_int
+except:
+    # Fallback if revit_utils not available
+    def _eid_int(element_id):
+        """Get ElementId integer value - works for Revit 2024-2027"""
+        if element_id is None:
+            return -1
+        try:
+            # Revit 2026+ uses .Value
+            if hasattr(element_id, 'Value'):
+                return element_id.Value
+        except:
+            pass
+        try:
+            # Revit 2024/2025 uses .IntegerValue
+            if hasattr(element_id, 'IntegerValue'):
+                return element_id.IntegerValue
+        except:
+            pass
+        return -1
+
 
 class BaseAdvancedScanner(object):
     """Base class for all advanced purge scanners"""
@@ -100,10 +123,10 @@ class BaseAdvancedScanner(object):
                         try:
                             elem_type = self.doc.GetElement(element.GetTypeId())
                             if elem_type and hasattr(elem_type, 'Name'):
-                                return "{} : {}".format(elem_type.Name, element.Id.IntegerValue)
+                                return "{} : {}".format(elem_type.Name, _eid_int(element.Id))
                         except:
                             pass
-                        return "{} : {}".format(cat_name, element.Id.IntegerValue)
+                        return "{} : {}".format(cat_name, _eid_int(element.Id))
                 
                 return name
             
@@ -111,19 +134,19 @@ class BaseAdvancedScanner(object):
             try:
                 elem_type = self.doc.GetElement(element.GetTypeId())
                 if elem_type and hasattr(elem_type, 'Name') and elem_type.Name:
-                    return "{} : {}".format(elem_type.Name, element.Id.IntegerValue)
+                    return "{} : {}".format(elem_type.Name, _eid_int(element.Id))
             except:
                 pass
             
             # Last resort - use category + ID
             if hasattr(element, 'Category') and element.Category:
-                return "{} : {}".format(element.Category.Name, element.Id.IntegerValue)
+                return "{} : {}".format(element.Category.Name, _eid_int(element.Id))
             
-            return "Unnamed : {}".format(element.Id.IntegerValue)
+            return "Unnamed : {}".format(_eid_int(element.Id))
             
         except Exception as e:
             try:
-                return "Element : {}".format(element.Id.IntegerValue)
+                return "Element : {}".format(_eid_int(element.Id))
             except:
                 return "Unnamed"
     
@@ -187,7 +210,7 @@ class BaseAdvancedScanner(object):
                 try:
                     if hasattr(element, 'Category') and element.Category:
                         # System families typically have negative category IDs
-                        if element.Category.Id.IntegerValue < 0:
+                        if _eid_int(element.Category.Id) < 0:
                             is_system = True
                 except:
                     pass
