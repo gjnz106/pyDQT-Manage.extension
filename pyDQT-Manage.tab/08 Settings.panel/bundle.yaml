@@ -9,3 +9,5 @@ layout:
   - WallLayerManager
   - Hatching
   - FamilyFont
+  - ViewTemplate
+  - LegendManager
