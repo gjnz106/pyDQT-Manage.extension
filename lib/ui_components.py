@@ -9,7 +9,7 @@ All rights reserved.
 
 import System
 from System.Windows import Thickness
-from System.Windows.Controls import Button, Label, Border, StackPanel
+from System.Windows.Controls import Button, Label, Border, StackPanel, TextBlock
 from System.Windows.Media import SolidColorBrush, Brushes
 from System.Windows import HorizontalAlignment, VerticalAlignment, FontWeights
 
@@ -128,12 +128,19 @@ def create_header(title, subtitle, show_copyright=True, help_handler=None):
 def create_stat_card(label, color):
     """Create a single bordered stat card (white box, colored label + value)
 
+    Uses TextBlock rather than Label for the text - Label pulls in WPF's
+    default Content template and control padding, which is what made the
+    numbers here render inconsistently (fine for multi-digit counts, wrong
+    for a plain "0"). TextBlock has no implicit template/padding, matching
+    how every other tool in the suite (Family Manager, Dimension Manager,
+    Wall Layer Manager, ...) already renders these card numbers.
+
     Args:
         label: Card label text (e.g. "TOTAL")
         color: System.Windows.Media.Color for the label/value text
 
     Returns:
-        tuple: (Border, Label) - the card and its value label to update later
+        tuple: (Border, TextBlock) - the card and its value text to update later
     """
     border = Border()
     border.Background = Brushes.White
@@ -144,23 +151,21 @@ def create_stat_card(label, color):
 
     stack = StackPanel()
 
-    label_text = Label()
-    label_text.Content = label
+    label_text = TextBlock()
+    label_text.Text = label
     label_text.FontSize = 9
-    label_text.Padding = Thickness(0)
     label_text.Foreground = SolidColorBrush(color)
     stack.Children.Add(label_text)
 
-    value_label = Label()
-    value_label.Content = "0"
-    value_label.FontSize = 18
-    value_label.Padding = Thickness(0)
-    value_label.FontWeight = FontWeights.Bold
-    value_label.Foreground = SolidColorBrush(color)
-    stack.Children.Add(value_label)
+    value_text = TextBlock()
+    value_text.Text = "0"
+    value_text.FontSize = 18
+    value_text.FontWeight = FontWeights.Bold
+    value_text.Foreground = SolidColorBrush(color)
+    stack.Children.Add(value_text)
 
     border.Child = stack
-    return border, value_label
+    return border, value_text
 
 
 def create_stats_row(cards):

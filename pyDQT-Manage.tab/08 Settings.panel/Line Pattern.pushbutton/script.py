@@ -738,7 +738,7 @@ class LinePatternManagerWindow(Window):
         main_grid.Margin = Thickness(0)
         
         main_grid.RowDefinitions.Add(RowDefinition(Height=GridLength(70)))
-        main_grid.RowDefinitions.Add(RowDefinition(Height=GridLength(100)))
+        main_grid.RowDefinitions.Add(RowDefinition(Height=GridLength(1, GridUnitType.Auto)))
         main_grid.RowDefinitions.Add(RowDefinition(Height=GridLength(1, GridUnitType.Star)))
         main_grid.RowDefinitions.Add(RowDefinition(Height=GridLength(60)))
 
