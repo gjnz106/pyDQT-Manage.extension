@@ -411,12 +411,16 @@ MAIN_XAML = """
 
     <Border Grid.Row="0" Background="#F0CC88" BorderBrush="#D4B87A"
             BorderThickness="0,0,0,2" Padding="16,10">
-      <StackPanel>
-        <TextBlock Text="Wall Layer Manager v1.0" FontSize="17"
-                   FontWeight="Bold" Foreground="#5D4E37"/>
-        <TextBlock Text="by Dang Quoc Truong (DQT)" FontSize="10"
-                   Foreground="#666"/>
-      </StackPanel>
+      <Grid>
+        <StackPanel>
+          <TextBlock Text="Wall Layer Manager v1.0" FontSize="17"
+                     FontWeight="Bold" Foreground="#5D4E37"/>
+          <TextBlock Text="by Dang Quoc Truong (DQT)" FontSize="10"
+                     Foreground="#666"/>
+        </StackPanel>
+        <Button Name="btnHelp" Content="? Help" Padding="10,4" Background="White"
+                BorderBrush="#D4B87A" HorizontalAlignment="Right"/>
+      </Grid>
     </Border>
 
     <Grid Grid.Row="1" Margin="12,10,12,0">
@@ -566,6 +570,7 @@ class WallLayerManagerWindow(WPFWindow):
         self.btnExport.Click += self.on_export
         self.btnRefresh.Click += self.on_refresh
         self.btnClose.Click += lambda s, e: self.Close()
+        self.btnHelp.Click += self.on_help
 
         self.load_data()
 
@@ -644,6 +649,17 @@ class WallLayerManagerWindow(WPFWindow):
     def on_refresh(self, sender, args):
         self.load_data()
         self.txtStatus.Text = "Reloaded."
+
+    def on_help(self, sender, args):
+        forms.alert(
+            "Wall Layer Manager\n\n"
+            "- Search filters by wall type name; Function narrows to one layer function.\n"
+            "- Core layers only shows just the layers inside the core boundary.\n"
+            "- Double-click a row (or 'Tick all visible') to tick it, then pick a new "
+            "Function and click Apply to batch-change the ticked layers.\n"
+            "- This edits wall TYPES, so every wall using them changes too.\n\n"
+            "Dang Quoc Truong - DQT (c) 2026",
+            title="Wall Layer Manager")
 
     def on_apply(self, sender, args):
         rows = self.ticked_rows()

@@ -42,7 +42,8 @@ from Autodesk.Revit.DB import Transaction, FilteredElementCollector
 
 from config import Colors, Settings, ButtonConfig
 from ui_components import (create_button, create_header, create_footer,
-                               create_search_box, create_select_all_checkbox,
+                               create_stats_row, create_search_box,
+                               create_select_all_checkbox,
                                create_toolbar, show_info, show_warning,
                                show_error, ask_yes_no)
 from revit_utils import (get_element_name, set_element_name,
@@ -158,48 +159,80 @@ class BaseManagerWindow(Window):
     def create_ui(self):
         """Create the user interface"""
         main_grid = System.Windows.Controls.Grid()
-        
-        # Define rows
+
+        # Define rows: header / stat cards / toolbar / content / footer
         main_grid.RowDefinitions.Add(System.Windows.Controls.RowDefinition())
         main_grid.RowDefinitions.Add(System.Windows.Controls.RowDefinition())
         main_grid.RowDefinitions.Add(System.Windows.Controls.RowDefinition())
         main_grid.RowDefinitions.Add(System.Windows.Controls.RowDefinition())
-        
+        main_grid.RowDefinitions.Add(System.Windows.Controls.RowDefinition())
+
         main_grid.RowDefinitions[0].Height = System.Windows.GridLength(70)
         main_grid.RowDefinitions[1].Height = System.Windows.GridLength(50)
-        main_grid.RowDefinitions[2].Height = System.Windows.GridLength(1, System.Windows.GridUnitType.Star)
-        main_grid.RowDefinitions[3].Height = System.Windows.GridLength(60)
-        
+        main_grid.RowDefinitions[2].Height = System.Windows.GridLength(50)
+        main_grid.RowDefinitions[3].Height = System.Windows.GridLength(1, System.Windows.GridUnitType.Star)
+        main_grid.RowDefinitions[4].Height = System.Windows.GridLength(60)
+
         # Header
         header = self.create_header_section()
         System.Windows.Controls.Grid.SetRow(header, 0)
         main_grid.Children.Add(header)
-        
+
+        # Stat cards
+        stats_row = self.create_stats_section()
+        System.Windows.Controls.Grid.SetRow(stats_row, 1)
+        main_grid.Children.Add(stats_row)
+
         # Toolbar
         toolbar = self.create_toolbar_section()
-        System.Windows.Controls.Grid.SetRow(toolbar, 1)
+        System.Windows.Controls.Grid.SetRow(toolbar, 2)
         main_grid.Children.Add(toolbar)
-        
+
         # Content
         content = self.create_content_section()
-        System.Windows.Controls.Grid.SetRow(content, 2)
+        System.Windows.Controls.Grid.SetRow(content, 3)
         main_grid.Children.Add(content)
-        
+
         # Footer
         footer = self.create_footer_section()
-        System.Windows.Controls.Grid.SetRow(footer, 3)
+        System.Windows.Controls.Grid.SetRow(footer, 4)
         main_grid.Children.Add(footer)
-        
+
         self.Content = main_grid
-    
+
     def create_header_section(self):
         """Create header section"""
         return create_header(
             self.config.get('title', 'Manager'),
             self.config.get('subtitle', 'Manage elements'),
-            show_copyright=True
+            show_copyright=True,
+            help_handler=self.on_help_click
         )
-    
+
+    def create_stats_section(self):
+        """Create the Family Manager v2.0-style stat card row (Total/Selected)"""
+        cards_row, value_labels = create_stats_row([
+            ("TOTAL", Colors.BTN_RENAME),
+            ("SELECTED", Colors.BTN_DUPLICATE),
+        ])
+        self.total_label, self.selected_label = value_labels
+        return cards_row
+
+    def on_help_click(self, sender, e):
+        """Show a short usage tip for this tool. Override via config['help_text']."""
+        default_text = (
+            "{}\n\n{}\n\n"
+            "- Search filters the list by name.\n"
+            "- Tick rows (or Select All) to act on them.\n"
+            "- Rename / Duplicate / Delete apply to the ticked rows.\n"
+            "- Refresh reloads from the current document."
+        ).format(
+            self.config.get('title', 'Manager'),
+            self.config.get('subtitle', 'Manage elements')
+        )
+        help_text = self.config.get('help_text', default_text)
+        show_info(help_text, title="Help")
+
     def create_toolbar_section(self):
         """Create toolbar section with search and buttons"""
         # Create search box
@@ -424,10 +457,9 @@ class BaseManagerWindow(Window):
         grid.Columns.Add(col)
     
     def create_footer_section(self):
-        """Create footer section"""
-        self.total_label = Label()
-        self.selected_label = Label()
-        return create_footer(self.total_label, self.selected_label)
+        """Create footer section (copyright only - counts live in the
+        stat-card row now, see create_stats_section)"""
+        return create_footer()
     
     # ========================================================================
     # DATA LOADING
@@ -534,8 +566,8 @@ class BaseManagerWindow(Window):
             total = len(self.filtered_items)
             selected = len(self.get_selected_items())
             
-            self.total_label.Content = "Total: {}".format(total)
-            self.selected_label.Content = "Selected: {}".format(selected)
+            self.total_label.Content = str(total)
+            self.selected_label.Content = str(selected)
         except Exception as ex:
             print("Error updating stats: {}".format(str(ex)))
     
