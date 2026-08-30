@@ -6,6 +6,17 @@ Color scheme and settings
 Compatible with Revit 2024, 2025, 2026, 2027
 
 Copyright (c) 2025 Dang Quoc Truong (DQT)
+
+Named smart_purge_config rather than the generic config to avoid colliding
+with pyDQT-Manage.extension/lib/config.py (used by Line Style Manager /
+Fill Pattern Manager) under the plain module name 'config' - pyRevit's
+sys.modules cache is shared across tools run in the same Revit session, so
+whichever 'config' module a tool imports first would otherwise win for
+every tool after it, however each tool's own sys.path is set up. This is
+exactly what caused "'classobj' object has no attribute 'HEADER'": Smart
+Purge's own Colors.HEADER resolved to the *other* tool's Colors class,
+which has no HEADER attribute, once that other tool had already been run
+in the same session.
 """
 
 __author__ = "Dang Quoc Truong (DQT)"

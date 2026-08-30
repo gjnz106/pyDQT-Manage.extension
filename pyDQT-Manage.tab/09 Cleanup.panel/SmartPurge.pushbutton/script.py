@@ -22,8 +22,8 @@ if lib_path not in sys.path:
 
 # FORCE RELOAD - Clear cached modules to ensure fresh imports
 modules_to_reload = [
-    'config',
-    'revit_utils', 
+    'smart_purge_config',
+    'revit_utils',
     'purge_group',
     'purge_categories_v2',
     'purge_scanner',
