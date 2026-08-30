@@ -11,6 +11,29 @@ __author__ = "Dang Quoc Truong (DQT)"
 from config_advanced import Icons
 import Autodesk.Revit.DB
 
+# Import compatibility helper
+try:
+    from revit_utils import _eid_int
+except:
+    # Fallback if revit_utils not available
+    def _eid_int(element_id):
+        """Get ElementId integer value - works for Revit 2024-2027"""
+        if element_id is None:
+            return -1
+        try:
+            # Revit 2026+ uses .Value
+            if hasattr(element_id, 'Value'):
+                return element_id.Value
+        except:
+            pass
+        try:
+            # Revit 2024/2025 uses .IntegerValue
+            if hasattr(element_id, 'IntegerValue'):
+                return element_id.IntegerValue
+        except:
+            pass
+        return -1
+
 
 class AdvancedPurgeCategory(object):
     """Represents an advanced purge category"""
@@ -142,12 +165,12 @@ def get_workset_cleanup_categories(doc):
             workset_kind = workset.Kind
             
             print("DEBUG: Workset '{}' - ID: {} - Kind: {}".format(
-                workset_name, workset_id.IntegerValue, workset_kind
+                workset_name, _eid_int(workset_id), workset_kind
             ))
             
             # Create category for this workset
             category = AdvancedPurgeCategory(
-                id="workset_{}".format(workset_id.IntegerValue),
+                id="workset_{}".format(_eid_int(workset_id)),
                 name='Elements on "{}"'.format(workset_name),
                 description="Remove all elements on {} workset".format(workset_name),
                 requires_worksets=True,

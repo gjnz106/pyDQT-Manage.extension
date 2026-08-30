@@ -18,6 +18,29 @@ except ImportError:
 
 from Autodesk.Revit.DB import FilteredElementCollector, Category
 
+# Import compatibility helper
+try:
+    from revit_utils import _eid_int
+except:
+    # Fallback if revit_utils not available
+    def _eid_int(element_id):
+        """Get ElementId integer value - works for Revit 2024-2027"""
+        if element_id is None:
+            return -1
+        try:
+            # Revit 2026+ uses .Value
+            if hasattr(element_id, 'Value'):
+                return element_id.Value
+        except:
+            pass
+        try:
+            # Revit 2024/2025 uses .IntegerValue
+            if hasattr(element_id, 'IntegerValue'):
+                return element_id.IntegerValue
+        except:
+            pass
+        return -1
+
 
 class CollaborationScanner(BaseAdvancedScanner):
     """Scanner for collaboration cleanup operations"""
@@ -106,13 +129,13 @@ class CollaborationScanner(BaseAdvancedScanner):
             used_subcategory_ids = set()
             for elem in all_elements:
                 if elem.Category and elem.Category.Id:
-                    used_subcategory_ids.add(elem.Category.Id.IntegerValue)
+                    used_subcategory_ids.add(_eid_int(elem.Category.Id))
             
             # Check each category for unused subcategories
             for cat in categories:
                 if cat and cat.SubCategories:
                     for subcat in cat.SubCategories:
-                        if subcat.Id.IntegerValue not in used_subcategory_ids:
+                        if _eid_int(subcat.Id) not in used_subcategory_ids:
                             # This subcategory is unused
                             # Note: Subcategories are NOT elements, they're Category objects
                             # We can't delete them like regular elements
@@ -122,7 +145,7 @@ class CollaborationScanner(BaseAdvancedScanner):
                             item = {
                                 'name': "{} > {}".format(cat.Name, subcat.Name),
                                 'type': 'SubCategory',
-                                'id': str(subcat.Id.IntegerValue),
+                                'id': str(_eid_int(subcat.Id)),
                                 'category': category.name,
                                 'element': None  # No actual element
                             }

@@ -18,6 +18,29 @@ except ImportError:
 
 from Autodesk.Revit.DB import FilteredElementCollector, BuiltInParameter
 
+# Import compatibility helper
+try:
+    from revit_utils import _eid_int
+except:
+    # Fallback if revit_utils not available
+    def _eid_int(element_id):
+        """Get ElementId integer value - works for Revit 2024-2027"""
+        if element_id is None:
+            return -1
+        try:
+            # Revit 2026+ uses .Value
+            if hasattr(element_id, 'Value'):
+                return element_id.Value
+        except:
+            pass
+        try:
+            # Revit 2024/2025 uses .IntegerValue
+            if hasattr(element_id, 'IntegerValue'):
+                return element_id.IntegerValue
+        except:
+            pass
+        return -1
+
 
 class WorksetScanner(BaseAdvancedScanner):
     """Scanner for elements on specific worksets"""
@@ -53,7 +76,7 @@ class WorksetScanner(BaseAdvancedScanner):
                 # Check if element is on target workset
                 elem_workset_param = elem.get_Parameter(BuiltInParameter.ELEM_PARTITION_PARAM)
                 
-                if elem_workset_param and elem_workset_param.AsInteger() == target_workset_id.IntegerValue:
+                if elem_workset_param and elem_workset_param.AsInteger() == _eid_int(target_workset_id):
                     # Element is on target workset
                     if self.can_delete(elem):
                         item_dict = self.create_item_dict(

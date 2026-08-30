@@ -18,6 +18,29 @@ from Autodesk.Revit.DB import (
 )
 from Autodesk.Revit import DB
 
+# Import compatibility helper
+try:
+    from revit_utils import _eid_int
+except:
+    # Fallback if revit_utils not available
+    def _eid_int(element_id):
+        """Get ElementId integer value - works for Revit 2024-2027"""
+        if element_id is None:
+            return -1
+        try:
+            # Revit 2026+ uses .Value
+            if hasattr(element_id, 'Value'):
+                return element_id.Value
+        except:
+            pass
+        try:
+            # Revit 2024/2025 uses .IntegerValue
+            if hasattr(element_id, 'IntegerValue'):
+                return element_id.IntegerValue
+        except:
+            pass
+        return -1
+
 try:
     from purge_scanner import BasePurgeScanner
 except:
@@ -50,7 +73,7 @@ class DetailComponentsScanner(BasePurgeScanner):
                     
                     # Check if family category is detail items
                     if family.FamilyCategory:
-                        cat_id = family.FamilyCategory.Id.IntegerValue
+                        cat_id = _eid_int(family.FamilyCategory.Id)
                         if cat_id == int(BuiltInCategory.OST_DetailComponents):
                             detail_families.append(family)
                 except:
@@ -75,7 +98,7 @@ class DetailComponentsScanner(BasePurgeScanner):
                     if inst and inst.IsValidObject and inst.Symbol:
                         symbol = inst.Symbol
                         if symbol and symbol.Family:
-                            family_id = symbol.Family.Id.IntegerValue
+                            family_id = _eid_int(symbol.Family.Id)
                             family_usage[family_id] = True
                 except:
                     continue
@@ -93,7 +116,7 @@ class DetailComponentsScanner(BasePurgeScanner):
                         continue
                     
                     # Check if family is used (quick lookup)
-                    family_id = family.Id.IntegerValue
+                    family_id = _eid_int(family.Id)
                     if family_id not in family_usage:
                         # Family is unused!
                         item = self.create_item_dict(family, {
@@ -143,7 +166,7 @@ class UnusedFamiliesScanner(BasePurgeScanner):
                     if inst and inst.IsValidObject and inst.Symbol:
                         symbol = inst.Symbol
                         if symbol and symbol.Family:
-                            family_id = symbol.Family.Id.IntegerValue
+                            family_id = _eid_int(symbol.Family.Id)
                             family_usage[family_id] = True
                 except:
                     continue
@@ -172,7 +195,7 @@ class UnusedFamiliesScanner(BasePurgeScanner):
                     
                     # Skip annotation families (handled by separate scanner)
                     try:
-                        cat_id = family.FamilyCategory.Id.IntegerValue
+                        cat_id = _eid_int(family.FamilyCategory.Id)
                         # Skip common annotation categories
                         annotation_cats = [
                             int(BuiltInCategory.OST_TextNotes),
@@ -191,7 +214,7 @@ class UnusedFamiliesScanner(BasePurgeScanner):
                         continue
                     
                     # Check if family is used (quick lookup)
-                    family_id = family.Id.IntegerValue
+                    family_id = _eid_int(family.Id)
                     if family_id not in family_usage:
                         # Family is unused!
                         category_name = "Unknown"
@@ -247,7 +270,7 @@ class UnusedFamilyTypesScanner(BasePurgeScanner):
             for inst in instance_list:
                 try:
                     if inst and inst.IsValidObject and inst.Symbol:
-                        symbol_id = inst.Symbol.Id.IntegerValue
+                        symbol_id = _eid_int(inst.Symbol.Id)
                         symbol_usage[symbol_id] = True
                 except:
                     continue
@@ -279,7 +302,7 @@ class UnusedFamilyTypesScanner(BasePurgeScanner):
                         continue
                     
                     # Check if symbol is used (quick lookup)
-                    symbol_id = symbol.Id.IntegerValue
+                    symbol_id = _eid_int(symbol.Id)
                     if symbol_id not in symbol_usage:
                         # Symbol is unused!
                         # Get family and category info
@@ -354,7 +377,7 @@ class AnnotationFamiliesScanner(BasePurgeScanner):
                         if inst and inst.IsValidObject and inst.Symbol:
                             symbol = inst.Symbol
                             if symbol and symbol.Family:
-                                family_id = symbol.Family.Id.IntegerValue
+                                family_id = _eid_int(symbol.Family.Id)
                                 family_usage[family_id] = True
                     except:
                         continue
@@ -381,7 +404,7 @@ class AnnotationFamiliesScanner(BasePurgeScanner):
                     if not family.FamilyCategory:
                         continue
                     
-                    cat_id = family.FamilyCategory.Id.IntegerValue
+                    cat_id = _eid_int(family.FamilyCategory.Id)
                     is_annotation = any(cat_id == int(cat) for cat in annotation_categories)
                     
                     if not is_annotation:
@@ -395,7 +418,7 @@ class AnnotationFamiliesScanner(BasePurgeScanner):
                         continue
                     
                     # Check if family is used (quick lookup)
-                    family_id = family.Id.IntegerValue
+                    family_id = _eid_int(family.Id)
                     if family_id not in family_usage:
                         # Family is unused!
                         category_name = "Annotation"
@@ -454,7 +477,7 @@ class ProfileFamiliesScanner(BasePurgeScanner):
                     # Check if family category is profiles
                     if family.FamilyCategory:
                         try:
-                            cat_id = family.FamilyCategory.Id.IntegerValue
+                            cat_id = _eid_int(family.FamilyCategory.Id)
                             if cat_id == int(BuiltInCategory.OST_ProfileFamilies):
                                 profile_families.append(family)
                         except:
@@ -500,7 +523,7 @@ class ProfileFamiliesScanner(BasePurgeScanner):
                                             profile_symbol = self.doc.GetElement(profile_id)
                                             if profile_symbol and hasattr(profile_symbol, 'Family'):
                                                 if profile_symbol.Family:
-                                                    used_profile_ids.add(profile_symbol.Family.Id.IntegerValue)
+                                                    used_profile_ids.add(_eid_int(profile_symbol.Family.Id))
                                         except:
                                             pass
                             except:
@@ -538,7 +561,7 @@ class ProfileFamiliesScanner(BasePurgeScanner):
                                             profile_symbol = self.doc.GetElement(profile_id)
                                             if profile_symbol and hasattr(profile_symbol, 'Family'):
                                                 if profile_symbol.Family:
-                                                    used_profile_ids.add(profile_symbol.Family.Id.IntegerValue)
+                                                    used_profile_ids.add(_eid_int(profile_symbol.Family.Id))
                                         except:
                                             pass
                             except:
@@ -555,7 +578,7 @@ class ProfileFamiliesScanner(BasePurgeScanner):
             # Check each profile family
             for family in profile_families:
                 try:
-                    family_id = family.Id.IntegerValue
+                    family_id = _eid_int(family.Id)
                     
                     # If not in used set, it's unused
                     if family_id not in used_profile_ids:
