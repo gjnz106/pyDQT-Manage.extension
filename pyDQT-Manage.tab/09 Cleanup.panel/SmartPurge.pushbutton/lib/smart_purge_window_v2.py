@@ -29,7 +29,7 @@ from System.Windows.Controls import (
 from System.Windows.Media import SolidColorBrush, Color
 from System import Action
 
-from config import Colors
+from smart_purge_config import Colors
 # from purge_history_manager import PurgeHistoryManager  # DISABLED - causing issues
 from purge_group import create_purge_groups, get_group_by_id
 from purge_categories_v2 import create_purge_categories

@@ -25,7 +25,7 @@ from System.Windows.Controls import (
 from System.Windows.Media import SolidColorBrush, Color
 from System.Collections.ObjectModel import ObservableCollection
 
-from config import Colors
+from smart_purge_config import Colors
 
 
 class PreviewWindow(Window):
