@@ -48,26 +48,32 @@ def create_button(text, width, color, height=30):
 # HEADER COMPONENT
 # ============================================================================
 
-def create_header(title, subtitle, show_copyright=True):
+def create_header(title, subtitle, show_copyright=True, help_handler=None):
     """Create standardized header
-    
+
     Args:
         title: Main title text
         subtitle: Subtitle text
         show_copyright: Show copyright line (default True)
-        
+        help_handler: Optional Click event handler. When given, a "? Help"
+            button is added to the top-right of the header (matches the
+            Family Manager v2.0 header layout).
+
     Returns:
         Border: Header border with content
     """
+    import System.Windows.Controls as Controls
+
     border = Border()
     border.Background = SolidColorBrush(Colors.HEADER_BACKGROUND)
     border.BorderBrush = SolidColorBrush(Colors.HEADER_BORDER)
     border.BorderThickness = Thickness(0, 0, 0, 2)
-    
+
     stack = StackPanel()
     stack.VerticalAlignment = VerticalAlignment.Center
+    stack.HorizontalAlignment = HorizontalAlignment.Left
     stack.Margin = Thickness(20, 0, 20, 0)
-    
+
     # Title
     title_label = Label()
     title_label.Content = title
@@ -75,7 +81,7 @@ def create_header(title, subtitle, show_copyright=True):
     title_label.FontWeight = FontWeights.Bold
     title_label.Foreground = SolidColorBrush(Colors.HEADER_TEXT)
     stack.Children.Add(title_label)
-    
+
     # Subtitle
     subtitle_label = Label()
     subtitle_label.Content = subtitle
@@ -83,7 +89,7 @@ def create_header(title, subtitle, show_copyright=True):
     subtitle_label.Foreground = SolidColorBrush(Colors.HEADER_SUBTITLE)
     subtitle_label.Margin = Thickness(0, -5, 0, 0)
     stack.Children.Add(subtitle_label)
-    
+
     # Copyright
     if show_copyright:
         copyright_label = Label()
@@ -92,22 +98,112 @@ def create_header(title, subtitle, show_copyright=True):
         copyright_label.Foreground = SolidColorBrush(Colors.HEADER_SUBTITLE)
         copyright_label.Margin = Thickness(0, -3, 0, 0)
         stack.Children.Add(copyright_label)
-    
-    border.Child = stack
+
+    if help_handler is not None:
+        header_grid = Controls.Grid()
+        header_grid.Children.Add(stack)
+
+        help_btn = Button()
+        help_btn.Content = "? Help"
+        help_btn.Padding = Thickness(10, 4, 10, 4)
+        help_btn.Margin = Thickness(0, 0, 20, 0)
+        help_btn.HorizontalAlignment = HorizontalAlignment.Right
+        help_btn.VerticalAlignment = VerticalAlignment.Center
+        help_btn.Background = Brushes.White
+        help_btn.BorderBrush = SolidColorBrush(Colors.HEADER_BORDER)
+        help_btn.Click += help_handler
+        header_grid.Children.Add(help_btn)
+
+        border.Child = header_grid
+    else:
+        border.Child = stack
+
     return border
+
+
+# ============================================================================
+# STAT CARD ROW (Family Manager v2.0 style)
+# ============================================================================
+
+def create_stat_card(label, color):
+    """Create a single bordered stat card (white box, colored label + value)
+
+    Args:
+        label: Card label text (e.g. "TOTAL")
+        color: System.Windows.Media.Color for the label/value text
+
+    Returns:
+        tuple: (Border, Label) - the card and its value label to update later
+    """
+    border = Border()
+    border.Background = Brushes.White
+    border.BorderBrush = SolidColorBrush(Colors.HEADER_BORDER)
+    border.BorderThickness = Thickness(1)
+    border.Padding = Thickness(8, 4, 8, 4)
+    border.Margin = Thickness(4, 0, 4, 0)
+
+    stack = StackPanel()
+
+    label_text = Label()
+    label_text.Content = label
+    label_text.FontSize = 9
+    label_text.Padding = Thickness(0)
+    label_text.Foreground = SolidColorBrush(color)
+    stack.Children.Add(label_text)
+
+    value_label = Label()
+    value_label.Content = "0"
+    value_label.FontSize = 18
+    value_label.Padding = Thickness(0)
+    value_label.FontWeight = FontWeights.Bold
+    value_label.Foreground = SolidColorBrush(color)
+    stack.Children.Add(value_label)
+
+    border.Child = stack
+    return border, value_label
+
+
+def create_stats_row(cards):
+    """Create a horizontal row of stat cards, evenly spaced
+
+    Args:
+        cards: list of (label, color) tuples, in display order
+
+    Returns:
+        tuple: (Border, list[Label]) - the row and the cards' value labels,
+            in the same order as `cards`, so callers can update them later.
+    """
+    import System.Windows.Controls as Controls
+
+    outer = Border()
+    outer.Background = Brushes.White
+    outer.Padding = Thickness(16, 6, 16, 6)
+
+    row = Controls.Grid()
+    value_labels = []
+
+    for i, (label, color) in enumerate(cards):
+        row.ColumnDefinitions.Add(Controls.ColumnDefinition())
+        card, value_label = create_stat_card(label, color)
+        Controls.Grid.SetColumn(card, i)
+        row.Children.Add(card)
+        value_labels.append(value_label)
+
+    outer.Child = row
+    return outer, value_labels
 
 
 # ============================================================================
 # FOOTER COMPONENT
 # ============================================================================
 
-def create_footer(total_label, selected_label):
-    """Create standardized footer with stats and copyright
-    
-    Args:
-        total_label: Label control for total count
-        selected_label: Label control for selected count
-        
+def create_footer():
+    """Create standardized footer with copyright only
+
+    The Total/Selected counts used to live here as plain text; they now
+    live in the stat-card row under the header (see create_stats_row),
+    matching the Family Manager v2.0 layout, so the footer is copyright-only.
+
     Returns:
         Border: Footer border with content
     """
@@ -116,27 +212,10 @@ def create_footer(total_label, selected_label):
     border.BorderBrush = SolidColorBrush(Colors.FOOTER_BORDER)
     border.BorderThickness = Thickness(0, 2, 0, 0)
     border.Padding = Thickness(10)
-    
+
     main_stack = StackPanel()
     main_stack.VerticalAlignment = VerticalAlignment.Center
-    
-    # Stats row
-    stats_stack = StackPanel()
-    stats_stack.Orientation = System.Windows.Controls.Orientation.Horizontal
-    stats_stack.HorizontalAlignment = HorizontalAlignment.Center
-    
-    total_label.Content = "Total: 0"
-    total_label.FontWeight = FontWeights.Bold
-    total_label.Margin = Thickness(10, 0, 10, 0)
-    stats_stack.Children.Add(total_label)
-    
-    selected_label.Content = "Selected: 0"
-    selected_label.FontWeight = FontWeights.Bold
-    selected_label.Margin = Thickness(10, 0, 10, 0)
-    stats_stack.Children.Add(selected_label)
-    
-    main_stack.Children.Add(stats_stack)
-    
+
     # Copyright row
     copyright_stack = StackPanel()
     copyright_stack.Orientation = System.Windows.Controls.Orientation.Horizontal

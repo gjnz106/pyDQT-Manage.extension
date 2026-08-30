@@ -388,6 +388,7 @@ MAIN_XAML = """
     <Grid Margin="12">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
@@ -395,14 +396,43 @@ MAIN_XAML = """
 
         <Border Grid.Row="0" Background="#F0CC88" BorderBrush="#D4B87A" BorderThickness="0,0,0,2"
                 CornerRadius="5" Padding="12,8" Margin="0,0,0,10">
-            <StackPanel>
-                <TextBlock Text="Family Font Manager" FontSize="18.7" FontWeight="Bold" Foreground="#5D4E37"/>
-                <TextBlock Text="Batch-change the Text Font and Width Factor used inside annotation, title block and tag families - Labels included, no need to open each one by hand"
-                           FontSize="12.1" Foreground="#5D4E37" TextWrapping="Wrap"/>
-            </StackPanel>
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0">
+                    <TextBlock Text="Family Font Manager" FontSize="18.7" FontWeight="Bold" Foreground="#5D4E37"/>
+                    <TextBlock Text="Batch-change the Text Font and Width Factor used inside annotation, title block and tag families - Labels included, no need to open each one by hand"
+                               FontSize="12.1" Foreground="#5D4E37" TextWrapping="Wrap"/>
+                </StackPanel>
+                <Button Grid.Column="1" Name="btnHelp" Content="? Help" Padding="10,4" Background="White"
+                        BorderBrush="#D4B87A" VerticalAlignment="Top" Margin="10,0,0,0"/>
+            </Grid>
         </Border>
 
-        <Grid Grid.Row="1">
+        <Grid Grid.Row="1" Margin="0,0,0,10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <Border Grid.Column="0" Background="White" BorderBrush="#D4B87A" BorderThickness="1" CornerRadius="4" Padding="10,6" Margin="0,0,4,0">
+                <StackPanel><TextBlock Text="FAMILIES SCANNED" FontSize="9" Foreground="#888"/><TextBlock Name="txtStatFamilies" Text="0" FontSize="20" FontWeight="Bold" Foreground="#5D4E37"/></StackPanel>
+            </Border>
+            <Border Grid.Column="1" Background="White" BorderBrush="#D4B87A" BorderThickness="1" CornerRadius="4" Padding="10,6" Margin="4,0,4,0">
+                <StackPanel><TextBlock Text="TYPES" FontSize="9" Foreground="#888"/><TextBlock Name="txtStatTypes" Text="0" FontSize="20" FontWeight="Bold" Foreground="#5DADE2"/></StackPanel>
+            </Border>
+            <Border Grid.Column="2" Background="White" BorderBrush="#D4B87A" BorderThickness="1" CornerRadius="4" Padding="10,6" Margin="4,0,4,0">
+                <StackPanel><TextBlock Text="DISTINCT FONTS" FontSize="9" Foreground="#888"/><TextBlock Name="txtStatFonts" Text="0" FontSize="20" FontWeight="Bold" Foreground="#E5B85C"/></StackPanel>
+            </Border>
+            <Border Grid.Column="3" Background="White" BorderBrush="#D4B87A" BorderThickness="1" CornerRadius="4" Padding="10,6" Margin="4,0,0,0">
+                <StackPanel><TextBlock Text="ERRORS" FontSize="9" Foreground="#888"/><TextBlock Name="txtStatErrors" Text="0" FontSize="20" FontWeight="Bold" Foreground="#FF6B6B"/></StackPanel>
+            </Border>
+        </Grid>
+
+        <Grid Grid.Row="2">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="320"/>
                 <ColumnDefinition Width="*"/>
@@ -509,7 +539,7 @@ MAIN_XAML = """
             </Grid>
         </Grid>
 
-        <Border Grid.Row="2" Background="White" BorderBrush="#D4B87A" BorderThickness="1" CornerRadius="4"
+        <Border Grid.Row="3" Background="White" BorderBrush="#D4B87A" BorderThickness="1" CornerRadius="4"
                 Padding="8" Margin="0,10,0,0">
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                 <Button Name="btnApply" Content="Apply Font Change" Padding="12,6" Margin="0,0,6,0" Background="#F0CC88" FontWeight="SemiBold"/>
@@ -517,7 +547,7 @@ MAIN_XAML = """
             </StackPanel>
         </Border>
 
-        <TextBlock Grid.Row="3" Text="Dang Quoc Truong - DQT (c) 2026" Foreground="#5D4E37" FontSize="12.1"
+        <TextBlock Grid.Row="4" Text="Dang Quoc Truong - DQT (c) 2026" Foreground="#5D4E37" FontSize="12.1"
                    HorizontalAlignment="Right" Margin="0,6,4,0"/>
     </Grid>
 </Window>
@@ -557,6 +587,7 @@ class FamilyFontWindow(WPFWindow):
         self.btnScan.Click += self.on_scan
         self.btnApply.Click += self.on_apply
         self.btnClose.Click += self.on_close
+        self.btnHelp.Click += self.on_help
 
         # Set by on_apply, read by main() AFTER ShowDialog() returns - the
         # batch itself must not run while this modal window is still up.
@@ -707,6 +738,11 @@ class FamilyFontWindow(WPFWindow):
                 len(fonts_seen),
                 ", {} error(s)".format(errors) if errors else ""))
 
+        self.txtStatFamilies.Text = str(len(targets))
+        self.txtStatTypes.Text = str(total_types)
+        self.txtStatFonts.Text = str(len(fonts_seen))
+        self.txtStatErrors.Text = str(errors)
+
     # -- apply ----------------------------------------------------------------
     def on_apply(self, sender, args):
         target_font = (self.cmbTargetFont.Text or "").strip()
@@ -758,6 +794,19 @@ class FamilyFontWindow(WPFWindow):
 
     def on_close(self, sender, args):
         self.Close()
+
+    def on_help(self, sender, args):
+        forms.alert(
+            "Family Font Manager\n\n"
+            "- Tick categories on the left (or use Annotation only / All / None), "
+            "then Scan to preview every font-bearing type - Text Note Types and the "
+            "Label types used by tags, title blocks and section heads.\n"
+            "- Pick a Target Font (and optionally a Width Factor) and, after scanning, "
+            "an Only replace current font filter to narrow the change.\n"
+            "- Apply Font Change opens, edits and reloads each family in the background - "
+            "save the model first.\n\n"
+            "Dang Quoc Truong - DQT (c) 2026",
+            title="DQT - Family Font Manager")
 
 
 def _run_batch(targets, target_font, current_filter, width_factor):

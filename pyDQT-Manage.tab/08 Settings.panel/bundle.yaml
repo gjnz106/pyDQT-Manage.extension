@@ -8,4 +8,4 @@ layout:
   - DimensionManager
   - WallLayerManager
   - Hatching
-  - ColorSplasher
+  - FamilyFont

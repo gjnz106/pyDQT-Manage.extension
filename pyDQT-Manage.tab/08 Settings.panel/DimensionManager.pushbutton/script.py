@@ -690,10 +690,13 @@ MAIN_XAML = """
 
         <!-- Header -->
         <Border Grid.Row="0" Background="#F0CC88" CornerRadius="5" Padding="12,8" Margin="0,0,0,10">
-            <StackPanel>
-                <TextBlock Text="Dimension Manager" FontSize="17" FontWeight="Bold"/>
-                <TextBlock Text="Dimension types in this model - by Dang Quoc Truong (DQT)" FontSize="10" Foreground="#5D4E37" Margin="0,2,0,0"/>
-            </StackPanel>
+            <Grid>
+                <StackPanel>
+                    <TextBlock Text="Dimension Manager" FontSize="17" FontWeight="Bold"/>
+                    <TextBlock Text="Dimension types in this model - by Dang Quoc Truong (DQT)" FontSize="10" Foreground="#5D4E37" Margin="0,2,0,0"/>
+                </StackPanel>
+                <Button x:Name="btnHelp" Content="? Help" Padding="10,4" Background="White" HorizontalAlignment="Right"/>
+            </Grid>
         </Border>
 
         <!-- Summary cards -->
@@ -810,9 +813,21 @@ class DimensionManagerWindow(WPFWindow):
         self.btnDeleteType.Click += self.delete_types_selected
         self.btnExportCSV.Click += self.export_csv
         self.btnClose.Click += self.close_window
+        self.btnHelp.Click += self.show_help
 
         self.load_data()
         self.update_ui()
+
+    def show_help(self, sender, args):
+        from System.Windows import MessageBox, MessageBoxButton, MessageBoxImage
+        MessageBox.Show(
+            "Dimension Manager\n\n"
+            "- Search filters by name, style, font, creator or workset.\n"
+            "- Double-click Text Size / Text Font / Width Factor to edit in place; Enter commits it.\n"
+            "- Detail shows every instance of the selected type and which view it's in.\n"
+            "- Select in Model / Zoom To act on the ticked rows; Rename / Batch Rename / Delete Type edit the type itself.\n\n"
+            "Dang Quoc Truong - DQT (c) 2026",
+            "Help", MessageBoxButton.OK, MessageBoxImage.Information)
 
     def load_data(self):
         self.items = get_dimension_types(self.doc)

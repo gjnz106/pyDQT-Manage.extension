@@ -1285,24 +1285,45 @@ class ParameterManagerWindow(Window):
         border.CornerRadius = System.Windows.CornerRadius(5)
         border.Padding = Thickness(12, 8, 12, 8)
         border.Margin = Thickness(0, 0, 0, 10)
-        
+
         panel = StackPanel()
-        
+
         title = TextBlock()
         title.Text = "Parameter Manager v1.1"
         title.FontSize = 17
         title.FontWeight = FontWeights.Bold
         panel.Children.Add(title)
-        
+
         subtitle = TextBlock()
         subtitle.Text = "by Dang Quoc Truong (DQT) | Revit {}".format(REVIT_VERSION)
         subtitle.FontSize = 10
         subtitle.Foreground = Config.hex_to_brush(Config.TEXT_DARK)
         subtitle.Margin = Thickness(0, 2, 0, 0)
         panel.Children.Add(subtitle)
-        
-        border.Child = panel
+
+        header_grid = WPFGrid()
+        header_grid.Children.Add(panel)
+
+        btn_help = Button()
+        btn_help.Content = "? Help"
+        btn_help.Padding = Thickness(10, 4, 10, 4)
+        btn_help.HorizontalAlignment = HorizontalAlignment.Right
+        btn_help.VerticalAlignment = VerticalAlignment.Center
+        btn_help.Background = Config.hex_to_brush(Config.WHITE)
+        btn_help.Click += self._on_help
+        header_grid.Children.Add(btn_help)
+
+        border.Child = header_grid
         return border
+
+    def _on_help(self, sender, args):
+        MessageBox.Show(
+            "Parameter Manager\n\n"
+            "- Pick a category, then a parameter, to see it across every type.\n"
+            "- Edit a value in the grid and click Apply to write it back.\n"
+            "- Export CSV / Import CSV round-trip parameter values in bulk.\n\n"
+            "Dang Quoc Truong - DQT (c) 2026",
+            "Help", MessageBoxButton.OK, MessageBoxImage.Information)
     
     def _create_summary_cards(self):
         grid = WPFGrid()

@@ -737,26 +737,50 @@ class LinePatternManagerWindow(Window):
         main_grid = Grid()
         main_grid.Margin = Thickness(0)
         
-        main_grid.RowDefinitions.Add(RowDefinition(Height=GridLength(60)))
+        main_grid.RowDefinitions.Add(RowDefinition(Height=GridLength(70)))
         main_grid.RowDefinitions.Add(RowDefinition(Height=GridLength(100)))
         main_grid.RowDefinitions.Add(RowDefinition(Height=GridLength(1, GridUnitType.Star)))
         main_grid.RowDefinitions.Add(RowDefinition(Height=GridLength(60)))
-        
-        # Header
+
+        # Header - Family Manager v2.0 style: title/subtitle left, Help button right
         header_border = Border()
         header_border.Background = SolidColorBrush(Config.hex_to_color(Config.PRIMARY_COLOR))
         header_border.BorderBrush = SolidColorBrush(Config.hex_to_color(Config.BORDER_COLOR))
         header_border.BorderThickness = Thickness(0, 0, 0, 2)
-        
+        header_border.Padding = Thickness(20, 8, 20, 8)
+
+        header_grid = Grid()
+
+        title_stack = StackPanel()
+        title_stack.VerticalAlignment = VerticalAlignment.Center
+        title_stack.HorizontalAlignment = HorizontalAlignment.Left
+
         header_text = TextBlock()
         header_text.Text = "Line Pattern Manager"
-        header_text.FontSize = 24
+        header_text.FontSize = 20
         header_text.FontWeight = FontWeights.Bold
         header_text.Foreground = SolidColorBrush(Config.hex_to_color(Config.TEXT_DARK))
-        header_text.VerticalAlignment = VerticalAlignment.Center
-        header_text.HorizontalAlignment = HorizontalAlignment.Center
-        
-        header_border.Child = header_text
+        title_stack.Children.Add(header_text)
+
+        subtitle_text = TextBlock()
+        subtitle_text.Text = "by Dang Quoc Truong (DQT)"
+        subtitle_text.FontSize = 10
+        subtitle_text.Foreground = SolidColorBrush(Config.hex_to_color(Config.TEXT_DARK))
+        title_stack.Children.Add(subtitle_text)
+
+        header_grid.Children.Add(title_stack)
+
+        btn_help = Button()
+        btn_help.Content = "? Help"
+        btn_help.Padding = Thickness(10, 4, 10, 4)
+        btn_help.HorizontalAlignment = HorizontalAlignment.Right
+        btn_help.VerticalAlignment = VerticalAlignment.Center
+        btn_help.Background = SolidColorBrush(Config.hex_to_color(Config.WHITE))
+        btn_help.BorderBrush = SolidColorBrush(Config.hex_to_color(Config.BORDER_COLOR))
+        btn_help.Click += self._on_help
+        header_grid.Children.Add(btn_help)
+
+        header_border.Child = header_grid
         Grid.SetRow(header_border, 0)
         main_grid.Children.Add(header_border)
         
@@ -776,10 +800,10 @@ class LinePatternManagerWindow(Window):
         stats_row.Orientation = Orientation.Horizontal
         stats_row.Margin = Thickness(0, 0, 0, 10)
         
-        self._add_stat_card(stats_row, "Total", "0", "txt_total")
-        self._add_stat_card(stats_row, "Selected", "0", "txt_selected")
-        self._add_stat_card(stats_row, "System", "0", "txt_system")
-        self._add_stat_card(stats_row, "Custom", "0", "txt_custom")
+        self._add_stat_card(stats_row, "Total", "0", "txt_total", Config.TEXT_DARK)
+        self._add_stat_card(stats_row, "Selected", "0", "txt_selected", Config.SECONDARY_COLOR)
+        self._add_stat_card(stats_row, "System", "0", "txt_system", Config.WARNING_COLOR)
+        self._add_stat_card(stats_row, "Custom", "0", "txt_custom", Config.SUCCESS_COLOR)
         
         stats_stack.Children.Add(stats_row)
         
@@ -986,39 +1010,53 @@ class LinePatternManagerWindow(Window):
         btn_refresh.BorderBrush = SolidColorBrush(Config.hex_to_color(Config.BORDER_COLOR))
         btn_refresh.Click += self._on_refresh
         footer_stack.Children.Add(btn_refresh)
-        
+
+        btn_close = Button()
+        btn_close.Content = "Close"
+        btn_close.Width = 100
+        btn_close.Height = 35
+        btn_close.Margin = Thickness(20, 0, 0, 0)
+        btn_close.Background = SolidColorBrush(Config.hex_to_color(Config.WHITE))
+        btn_close.Foreground = SolidColorBrush(Config.hex_to_color(Config.TEXT_DARK))
+        btn_close.BorderBrush = SolidColorBrush(Config.hex_to_color(Config.BORDER_COLOR))
+        btn_close.Click += lambda s, e: self.Close()
+        footer_stack.Children.Add(btn_close)
+
         footer_border.Child = footer_stack
         main_grid.Children.Add(footer_border)
         
         self.Content = main_grid
     
-    def _add_stat_card(self, parent, label, value, name):
-        """Add a stat card to the parent panel"""
+    def _add_stat_card(self, parent, label, value, name, color=None):
+        """Add a Family Manager v2.0 style stat card (white box, small
+        colored label above a bold colored value) to the parent panel"""
+        color = color or Config.TEXT_DARK
         card = Border()
-        card.Background = SolidColorBrush(Config.hex_to_color(Config.PRIMARY_COLOR))
+        card.Background = SolidColorBrush(Config.hex_to_color(Config.WHITE))
         card.BorderBrush = SolidColorBrush(Config.hex_to_color(Config.BORDER_COLOR))
         card.BorderThickness = Thickness(1)
-        card.CornerRadius = System.Windows.CornerRadius(5)
-        card.Padding = Thickness(15, 8, 15, 8)
-        card.Margin = Thickness(0, 0, 15, 0)
-        
+        card.CornerRadius = System.Windows.CornerRadius(4)
+        card.Padding = Thickness(10, 4, 10, 4)
+        card.Margin = Thickness(0, 0, 8, 0)
+
         stack = StackPanel()
-        stack.Orientation = Orientation.Horizontal
-        
+        stack.Orientation = Orientation.Vertical
+
         label_text = TextBlock()
-        label_text.Text = label + ": "
-        label_text.FontWeight = FontWeights.Bold
-        label_text.Foreground = SolidColorBrush(Config.hex_to_color(Config.TEXT_DARK))
+        label_text.Text = label.upper()
+        label_text.FontSize = 9
+        label_text.Foreground = SolidColorBrush(Config.hex_to_color(color))
         stack.Children.Add(label_text)
-        
+
         value_text = TextBlock()
         value_text.Text = value
+        value_text.FontSize = 18
         value_text.FontWeight = FontWeights.Bold
-        value_text.Foreground = SolidColorBrush(Config.hex_to_color(Config.TEXT_DARK))
+        value_text.Foreground = SolidColorBrush(Config.hex_to_color(color))
         stack.Children.Add(value_text)
-        
+
         setattr(self, name, value_text)
-        
+
         card.Child = stack
         parent.Children.Add(card)
     
@@ -1135,7 +1173,18 @@ class LinePatternManagerWindow(Window):
     def _on_refresh(self, sender, args):
         self._load_data()
         MessageBox.Show("Data refreshed!", "Info", MessageBoxButton.OK, MessageBoxImage.Information)
-    
+
+    def _on_help(self, sender, args):
+        MessageBox.Show(
+            "Line Pattern Manager\n\n"
+            "- Search filters by name; Category narrows to System/Custom.\n"
+            "- Select All / Clear All / Select Custom pick rows for you.\n"
+            "- Rename edits one selected line pattern; Batch Rename edits many at once.\n"
+            "- Delete removes the selected custom patterns (system patterns are protected).\n"
+            "- Refresh reloads from the current document.\n\n"
+            "Dang Quoc Truong - DQT (c) 2026",
+            "Help", MessageBoxButton.OK, MessageBoxImage.Information)
+
     def _on_rename(self, sender, args):
         selected = self._get_selected_items()
         
