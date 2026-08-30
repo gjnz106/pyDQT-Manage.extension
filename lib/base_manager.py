@@ -168,7 +168,7 @@ class BaseManagerWindow(Window):
         main_grid.RowDefinitions.Add(System.Windows.Controls.RowDefinition())
 
         main_grid.RowDefinitions[0].Height = System.Windows.GridLength(70)
-        main_grid.RowDefinitions[1].Height = System.Windows.GridLength(50)
+        main_grid.RowDefinitions[1].Height = System.Windows.GridLength(1, System.Windows.GridUnitType.Auto)
         main_grid.RowDefinitions[2].Height = System.Windows.GridLength(50)
         main_grid.RowDefinitions[3].Height = System.Windows.GridLength(1, System.Windows.GridUnitType.Star)
         main_grid.RowDefinitions[4].Height = System.Windows.GridLength(60)
@@ -566,8 +566,8 @@ class BaseManagerWindow(Window):
             total = len(self.filtered_items)
             selected = len(self.get_selected_items())
             
-            self.total_label.Content = str(total)
-            self.selected_label.Content = str(selected)
+            self.total_label.Text = str(total)
+            self.selected_label.Text = str(selected)
         except Exception as ex:
             print("Error updating stats: {}".format(str(ex)))
     
