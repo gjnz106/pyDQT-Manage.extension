@@ -8,11 +8,16 @@ All rights reserved.
 
 Author: DQT
 
-FEATURES:
+FEATURES (one tab active at a time - apply_rename_rules() dispatches on
+whichever tab is selected when Apply Rename is clicked, matching Text Note
+Type Manager's own Batch Rename dialog):
 1. Prefix/Suffix Tab
-2. Find/Replace Tab  
-3. Type/Segments Tab (for patterns with type/segments info)
-4. Custom Position Tab
+2. Find/Replace Tab
+3. Remove Tab (numbers / special characters / spaces / custom characters)
+4. Change Case Tab (UPPERCASE / lowercase / Title Case / Sentence case)
+5. Numbering Tab (a running number as prefix or suffix)
+6. Type/Segments Tab (for patterns with type/segments info)
+7. Custom Position Tab
 """
 
 from System.Windows import (
@@ -22,7 +27,8 @@ from System.Windows import (
 from System.Windows.Controls import (
     Grid, StackPanel, TextBox, Button, Label,
     RadioButton, CheckBox, Separator, GroupBox, TabControl, TabItem,
-    RowDefinition, ColumnDefinition, Orientation, TextBlock, WrapPanel
+    RowDefinition, ColumnDefinition, Orientation, TextBlock, WrapPanel,
+    ComboBox, ComboBoxItem
 )
 from System.Windows.Media import SolidColorBrush, Color, Brushes
 from System import EventHandler, Windows
@@ -109,6 +115,9 @@ class BatchRenameDialog(Window):
         # Create tabs
         self.create_prefix_suffix_tab()
         self.create_find_replace_tab()
+        self.create_remove_tab()
+        self.create_case_tab()
+        self.create_numbering_tab()
         self.create_type_segments_tab()
         self.create_custom_position_tab()
         
@@ -220,10 +229,177 @@ class BatchRenameDialog(Window):
         self.whole_word_check.Checked += self.on_text_changed
         self.whole_word_check.Unchecked += self.on_text_changed
         stack.Children.Add(self.whole_word_check)
-        
+
         tab.Content = stack
         self.tab_control.Items.Add(tab)
-        
+
+    def create_remove_tab(self):
+        """Create Remove tab - strip characters out of the name"""
+        tab = TabItem()
+        tab.Header = "Remove"
+
+        stack = StackPanel()
+        stack.Margin = Thickness(10)
+
+        instruction = Label()
+        instruction.Content = "Remove characters from selected items' names:"
+        instruction.FontWeight = Windows.FontWeights.Bold
+        instruction.Margin = Thickness(0, 0, 0, 10)
+        stack.Children.Add(instruction)
+
+        self.remove_numbers_check = CheckBox()
+        self.remove_numbers_check.Content = "Remove numbers (0-9)"
+        self.remove_numbers_check.Margin = Thickness(0, 0, 0, 5)
+        self.remove_numbers_check.Checked += self.on_text_changed
+        self.remove_numbers_check.Unchecked += self.on_text_changed
+        stack.Children.Add(self.remove_numbers_check)
+
+        self.remove_special_check = CheckBox()
+        self.remove_special_check.Content = "Remove special characters (!@#$%^&*)"
+        self.remove_special_check.Margin = Thickness(0, 0, 0, 5)
+        self.remove_special_check.Checked += self.on_text_changed
+        self.remove_special_check.Unchecked += self.on_text_changed
+        stack.Children.Add(self.remove_special_check)
+
+        self.remove_spaces_check = CheckBox()
+        self.remove_spaces_check.Content = "Remove spaces"
+        self.remove_spaces_check.Margin = Thickness(0, 0, 0, 10)
+        self.remove_spaces_check.Checked += self.on_text_changed
+        self.remove_spaces_check.Unchecked += self.on_text_changed
+        stack.Children.Add(self.remove_spaces_check)
+
+        custom_label = Label()
+        custom_label.Content = "Remove custom characters:"
+        stack.Children.Add(custom_label)
+
+        self.remove_custom_textbox = TextBox()
+        self.remove_custom_textbox.Height = 25
+        self.remove_custom_textbox.Margin = Thickness(0, 0, 0, 5)
+        self.remove_custom_textbox.TextChanged += self.on_text_changed
+        stack.Children.Add(self.remove_custom_textbox)
+
+        tab.Content = stack
+        self.tab_control.Items.Add(tab)
+
+    def create_case_tab(self):
+        """Create Change Case tab"""
+        tab = TabItem()
+        tab.Header = "Change Case"
+
+        stack = StackPanel()
+        stack.Margin = Thickness(10)
+
+        instruction = Label()
+        instruction.Content = "Change the case of selected items' names:"
+        instruction.FontWeight = Windows.FontWeights.Bold
+        instruction.Margin = Thickness(0, 0, 0, 10)
+        stack.Children.Add(instruction)
+
+        case_label = Label()
+        case_label.Content = "Change to:"
+        stack.Children.Add(case_label)
+
+        self.case_combo = ComboBox()
+        self.case_combo.Height = 25
+        self.case_combo.Width = 200
+        self.case_combo.HorizontalAlignment = HorizontalAlignment.Left
+        self.case_combo.Margin = Thickness(0, 0, 0, 10)
+        for option in ["No Change", "UPPERCASE", "lowercase", "Title Case", "Sentence case"]:
+            cb_item = ComboBoxItem()
+            cb_item.Content = option
+            self.case_combo.Items.Add(cb_item)
+        self.case_combo.SelectedIndex = 0
+        self.case_combo.SelectionChanged += self.on_text_changed
+        stack.Children.Add(self.case_combo)
+
+        tab.Content = stack
+        self.tab_control.Items.Add(tab)
+
+    def create_numbering_tab(self):
+        """Create Numbering tab - a running number as prefix or suffix"""
+        tab = TabItem()
+        tab.Header = "Numbering"
+
+        stack = StackPanel()
+        stack.Margin = Thickness(10)
+
+        instruction = Label()
+        instruction.Content = "Add a running number to selected items' names:"
+        instruction.FontWeight = Windows.FontWeights.Bold
+        instruction.Margin = Thickness(0, 0, 0, 10)
+        stack.Children.Add(instruction)
+
+        self.numbering_check = CheckBox()
+        self.numbering_check.Content = "Add numbering to names"
+        self.numbering_check.Margin = Thickness(0, 0, 0, 10)
+        self.numbering_check.Checked += self.on_text_changed
+        self.numbering_check.Unchecked += self.on_text_changed
+        stack.Children.Add(self.numbering_check)
+
+        start_label = Label()
+        start_label.Content = "Start at:"
+        stack.Children.Add(start_label)
+
+        self.start_number_textbox = TextBox()
+        self.start_number_textbox.Height = 25
+        self.start_number_textbox.Width = 80
+        self.start_number_textbox.HorizontalAlignment = HorizontalAlignment.Left
+        self.start_number_textbox.Text = "1"
+        self.start_number_textbox.Margin = Thickness(0, 0, 0, 10)
+        self.start_number_textbox.TextChanged += self.on_text_changed
+        stack.Children.Add(self.start_number_textbox)
+
+        padding_label = Label()
+        padding_label.Content = "Padding (digits):"
+        stack.Children.Add(padding_label)
+
+        self.padding_textbox = TextBox()
+        self.padding_textbox.Height = 25
+        self.padding_textbox.Width = 80
+        self.padding_textbox.HorizontalAlignment = HorizontalAlignment.Left
+        self.padding_textbox.Text = "2"
+        self.padding_textbox.Margin = Thickness(0, 0, 0, 10)
+        self.padding_textbox.TextChanged += self.on_text_changed
+        stack.Children.Add(self.padding_textbox)
+
+        pos_label = Label()
+        pos_label.Content = "Position:"
+        stack.Children.Add(pos_label)
+
+        pos_panel = WrapPanel()
+        pos_panel.Margin = Thickness(0, 0, 0, 10)
+
+        self.number_prefix_radio = RadioButton()
+        self.number_prefix_radio.Content = "Prefix"
+        self.number_prefix_radio.GroupName = "NumberPositionGroup"
+        self.number_prefix_radio.IsChecked = True
+        self.number_prefix_radio.Margin = Thickness(0, 0, 20, 0)
+        self.number_prefix_radio.Checked += self.on_text_changed
+        pos_panel.Children.Add(self.number_prefix_radio)
+
+        self.number_suffix_radio = RadioButton()
+        self.number_suffix_radio.Content = "Suffix"
+        self.number_suffix_radio.GroupName = "NumberPositionGroup"
+        self.number_suffix_radio.Checked += self.on_text_changed
+        pos_panel.Children.Add(self.number_suffix_radio)
+
+        stack.Children.Add(pos_panel)
+
+        sep_label = Label()
+        sep_label.Content = "Separator:"
+        stack.Children.Add(sep_label)
+
+        self.number_separator_textbox = TextBox()
+        self.number_separator_textbox.Height = 25
+        self.number_separator_textbox.Width = 80
+        self.number_separator_textbox.HorizontalAlignment = HorizontalAlignment.Left
+        self.number_separator_textbox.Text = "_"
+        self.number_separator_textbox.TextChanged += self.on_text_changed
+        stack.Children.Add(self.number_separator_textbox)
+
+        tab.Content = stack
+        self.tab_control.Items.Add(tab)
+
     def create_type_segments_tab(self):
         """Create Type/Segments tab for adding text type/size info"""
         tab = TabItem()
@@ -960,25 +1136,32 @@ class BatchRenameDialog(Window):
         except Exception as ex:
             self.preview_textblock.Text = "Error generating preview: {}".format(str(ex))
             
-    def apply_rename_rules(self, item, old_name):
-        """Apply rename rules based on selected tab"""
+    def apply_rename_rules(self, item, old_name, index=None):
+        """Apply rename rules based on selected tab.
+
+        index: this item's position among self.selected_items, used only by
+        the Numbering tab. Callers written before Numbering existed never
+        pass it, so it is computed here on demand rather than requiring
+        every call site to be updated - selected_items is small enough
+        (a batch rename selection, not the whole model) that the .index()
+        lookup this falls back to is not worth avoiding."""
         new_name = old_name
-        
+
         selected_tab = self.tab_control.SelectedIndex
-        
+
         if selected_tab == 0:  # Prefix/Suffix
             prefix = self.prefix_textbox.Text or ""
             suffix = self.suffix_textbox.Text or ""
             new_name = "{}{}{}".format(prefix, old_name, suffix)
-            
+
         elif selected_tab == 1:  # Find/Replace
             find_text = self.find_textbox.Text
             replace_text = self.replace_textbox.Text or ""
-            
+
             if find_text:
                 case_sensitive = self.case_check.IsChecked == True
                 whole_word = self.whole_word_check.IsChecked == True
-                
+
                 if whole_word:
                     if case_sensitive:
                         pattern = r'\b' + re.escape(find_text) + r'\b'
@@ -992,8 +1175,56 @@ class BatchRenameDialog(Window):
                     else:
                         pattern = re.compile(re.escape(find_text), re.IGNORECASE)
                         new_name = pattern.sub(replace_text, old_name)
-                        
-        elif selected_tab == 2:  # Type/Segments
+
+        elif selected_tab == 2:  # Remove
+            if self.remove_numbers_check.IsChecked == True:
+                new_name = re.sub(r'[0-9]', '', new_name)
+
+            if self.remove_special_check.IsChecked == True:
+                new_name = re.sub(r'[!@#$%^&*()+=\[\]{};:\'",.<>?/\\|`~]', '', new_name)
+
+            if self.remove_spaces_check.IsChecked == True:
+                new_name = new_name.replace(' ', '')
+
+            custom = self.remove_custom_textbox.Text or ""
+            if custom:
+                for char in custom:
+                    new_name = new_name.replace(char, '')
+
+        elif selected_tab == 3:  # Change Case
+            case_option = self.case_combo.SelectedIndex
+            if case_option == 1:
+                new_name = new_name.upper()
+            elif case_option == 2:
+                new_name = new_name.lower()
+            elif case_option == 3:
+                new_name = new_name.title()
+            elif case_option == 4:
+                new_name = new_name.capitalize()
+
+        elif selected_tab == 4:  # Numbering
+            if self.numbering_check.IsChecked == True:
+                if index is None:
+                    try:
+                        index = list(self.selected_items).index(item)
+                    except ValueError:
+                        index = 0
+                try:
+                    start = int(self.start_number_textbox.Text) if self.start_number_textbox.Text else 1
+                    padding = int(self.padding_textbox.Text) if self.padding_textbox.Text else 2
+                except Exception:
+                    start = 1
+                    padding = 2
+
+                number = str(start + index).zfill(padding)
+                separator = self.number_separator_textbox.Text or "_"
+
+                if self.number_suffix_radio.IsChecked == True:
+                    new_name = new_name + separator + number
+                else:
+                    new_name = number + separator + new_name
+
+        elif selected_tab == 5:  # Type/Segments
             type_info = self.get_type_info(item)
             size_info = self.get_size_info(item)
             
@@ -1072,7 +1303,7 @@ class BatchRenameDialog(Window):
             else:
                 print("    No parts - keeping old name")
                         
-        elif selected_tab == 3:  # Custom Position
+        elif selected_tab == 6:  # Custom Position
             custom_text = self.custom_textbox.Text or ""
             
             if custom_text:
@@ -1132,14 +1363,14 @@ class BatchRenameDialog(Window):
                     )
                     return
                     
-            elif selected_tab == 2:
-                has_type = (self.type_prefix_radio.IsChecked == True or 
+            elif selected_tab == 5:
+                has_type = (self.type_prefix_radio.IsChecked == True or
                            self.type_suffix_radio.IsChecked == True)
-                has_size = (self.size_prefix_radio.IsChecked == True or 
+                has_size = (self.size_prefix_radio.IsChecked == True or
                            self.size_suffix_radio.IsChecked == True)
                 has_segments = (self.segments_prefix_radio.IsChecked == True or
                                self.segments_suffix_radio.IsChecked == True)
-                
+
                 if not has_type and not has_size and not has_segments and self.remove_name_check.IsChecked != True:
                     MessageBox.Show(
                         "Please select at least one option:\n" +
@@ -1152,8 +1383,8 @@ class BatchRenameDialog(Window):
                         MessageBoxImage.Warning
                     )
                     return
-                    
-            elif selected_tab == 3:
+
+            elif selected_tab == 6:
                 if not self.custom_textbox.Text:
                     MessageBox.Show(
                         "Please enter text to insert!",
@@ -1324,6 +1555,7 @@ class BatchRenameDialog(Window):
         
     def check_name_conflict(self, new_name, item):
         """Check if new name conflicts - universal for all element types"""
+        from Autodesk.Revit.DB import BuiltInParameter
         try:
             # Get item ID
             try:

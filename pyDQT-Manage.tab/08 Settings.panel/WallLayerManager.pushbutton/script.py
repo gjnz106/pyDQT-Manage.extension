@@ -35,6 +35,21 @@ from Autodesk.Revit.DB import (
 import codecs
 import datetime
 import os
+import sys
+
+# Shared batch rename dialog (extension lib/). Imported softly: it powers one
+# button, so a broken install should not stop the whole manager from opening -
+# the button reports it instead. Matches the pattern Dimension Manager
+# already uses for the same shared dialog.
+_script_dir = os.path.dirname(__file__)
+_extension_dir = os.path.dirname(os.path.dirname(os.path.dirname(_script_dir)))
+_lib_path = os.path.join(_extension_dir, 'lib')
+if _lib_path not in sys.path:
+    sys.path.insert(0, _lib_path)
+try:
+    from batch_rename_dialog import BatchRenameDialog
+except ImportError:
+    BatchRenameDialog = None
 
 doc = revit.doc
 uidoc = revit.uidoc
@@ -108,6 +123,16 @@ class LayerRow(object):
     def toggle(self):
         self.selected = not self.selected
         self.mark = u"☑" if self.selected else u"☐"
+
+
+class WallTypeRenameItem(object):
+    """One Wall Type, wrapped for the shared Batch Rename dialog (lib/
+    batch_rename_dialog.py) - it looks for .name and .Element on whatever
+    item list it's given."""
+
+    def __init__(self, wall_type):
+        self.Element = wall_type
+        self.name = _type_name(wall_type)
 
 
 # ============================================================================
@@ -522,6 +547,8 @@ MAIN_XAML = """
       <TextBlock Text="Dang Quoc Truong - DQT (c) 2026" FontSize="10"
                  Foreground="#5D4E37" VerticalAlignment="Center"/>
       <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+        <Button Name="btnBatchRenameTypes" Content="Batch Rename Types..." Padding="10,5"
+                Margin="0,0,6,0" Background="White" BorderBrush="#D4B87A"/>
         <Button Name="btnExport" Content="Export CSV" Padding="10,5"
                 Margin="0,0,6,0" Background="White" BorderBrush="#D4B87A"/>
         <Button Name="btnRefresh" Content="Refresh" Padding="10,5"
@@ -567,6 +594,7 @@ class WallLayerManagerWindow(WPFWindow):
         self.btnSelectVisible.Click += self.on_select_visible
         self.btnClear.Click += self.on_clear
         self.btnApply.Click += self.on_apply
+        self.btnBatchRenameTypes.Click += self.on_batch_rename_types
         self.btnExport.Click += self.on_export
         self.btnRefresh.Click += self.on_refresh
         self.btnClose.Click += lambda s, e: self.Close()
@@ -650,6 +678,45 @@ class WallLayerManagerWindow(WPFWindow):
         self.load_data()
         self.txtStatus.Text = "Reloaded."
 
+    def on_batch_rename_types(self, sender, args):
+        """Batch-rename the Wall Types behind the ticked layers - grouped
+        by type, since a tick lives on a layer row and several rows can
+        share the same wall type."""
+        if BatchRenameDialog is None:
+            forms.alert(
+                "The shared batch rename dialog could not be loaded from the "
+                "extension's lib folder.",
+                title="Wall Layer Manager")
+            return
+
+        ticked = self.ticked_rows()
+        if not ticked:
+            forms.alert("Tick at least one layer first - its wall type is "
+                        "what gets renamed.",
+                        title="Wall Layer Manager")
+            return
+
+        seen = set()
+        items = []
+        for row in ticked:
+            if row.type_id in seen:
+                continue
+            seen.add(row.type_id)
+            wall_type = self.doc.GetElement(DB.ElementId(row.type_id))
+            if wall_type is not None:
+                items.append(WallTypeRenameItem(wall_type))
+
+        if not items:
+            forms.alert("The ticked wall type(s) no longer exist - refresh "
+                        "and try again.",
+                        title="Wall Layer Manager")
+            return
+
+        dialog = BatchRenameDialog(self.doc, items, self)
+        dialog.ShowDialog()
+        self.load_data()
+        self.txtStatus.Text = "Reloaded after batch rename."
+
     def on_help(self, sender, args):
         forms.alert(
             "Wall Layer Manager\n\n"
@@ -657,6 +724,8 @@ class WallLayerManagerWindow(WPFWindow):
             "- Core layers only shows just the layers inside the core boundary.\n"
             "- Double-click a row (or 'Tick all visible') to tick it, then pick a new "
             "Function and click Apply to batch-change the ticked layers.\n"
+            "- Batch Rename Types... renames the wall TYPE(S) behind the ticked "
+            "layers (tick any one of a type's layers to include it).\n"
             "- This edits wall TYPES, so every wall using them changes too.\n\n"
             "Dang Quoc Truong - DQT (c) 2026",
             title="Wall Layer Manager")
