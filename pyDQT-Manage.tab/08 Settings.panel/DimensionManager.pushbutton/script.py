@@ -266,6 +266,47 @@ def apply_dimension_type_edit(doc, item, field, value):
         return False, str(ex)
 
 
+def _set_dimension_field(dt, field, value):
+    """Write one field on one DimensionType, WITHOUT opening its own
+    transaction - the batch editor wraps every selected type in a single
+    transaction instead of one per cell, the way apply_dimension_type_edit
+    (used by the inline double-click-to-edit cell) does. Same validation as
+    that function; kept separate rather than shared so the working inline
+    edit path is not touched by the batch feature.
+
+    Returns (status, message): status is "ok", "skip" (this type has no
+    such parameter - not every dimension style carries every field, so
+    that is not a failure), or "error" (a real problem: bad value,
+    read-only parameter, or an exception setting it)."""
+    spec = EDITABLE_FIELDS.get(field)
+    if spec is None:
+        return "error", "unknown field '{}'".format(field)
+    bip, display_name = spec
+
+    param = _param_by_bip_or_name(dt, bip, display_name)
+    if param is None:
+        return "skip", "this type has no {} parameter".format(display_name)
+    if param.IsReadOnly:
+        return "error", "{} is read-only on this type".format(display_name)
+
+    text = str(value).strip() if value is not None else ""
+    if not text:
+        return "error", "{} cannot be empty".format(display_name)
+
+    try:
+        if field == "text_font":
+            param.Set(text)
+        elif field == "width_factor":
+            if not param.SetValueString(text):
+                try:
+                    param.Set(float(text))
+                except ValueError:
+                    return "error", "'{}' is not a number".format(text)
+        return "ok", None
+    except Exception as ex:
+        return "error", str(ex)
+
+
 def _get_created_by(doc, elem):
     """Who created this element, from worksharing tooltip info.
 
@@ -670,6 +711,151 @@ class DimensionDetailWindow(WPFWindow):
 
 
 # ============================================================================
+# XAML - BATCH EDIT DIALOG (Text Font / Width Factor across many types)
+# ============================================================================
+BATCH_EDIT_XAML = """
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Batch Edit - DQT"
+        Width="480" Height="330"
+        WindowStartupLocation="CenterScreen"
+        Background="#FEF8E7" ResizeMode="NoResize">
+    <Grid Margin="15">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <Border Grid.Row="0" Background="#F0CC88" CornerRadius="5" Padding="12,8" Margin="0,0,0,10">
+            <TextBlock Text="Batch Edit Text Font / Width Factor" FontSize="16" FontWeight="Bold"/>
+        </Border>
+
+        <TextBlock Grid.Row="1" x:Name="txtInfo" Text="" FontSize="12" Foreground="#5D4E37" Margin="0,0,0,15"/>
+
+        <StackPanel Grid.Row="2">
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,15">
+                <CheckBox x:Name="chkFont" Content="Set Text Font to:" VerticalAlignment="Center" Width="150"/>
+                <ComboBox x:Name="cmbFont" Width="230" Height="26" IsEditable="True" IsEnabled="False"/>
+            </StackPanel>
+            <StackPanel Orientation="Horizontal">
+                <CheckBox x:Name="chkWidth" Content="Set Width Factor to:" VerticalAlignment="Center" Width="150"/>
+                <TextBox x:Name="txtWidth" Width="230" Height="26" Padding="4,2" IsEnabled="False" VerticalContentAlignment="Center"/>
+            </StackPanel>
+            <TextBlock Text="A type with no Text Font / Width Factor parameter (not every dimension style has one) is skipped, not failed." FontSize="9" Foreground="#888" TextWrapping="Wrap" Margin="0,15,0,0"/>
+        </StackPanel>
+
+        <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,15,0,0">
+            <Button x:Name="btnApply" Content="Apply" Padding="18,6" Margin="0,0,8,0" Background="#F0CC88" FontWeight="SemiBold"/>
+            <Button x:Name="btnCancel" Content="Cancel" Padding="18,6" Background="White"/>
+        </StackPanel>
+    </Grid>
+</Window>
+"""
+
+
+class BatchEditDialog(WPFWindow):
+    """Set Text Font and/or Width Factor on many DimensionTypes at once,
+    in a single transaction - the double-click-to-edit grid cells only
+    ever touch one type at a time."""
+
+    def __init__(self, doc, items, parent):
+        WPFWindow.__init__(self, BATCH_EDIT_XAML, literal_string=True)
+        self.doc = doc
+        self.items = items
+        self.parent = parent
+        self.applied = False
+
+        self.txtInfo.Text = "{} dimension type(s) selected.".format(len(items))
+
+        fonts = sorted(set(i.text_font for i in items
+                            if i.text_font and i.text_font != "-"))
+        for font in fonts:
+            self.cmbFont.Items.Add(font)
+
+        self.chkFont.Checked += self._on_font_checked
+        self.chkFont.Unchecked += self._on_font_unchecked
+        self.chkWidth.Checked += self._on_width_checked
+        self.chkWidth.Unchecked += self._on_width_unchecked
+        self.btnApply.Click += self.on_apply
+        self.btnCancel.Click += lambda s, e: self.Close()
+
+    def _on_font_checked(self, s, e):
+        self.cmbFont.IsEnabled = True
+
+    def _on_font_unchecked(self, s, e):
+        self.cmbFont.IsEnabled = False
+
+    def _on_width_checked(self, s, e):
+        self.txtWidth.IsEnabled = True
+
+    def _on_width_unchecked(self, s, e):
+        self.txtWidth.IsEnabled = False
+
+    def on_apply(self, sender, args):
+        updates = {}
+        if self.chkFont.IsChecked:
+            font_text = (self.cmbFont.Text or "").strip()
+            if not font_text:
+                forms.alert("Enter a Text Font, or untick 'Set Text Font to'.",
+                            title="DQT - Batch Edit")
+                return
+            updates["text_font"] = font_text
+
+        if self.chkWidth.IsChecked:
+            width_text = (self.txtWidth.Text or "").strip()
+            if not width_text:
+                forms.alert("Enter a Width Factor, or untick 'Set Width Factor to'.",
+                            title="DQT - Batch Edit")
+                return
+            updates["width_factor"] = width_text
+
+        if not updates:
+            forms.alert("Tick at least one field to set.", title="DQT - Batch Edit")
+            return
+
+        success = 0
+        skipped = 0
+        failures = []
+
+        with revit.Transaction("DQT - Batch Edit Dimension Types"):
+            for item in self.items:
+                if item.element is None:
+                    skipped += 1
+                    continue
+                item_ok = False
+                item_failed = False
+                for field, value in updates.items():
+                    status, err = _set_dimension_field(item.element, field, value)
+                    if status == "ok":
+                        item_ok = True
+                    elif status == "error":
+                        item_failed = True
+                        failures.append("{}: {}".format(item.name, err))
+                    # status == "skip": no such parameter on this type -
+                    # not a failure, just doesn't apply here.
+                if item_failed:
+                    continue
+                if item_ok:
+                    success += 1
+                else:
+                    skipped += 1
+
+        message = "Updated {} of {} dimension type(s).".format(success, len(self.items))
+        if skipped:
+            message += "\n{} skipped (no matching parameter on that type).".format(skipped)
+        if failures:
+            lines = failures[:8]
+            more = "" if len(failures) <= 8 else "\n... and {} more".format(len(failures) - 8)
+            message += "\n\nFailed:\n" + "\n".join(lines) + more
+        forms.alert(message, title="DQT - Batch Edit")
+
+        self.applied = True
+        self.Close()
+
+
+# ============================================================================
 # XAML - MAIN WINDOW
 # ============================================================================
 MAIN_XAML = """
@@ -769,6 +955,7 @@ MAIN_XAML = """
                     <Button x:Name="btnDetail" Content="Detail" Padding="10,5" Margin="2" Background="#F0CC88" FontWeight="SemiBold"/>
                     <Button x:Name="btnRename" Content="Rename" Padding="10,5" Margin="2" Background="White"/>
                     <Button x:Name="btnBatchRename" Content="Batch Rename" Padding="10,5" Margin="2" Background="White"/>
+                    <Button x:Name="btnBatchEdit" Content="Batch Edit Font/Width..." Padding="10,5" Margin="2" Background="White"/>
                     <Button x:Name="btnDeleteType" Content="Delete Type" Padding="10,5" Margin="2" Background="#FFCDD2"/>
                     <Button x:Name="btnExportCSV" Content="Export CSV" Padding="10,5" Margin="2" Background="White"/>
                     <Button x:Name="btnClose" Content="Close" Padding="10,5" Margin="2" Background="White"/>
@@ -810,6 +997,7 @@ class DimensionManagerWindow(WPFWindow):
         self.btnDetail.Click += self.show_detail
         self.btnRename.Click += self.rename_selected
         self.btnBatchRename.Click += self.batch_rename_selected
+        self.btnBatchEdit.Click += self.batch_edit_selected
         self.btnDeleteType.Click += self.delete_types_selected
         self.btnExportCSV.Click += self.export_csv
         self.btnClose.Click += self.close_window
@@ -825,7 +1013,9 @@ class DimensionManagerWindow(WPFWindow):
             "- Search filters by name, style, font, creator or workset.\n"
             "- Double-click Text Size / Text Font / Width Factor to edit in place; Enter commits it.\n"
             "- Detail shows every instance of the selected type and which view it's in.\n"
-            "- Select in Model / Zoom To act on the ticked rows; Rename / Batch Rename / Delete Type edit the type itself.\n\n"
+            "- Select in Model / Zoom To act on the ticked rows; Rename / Batch Rename / Delete Type edit the type itself.\n"
+            "- Batch Edit Font/Width... sets Text Font and/or Width Factor on every "
+            "selected type at once, instead of one cell at a time.\n\n"
             "Dang Quoc Truong - DQT (c) 2026",
             "Help", MessageBoxButton.OK, MessageBoxImage.Information)
 
@@ -1076,6 +1266,25 @@ class DimensionManagerWindow(WPFWindow):
             return
 
         _open_batch_rename(self.doc, selected, self)
+
+    def batch_edit_selected(self, s, e):
+        if self.dataGrid.SelectedItems.Count == 0:
+            forms.alert("Select one or more dimension types to batch edit.",
+                        title="DQT - Dimension Manager")
+            return
+
+        selected = [item for item in self._resolve_selected_items()
+                    if item.element is not None]
+        if not selected:
+            forms.alert("The selected dimension types no longer exist - "
+                        "refresh and try again.",
+                        title="DQT - Dimension Manager")
+            return
+
+        dialog = BatchEditDialog(self.doc, selected, self)
+        dialog.ShowDialog()
+        if dialog.applied:
+            self.refresh(s, e)
 
     def delete_types_selected(self, s, e):
         """Delete the selected dimension types. Deleting a type that still
