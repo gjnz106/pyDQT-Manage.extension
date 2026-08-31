@@ -475,9 +475,117 @@ class BatchRenameDialog(Window):
         
         self.chk_find.Checked += self._on_find_checked
         self.chk_find.Unchecked += self._on_find_unchecked
-        
+
         options_stack.Children.Add(find_panel)
-        
+
+        # Remove characters
+        remove_panel = StackPanel()
+        remove_panel.Orientation = Orientation.Horizontal
+        remove_panel.Margin = Thickness(0, 0, 0, 10)
+
+        self.chk_remove = CheckBox()
+        self.chk_remove.Content = "Remove:"
+        self.chk_remove.VerticalAlignment = VerticalAlignment.Center
+        self.chk_remove.Margin = Thickness(0, 0, 10, 0)
+        remove_panel.Children.Add(self.chk_remove)
+
+        self.chk_remove_numbers = CheckBox()
+        self.chk_remove_numbers.Content = "Numbers"
+        self.chk_remove_numbers.IsEnabled = False
+        self.chk_remove_numbers.Margin = Thickness(0, 0, 12, 0)
+        remove_panel.Children.Add(self.chk_remove_numbers)
+
+        self.chk_remove_special = CheckBox()
+        self.chk_remove_special.Content = "Special characters"
+        self.chk_remove_special.IsEnabled = False
+        self.chk_remove_special.Margin = Thickness(0, 0, 12, 0)
+        remove_panel.Children.Add(self.chk_remove_special)
+
+        self.chk_remove_spaces = CheckBox()
+        self.chk_remove_spaces.Content = "Spaces"
+        self.chk_remove_spaces.IsEnabled = False
+        remove_panel.Children.Add(self.chk_remove_spaces)
+
+        self.chk_remove.Checked += self._on_remove_checked
+        self.chk_remove.Unchecked += self._on_remove_unchecked
+
+        options_stack.Children.Add(remove_panel)
+
+        # Change case
+        case_panel = StackPanel()
+        case_panel.Orientation = Orientation.Horizontal
+        case_panel.Margin = Thickness(0, 0, 0, 10)
+
+        self.chk_case = CheckBox()
+        self.chk_case.Content = "Change Case:"
+        self.chk_case.VerticalAlignment = VerticalAlignment.Center
+        self.chk_case.Margin = Thickness(0, 0, 10, 0)
+        case_panel.Children.Add(self.chk_case)
+
+        self.cmb_case = ComboBox()
+        self.cmb_case.Width = 150
+        self.cmb_case.IsEnabled = False
+        for option in ["UPPERCASE", "lowercase", "Title Case", "Sentence case"]:
+            cb_item = ComboBoxItem()
+            cb_item.Content = option
+            self.cmb_case.Items.Add(cb_item)
+        self.cmb_case.SelectedIndex = 0
+        case_panel.Children.Add(self.cmb_case)
+
+        self.chk_case.Checked += self._on_case_checked
+        self.chk_case.Unchecked += self._on_case_unchecked
+
+        options_stack.Children.Add(case_panel)
+
+        # Numbering
+        number_panel = StackPanel()
+        number_panel.Orientation = Orientation.Horizontal
+        number_panel.Margin = Thickness(0, 0, 0, 10)
+
+        self.chk_number = CheckBox()
+        self.chk_number.Content = "Add Numbering:"
+        self.chk_number.VerticalAlignment = VerticalAlignment.Center
+        self.chk_number.Margin = Thickness(0, 0, 10, 0)
+        number_panel.Children.Add(self.chk_number)
+
+        start_label = TextBlock()
+        start_label.Text = "Start:"
+        start_label.VerticalAlignment = VerticalAlignment.Center
+        start_label.Margin = Thickness(0, 0, 4, 0)
+        number_panel.Children.Add(start_label)
+
+        self.txt_number_start = TextBox()
+        self.txt_number_start.Width = 40
+        self.txt_number_start.Text = "1"
+        self.txt_number_start.Padding = Thickness(3)
+        self.txt_number_start.IsEnabled = False
+        self.txt_number_start.Margin = Thickness(0, 0, 10, 0)
+        number_panel.Children.Add(self.txt_number_start)
+
+        pad_label = TextBlock()
+        pad_label.Text = "Padding:"
+        pad_label.VerticalAlignment = VerticalAlignment.Center
+        pad_label.Margin = Thickness(0, 0, 4, 0)
+        number_panel.Children.Add(pad_label)
+
+        self.txt_number_padding = TextBox()
+        self.txt_number_padding.Width = 40
+        self.txt_number_padding.Text = "2"
+        self.txt_number_padding.Padding = Thickness(3)
+        self.txt_number_padding.IsEnabled = False
+        self.txt_number_padding.Margin = Thickness(0, 0, 10, 0)
+        number_panel.Children.Add(self.txt_number_padding)
+
+        self.chk_number_suffix = CheckBox()
+        self.chk_number_suffix.Content = "As suffix (default prefix)"
+        self.chk_number_suffix.IsEnabled = False
+        number_panel.Children.Add(self.chk_number_suffix)
+
+        self.chk_number.Checked += self._on_number_checked
+        self.chk_number.Unchecked += self._on_number_unchecked
+
+        options_stack.Children.Add(number_panel)
+
         # Auto-naming option
         auto_panel = StackPanel()
         auto_panel.Orientation = Orientation.Horizontal
@@ -566,80 +674,165 @@ class BatchRenameDialog(Window):
     def _on_find_checked(self, sender, args):
         self.txt_find.IsEnabled = True
         self.txt_replace.IsEnabled = True
-    
+
     def _on_find_unchecked(self, sender, args):
         self.txt_find.IsEnabled = False
         self.txt_replace.IsEnabled = False
-    
+
+    def _on_remove_checked(self, sender, args):
+        self.chk_remove_numbers.IsEnabled = True
+        self.chk_remove_special.IsEnabled = True
+        self.chk_remove_spaces.IsEnabled = True
+
+    def _on_remove_unchecked(self, sender, args):
+        self.chk_remove_numbers.IsEnabled = False
+        self.chk_remove_special.IsEnabled = False
+        self.chk_remove_spaces.IsEnabled = False
+
+    def _on_case_checked(self, sender, args):
+        self.cmb_case.IsEnabled = True
+
+    def _on_case_unchecked(self, sender, args):
+        self.cmb_case.IsEnabled = False
+
+    def _on_number_checked(self, sender, args):
+        self.txt_number_start.IsEnabled = True
+        self.txt_number_padding.IsEnabled = True
+        self.chk_number_suffix.IsEnabled = True
+
+    def _on_number_unchecked(self, sender, args):
+        self.txt_number_start.IsEnabled = False
+        self.txt_number_padding.IsEnabled = False
+        self.chk_number_suffix.IsEnabled = False
+
     def _on_auto_checked(self, sender, args):
         # Disable other options when auto is checked
         self.chk_prefix.IsEnabled = False
         self.chk_suffix.IsEnabled = False
         self.chk_find.IsEnabled = False
+        self.chk_remove.IsEnabled = False
+        self.chk_case.IsEnabled = False
+        self.chk_number.IsEnabled = False
         self.txt_prefix.IsEnabled = False
         self.txt_suffix.IsEnabled = False
         self.txt_find.IsEnabled = False
         self.txt_replace.IsEnabled = False
-    
+        self.chk_remove_numbers.IsEnabled = False
+        self.chk_remove_special.IsEnabled = False
+        self.chk_remove_spaces.IsEnabled = False
+        self.cmb_case.IsEnabled = False
+        self.txt_number_start.IsEnabled = False
+        self.txt_number_padding.IsEnabled = False
+        self.chk_number_suffix.IsEnabled = False
+
     def _on_auto_unchecked(self, sender, args):
-        # Re-enable other options
+        # Re-enable other options - each one's own checkbox still governs
+        # whether its sub-controls are enabled (re-checking it fires
+        # _on_remove_checked/_on_case_checked/_on_number_checked again).
         self.chk_prefix.IsEnabled = True
         self.chk_suffix.IsEnabled = True
         self.chk_find.IsEnabled = True
+        self.chk_remove.IsEnabled = True
+        self.chk_case.IsEnabled = True
+        self.chk_number.IsEnabled = True
     
-    def _generate_new_name(self, item):
-        """Generate new name based on options"""
+    def _generate_new_name(self, item, index=None):
+        """Generate new name based on options. All checked options combine
+        (this dialog does not use tabs the way the newer Batch Rename
+        dialogs in this suite do), applied in a fixed order: Find/Replace,
+        Remove characters, Change Case, Prefix, Suffix, Numbering last so
+        digits added by Numbering are never touched by Change Case."""
         if self.chk_auto.IsChecked:
             # Auto-naming based on segments
             seg_type = item._get_segments_type_short()
             seg_value = item._get_segments_value_short()
-            
+
             if seg_value:
                 return "{}-{}".format(seg_type, seg_value)
             else:
                 return seg_type
         else:
-            # Manual prefix/suffix/find-replace
+            # Manual: Find/Replace, Remove, Case, Prefix/Suffix, Numbering
             new_name = item.name
-            
+
             if self.chk_find.IsChecked:
                 find_text = self.txt_find.Text if self.txt_find.Text else ""
                 replace_text = self.txt_replace.Text if self.txt_replace.Text else ""
                 if find_text:
                     new_name = new_name.replace(find_text, replace_text)
-            
+
+            if self.chk_remove.IsChecked:
+                if self.chk_remove_numbers.IsChecked:
+                    new_name = re.sub(r'[0-9]', '', new_name)
+                if self.chk_remove_special.IsChecked:
+                    new_name = re.sub(r'[!@#$%^&*()+=\[\]{};:\'",.<>?/\\|`~]', '', new_name)
+                if self.chk_remove_spaces.IsChecked:
+                    new_name = new_name.replace(' ', '')
+
+            if self.chk_case.IsChecked:
+                case_option = self.cmb_case.SelectedIndex
+                if case_option == 0:
+                    new_name = new_name.upper()
+                elif case_option == 1:
+                    new_name = new_name.lower()
+                elif case_option == 2:
+                    new_name = new_name.title()
+                elif case_option == 3:
+                    new_name = new_name.capitalize()
+
             if self.chk_prefix.IsChecked:
                 prefix = self.txt_prefix.Text if self.txt_prefix.Text else ""
                 new_name = prefix + new_name
-            
+
             if self.chk_suffix.IsChecked:
                 suffix = self.txt_suffix.Text if self.txt_suffix.Text else ""
                 new_name = new_name + suffix
-            
+
+            if self.chk_number.IsChecked:
+                if index is None:
+                    try:
+                        index = list(self.items).index(item)
+                    except ValueError:
+                        index = 0
+                try:
+                    start = int(self.txt_number_start.Text) if self.txt_number_start.Text else 1
+                    padding = int(self.txt_number_padding.Text) if self.txt_number_padding.Text else 2
+                except Exception:
+                    start = 1
+                    padding = 2
+                number = str(start + index).zfill(padding)
+                if self.chk_number_suffix.IsChecked:
+                    new_name = new_name + "_" + number
+                else:
+                    new_name = number + "_" + new_name
+
             return new_name
-    
+
     def _on_preview(self, sender, args):
         """Show preview of new names"""
         preview_text = "New names preview:\n\n"
-        
-        for item in self.items:
-            new_name = self._generate_new_name(item)
+
+        for i, item in enumerate(self.items):
+            new_name = self._generate_new_name(item, i)
             preview_text += "{} → {}\n".format(item.name, new_name)
-        
+
         MessageBox.Show(preview_text, "Preview", MessageBoxButton.OK, MessageBoxImage.Information)
-    
+
     def _on_apply(self, sender, args):
         """Apply batch rename"""
         # Validate
-        if not self.chk_prefix.IsChecked and not self.chk_suffix.IsChecked and not self.chk_find.IsChecked and not self.chk_auto.IsChecked:
+        if not (self.chk_prefix.IsChecked or self.chk_suffix.IsChecked or
+                self.chk_find.IsChecked or self.chk_remove.IsChecked or
+                self.chk_case.IsChecked or self.chk_number.IsChecked or
+                self.chk_auto.IsChecked):
             MessageBox.Show("Please select at least one rename option!",
                           "Warning", MessageBoxButton.OK, MessageBoxImage.Warning)
             return
         
         # Generate result items
         self.result_items = []
-        for item in self.items:
-            new_name = self._generate_new_name(item)
+        for i, item in enumerate(self.items):
+            new_name = self._generate_new_name(item, i)
             
             # Clean name
             invalid_chars = ['\\', '/', ':', '*', '?', '"', '<', '>', '|']

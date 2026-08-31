@@ -46,6 +46,22 @@ from Autodesk.Revit.DB import (
 )
 
 import codecs
+import os
+import sys
+
+# Shared batch rename dialog (extension lib/). Imported softly: it powers one
+# button, so a broken install should not stop the whole manager from opening -
+# the button reports it instead. Matches the pattern Dimension Manager and
+# Wall Layer Manager already use for the same shared dialog.
+_script_dir = os.path.dirname(__file__)
+_extension_dir = os.path.dirname(os.path.dirname(os.path.dirname(_script_dir)))
+_lib_path = os.path.join(_extension_dir, 'lib')
+if _lib_path not in sys.path:
+    sys.path.insert(0, _lib_path)
+try:
+    from batch_rename_dialog import BatchRenameDialog
+except ImportError:
+    BatchRenameDialog = None
 
 doc = revit.doc
 uidoc = revit.uidoc
@@ -162,6 +178,16 @@ class LegendRow(object):
         self.sheet_count = len(sheets)
         self.sheets_display = (", ".join(sheet_label(s) for s in sheets)
                                 if sheets else "Not placed")
+
+
+class LegendRenameItem(object):
+    """One Legend view, wrapped for the shared Batch Rename dialog (lib/
+    batch_rename_dialog.py) - it looks for .name and .Element on whatever
+    item list it's given; LegendRow itself exposes the view as .view."""
+
+    def __init__(self, legend_row):
+        self.Element = legend_row.view
+        self.name = legend_row.name
 
 
 class SheetRow(object):
@@ -283,6 +309,7 @@ MAIN_XAML = """
           <Button x:Name="btnPlaceOnSheets" Content="Place on Sheets..." Padding="12,5" Margin="2"
                   Background="#F0CC88" FontWeight="SemiBold"/>
           <Button x:Name="btnRename" Content="Rename" Padding="10,5" Margin="8,2,2,2" Background="White" BorderBrush="#D4B87A"/>
+          <Button x:Name="btnBatchRename" Content="Batch Rename..." Padding="10,5" Margin="2" Background="White" BorderBrush="#D4B87A"/>
           <Button x:Name="btnDuplicate" Content="Duplicate" Padding="10,5" Margin="2" Background="White" BorderBrush="#D4B87A"/>
           <Button x:Name="btnDelete" Content="Delete" Padding="10,5" Margin="2" Background="#FFCDD2"/>
         </StackPanel>
@@ -533,6 +560,7 @@ class LegendManagerWindow(WPFWindow):
         self.btnClear.Click += self.select_none
         self.btnPlaceOnSheets.Click += self.on_place_on_sheets
         self.btnRename.Click += self.on_rename
+        self.btnBatchRename.Click += self.on_batch_rename
         self.btnDuplicate.Click += self.on_duplicate
         self.btnDelete.Click += self.on_delete
         self.btnExportCSV.Click += self.on_export_csv
@@ -601,7 +629,10 @@ class LegendManagerWindow(WPFWindow):
             "legend it's a full sync (check to add, uncheck to remove); for several "
             "legends at once it only adds new placements.\n"
             "- Rename / Duplicate / Delete act on the selected row(s). Duplicating a "
-            "legend does not copy its sheet placements - the copy starts unplaced.\n\n"
+            "legend does not copy its sheet placements - the copy starts unplaced.\n"
+            "- Batch Rename... opens the same tabbed Prefix/Suffix, Find/Replace, "
+            "Remove, Change Case and Numbering rename tool the other managers in "
+            "this suite use, applied to every selected legend at once.\n\n"
             "Dang Quoc Truong - DQT (c) 2026",
             title="DQT - Legend Manager")
 
@@ -635,6 +666,22 @@ class LegendManagerWindow(WPFWindow):
             t.RollBack()
             forms.alert("Could not rename:\n\n{}".format(ex), title="DQT - Legend Manager")
             return
+        self.load_data()
+
+    def on_batch_rename(self, sender, args):
+        if BatchRenameDialog is None:
+            forms.alert(
+                "The shared batch rename dialog could not be loaded from the "
+                "extension's lib folder.\n\nSingle Rename still works.",
+                title="DQT - Legend Manager")
+            return
+        selected = self.selected_rows()
+        if not selected:
+            forms.alert("Select one or more legends to batch rename.", title="DQT - Legend Manager")
+            return
+        items = [LegendRenameItem(row) for row in selected]
+        dialog = BatchRenameDialog(self.document, items, self)
+        dialog.ShowDialog()
         self.load_data()
 
     def on_duplicate(self, sender, args):
