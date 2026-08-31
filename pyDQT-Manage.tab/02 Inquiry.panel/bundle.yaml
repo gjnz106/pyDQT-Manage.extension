@@ -7,4 +7,5 @@ layout:
   - InPlaceModel
   - WorksetChecker
   - CADImportManager
+  - ImageManager
   - GroupManager
