@@ -23,14 +23,21 @@ clr.AddReference('RevitAPI')
 clr.AddReference('RevitAPIUI')
 clr.AddReference('System')
 clr.AddReference('PresentationFramework')
+clr.AddReference('WindowsBase')
+
+# pyrevit.forms must be imported before anything from System.Windows -
+# it is what actually loads WindowsBase/PresentationCore into the CLR in
+# pyRevit's IronPython engine. Importing RoutedEventHandler first (as an
+# earlier version of this file did) raised "Cannot import name
+# RoutedEventHandler" on Revit 2026, because the assembly it lives in
+# (WindowsBase) was not loaded yet at that point.
+from pyrevit import revit, forms, script
+from pyrevit.forms import WPFWindow
 
 import System
 from System.Windows import RoutedEventHandler
 from System.Windows.Controls import CheckBox
 from System.Collections.ObjectModel import ObservableCollection
-
-from pyrevit import revit, forms, script
-from pyrevit.forms import WPFWindow
 
 import Autodesk.Revit.DB as DB
 from Autodesk.Revit.DB import (
