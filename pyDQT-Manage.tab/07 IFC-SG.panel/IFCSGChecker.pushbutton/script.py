@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-IFC-SG Parameter Checker v1.0 - DQT
+IFC-SG Parameter Checker v1.1 - DQT
 Checks that required IFC+SG parameters exist and have values in Revit model elements.
 Supports import from:
   - Autodesk Model Checker XML configuration files
@@ -144,43 +144,98 @@ for d in [CONFIG_DIR, REPORTS_DIR]:
         os.makedirs(d)
 
 # =====================================================================
+# UI SCALE
+# One layout transform on the root grid scales text, icons, buttons and
+# spacing together, so nothing can be missed and the ratio stays tunable.
+# =====================================================================
+UI_SCALE = 1.3
+BASE_WIDTH = 1150
+BASE_HEIGHT = 820
+
+# How many missing element ids are kept per check. The results list, the
+# per-category button and "Select All Failed" all read from this, so it has
+# to be at least as large as the biggest of those slices.
+MAX_STORED_IDS = 1000
+
+# =====================================================================
 # CATEGORY NAME MAPPING: Revit Category Name <-> BuiltInCategory
 # =====================================================================
+def _bic(*names):
+    """First BuiltInCategory that exists in this Revit version.
+
+    Category enum members come and go between releases - OST_Toposolid only
+    exists from Revit 2024 - so resolve by name and fall back rather than
+    referencing a member that may not be there."""
+    for name in names:
+        try:
+            value = getattr(BuiltInCategory, name, None)
+            if value is not None:
+                return value
+        except:
+            pass
+    return None
+
+
 CATEGORY_MAP = {
-    "Areas": BuiltInCategory.OST_Areas,
-    "Generic Models": BuiltInCategory.OST_GenericModel,
-    "Plumbing Fixtures": BuiltInCategory.OST_PlumbingFixtures,
+    "Areas": _bic("OST_Areas"),
+    "Generic Models": _bic("OST_GenericModel"),
+    "Plumbing Fixtures": _bic("OST_PlumbingFixtures"),
     "Project Information": None,  # Special handling
-    "Ceilings": BuiltInCategory.OST_Ceilings,
-    "Doors": BuiltInCategory.OST_Doors,
-    "Toposolid": BuiltInCategory.OST_Topography,
-    "Floors": BuiltInCategory.OST_Floors,
-    "Shaft Openings": BuiltInCategory.OST_ShaftOpening,
-    "Windows": BuiltInCategory.OST_Windows,
-    "Planting": BuiltInCategory.OST_Planting,
-    "Specialty Equipment": BuiltInCategory.OST_SpecialityEquipment,
-    "Parking": BuiltInCategory.OST_Parking,
-    "Rooms": BuiltInCategory.OST_Rooms,
-    "Walls": BuiltInCategory.OST_Walls,
-    "Railings": BuiltInCategory.OST_StairsRailing,
-    "Ramps": BuiltInCategory.OST_Ramps,
-    "Model Groups": BuiltInCategory.OST_IOSModelGroups,
-    "Roofs": BuiltInCategory.OST_Roofs,
-    "Furniture": BuiltInCategory.OST_Furniture,
-    "Stairs": BuiltInCategory.OST_Stairs,
-    "Structural Framing": BuiltInCategory.OST_StructuralFraming,
-    "Structural Columns": BuiltInCategory.OST_StructuralColumns,
-    "Columns": BuiltInCategory.OST_Columns,
-    "Structural Foundations": BuiltInCategory.OST_StructuralFoundation,
-    "Electrical Equipment": BuiltInCategory.OST_ElectricalEquipment,
-    "Duct Accessories": BuiltInCategory.OST_DuctAccessory,
-    "Mechanical Equipment": BuiltInCategory.OST_MechanicalEquipment,
-    "Pipes": BuiltInCategory.OST_PipeCurves,
-    "Pipe Fittings": BuiltInCategory.OST_PipeFitting,
-    "Ducts": BuiltInCategory.OST_DuctCurves,
-    "Duct Fittings": BuiltInCategory.OST_DuctFitting,
-    "Pipe Accessories": BuiltInCategory.OST_PipeAccessory,
+    "Ceilings": _bic("OST_Ceilings"),
+    "Doors": _bic("OST_Doors"),
+    # Toposolid (Revit 2024+) is its own category - OST_Topography is the old
+    # toposurface and finds nothing in a toposolid model.
+    "Toposolid": _bic("OST_Toposolid", "OST_Topography"),
+    "Toposolids": _bic("OST_Toposolid", "OST_Topography"),
+    "Topography": _bic("OST_Topography"),
+    "Floors": _bic("OST_Floors"),
+    "Shaft Openings": _bic("OST_ShaftOpening"),
+    "Windows": _bic("OST_Windows"),
+    "Planting": _bic("OST_Planting"),
+    "Specialty Equipment": _bic("OST_SpecialityEquipment"),
+    "Parking": _bic("OST_Parking"),
+    "Rooms": _bic("OST_Rooms"),
+    "Walls": _bic("OST_Walls"),
+    "Railings": _bic("OST_StairsRailing"),
+    "Ramps": _bic("OST_Ramps"),
+    "Model Groups": _bic("OST_IOSModelGroups"),
+    "Roofs": _bic("OST_Roofs"),
+    "Furniture": _bic("OST_Furniture"),
+    "Stairs": _bic("OST_Stairs"),
+    "Structural Framing": _bic("OST_StructuralFraming"),
+    "Structural Columns": _bic("OST_StructuralColumns"),
+    "Columns": _bic("OST_Columns"),
+    "Structural Foundations": _bic("OST_StructuralFoundation"),
+    "Structural Foundation": _bic("OST_StructuralFoundation"),
+    "Electrical Equipment": _bic("OST_ElectricalEquipment"),
+    "Electrical Fixtures": _bic("OST_ElectricalFixtures"),
+    "Lighting Fixtures": _bic("OST_LightingFixtures"),
+    "Duct Accessories": _bic("OST_DuctAccessory"),
+    "Mechanical Equipment": _bic("OST_MechanicalEquipment"),
+    "Pipes": _bic("OST_PipeCurves"),
+    "Pipe Fittings": _bic("OST_PipeFitting"),
+    "Ducts": _bic("OST_DuctCurves"),
+    "Duct Fittings": _bic("OST_DuctFitting"),
+    "Pipe Accessories": _bic("OST_PipeAccessory"),
+    "Sprinklers": _bic("OST_Sprinklers"),
+    "Casework": _bic("OST_Casework"),
+    "Curtain Panels": _bic("OST_CurtainWallPanels"),
+    "Curtain Wall Panels": _bic("OST_CurtainWallPanels"),
+    "Curtain Wall Mullions": _bic("OST_CurtainWallMullions"),
+    "Spaces": _bic("OST_MEPSpaces"),
 }
+
+# Case/whitespace-insensitive lookup so category names coming from an Excel
+# sheet or a hand-edited config still resolve.
+CATEGORY_LOOKUP = dict((k.strip().lower(), k) for k in CATEGORY_MAP)
+
+
+def resolve_category_key(category_name):
+    """Canonical CATEGORY_MAP key for a config's category name, or None when
+    the category is not one this tool knows how to collect."""
+    if category_name is None:
+        return None
+    return CATEGORY_LOOKUP.get(str(category_name).strip().lower())
 
 
 # =====================================================================
@@ -224,34 +279,45 @@ class ParamCheckConfig:
         root = tree.getroot()
         config.name = root.get("Name", "Imported XML Config")
         config.description = root.get("Description", "")
-        
-        for heading in root.findall("Heading"):
-            disc_name = heading.get("HeadingText", "")
+
+        # Autodesk writes these files with the Heading/Section/Check elements
+        # at varying depths, so search the whole subtree instead of only the
+        # direct children - two of the shipped CORENET configs nest them one
+        # level deeper and used to import as completely empty.
+        for heading in root.iter("Heading"):
+            disc_name = heading.get("HeadingText", "") or heading.get("Name", "")
             disc_enabled = heading.get("IsChecked", "True") == "True"
-            
+
             categories = {}
-            for section in heading.findall("Section"):
-                cat_name = section.get("SectionName", "")
+            for section in heading.iter("Section"):
+                cat_name = section.get("SectionName", "") or section.get("Name", "")
                 cat_enabled = section.get("IsChecked", "True") == "True"
-                
+
                 params = []
-                for check in section.findall("Check"):
-                    param_name = check.get("CheckName", "")
+                for check in section.iter("Check"):
+                    param_name = (check.get("CheckName", "") or
+                                  check.get("Name", "") or
+                                  check.get("ParameterName", ""))
                     if param_name:
                         params.append(param_name)
-                
-                if params:
+
+                if cat_name and params:
+                    if cat_name in categories:
+                        params.extend(categories[cat_name]["params"])
                     categories[cat_name] = {
                         "enabled": cat_enabled,
                         "params": sorted(set(params))
                     }
-            
+
             if categories:
-                config.disciplines[disc_name] = {
-                    "enabled": disc_enabled,
-                    "categories": categories
-                }
-        
+                if disc_name in config.disciplines:
+                    config.disciplines[disc_name]["categories"].update(categories)
+                else:
+                    config.disciplines[disc_name or "Imported"] = {
+                        "enabled": disc_enabled,
+                        "categories": categories
+                    }
+
         return config
     
     @staticmethod
@@ -268,14 +334,16 @@ class ParamCheckConfig:
         config.source = "Excel"
         config.name = os.path.splitext(os.path.basename(filepath))[0]
         
+        excel_app = None
+        wb = None
         try:
             clr.AddReference('Microsoft.Office.Interop.Excel')
             from Microsoft.Office.Interop import Excel as ExcelInterop
-            
+
             excel_app = ExcelInterop.ApplicationClass()
             excel_app.Visible = False
             excel_app.DisplayAlerts = False
-            
+
             wb = excel_app.Workbooks.Open(filepath)
             ws = wb.Sheets[1]
             
@@ -303,12 +371,28 @@ class ParamCheckConfig:
                     config.disciplines[disc]["categories"][cat]["params"].append(param)
             
             wb.Close(False)
+            wb = None
             excel_app.Quit()
             System.Runtime.InteropServices.Marshal.ReleaseComObject(excel_app)
-            
+            excel_app = None
+
         except Exception as e:
             raise Exception("Excel parse error: {}".format(str(e)))
-        
+        finally:
+            # Without this an EXCEL.EXE stays running invisibly whenever the
+            # read throws part-way through.
+            try:
+                if wb is not None:
+                    wb.Close(False)
+            except:
+                pass
+            try:
+                if excel_app is not None:
+                    excel_app.Quit()
+                    System.Runtime.InteropServices.Marshal.ReleaseComObject(excel_app)
+            except:
+                pass
+
         return config
     
     @staticmethod
@@ -352,8 +436,9 @@ class ParamCheckConfig:
 # =====================================================================
 class CheckResult:
     """Result for one category check"""
-    def __init__(self, discipline, category, param_name, status, 
-                 total_elements=0, missing_count=0, element_ids=None):
+    def __init__(self, discipline, category, param_name, status,
+                 total_elements=0, missing_count=0, element_ids=None,
+                 unmapped=False):
         self.discipline = discipline
         self.category = category
         self.param_name = param_name
@@ -361,6 +446,10 @@ class CheckResult:
         self.total_elements = total_elements
         self.missing_count = missing_count
         self.element_ids = element_ids or []
+        # True when the config names a category this tool cannot collect, as
+        # opposed to a category that is simply empty in this model. Both come
+        # back as "no_elements" but they mean very different things.
+        self.unmapped = unmapped
 
 
 class ParamChecker:
@@ -368,17 +457,26 @@ class ParamChecker:
     
     def __init__(self, document):
         self.doc = document
-        self._element_cache = {}  # category -> list of elements
-    
+        self._element_cache = {}   # category -> list of elements
+        self._type_cache = {}      # type element id -> {param name: has value}
+
+    def is_mapped(self, category_name):
+        """True when this tool knows how to collect the config's category."""
+        if str(category_name).strip().lower() == "project information":
+            return True
+        return resolve_category_key(category_name) is not None
+
     def _get_elements(self, category_name):
         """Get all instance elements for a Revit category"""
         if category_name in self._element_cache:
             return self._element_cache[category_name]
-        
-        bic = CATEGORY_MAP.get(category_name)
+
+        key = resolve_category_key(category_name)
+        bic = CATEGORY_MAP.get(key) if key else None
         elements = []
-        
-        if category_name == "Project Information":
+
+        if key == "Project Information" or \
+                str(category_name).strip().lower() == "project information":
             # Special: only 1 element
             elements = [self.doc.ProjectInformation]
         elif bic is not None:
@@ -389,30 +487,83 @@ class ParamChecker:
                 elements = list(collector)
             except:
                 elements = []
-        
+
         self._element_cache[category_name] = elements
         return elements
-    
-    def _check_param_has_value(self, element, param_name):
-        """Check if an element has a parameter with a non-empty value"""
-        # Try by name
-        for p in element.Parameters:
-            if p.Definition.Name == param_name:
-                if not p.HasValue:
-                    return False
-                if p.StorageType == StorageType.String:
-                    val = p.AsString()
-                    return val is not None and val.strip() != ""
-                elif p.StorageType == StorageType.Integer:
-                    return True  # Has value
-                elif p.StorageType == StorageType.Double:
-                    return True
-                elif p.StorageType == StorageType.ElementId:
-                    return p.AsElementId() != ElementId.InvalidElementId
-                return True
-        
-        # Parameter not found on element
-        return False
+
+    def _param_has_value(self, p):
+        """True when a parameter holds something a checker would accept."""
+        try:
+            if not p.HasValue:
+                return False
+            if p.StorageType == StorageType.String:
+                val = p.AsString()
+                return val is not None and val.strip() != ""
+            elif p.StorageType == StorageType.ElementId:
+                return p.AsElementId() != ElementId.InvalidElementId
+            return True
+        except:
+            return False
+
+    def _collect_param_map(self, element):
+        """{parameter name: has a value} for one element, built in one pass.
+
+        Reading every parameter once and looking the wanted names up in the
+        result is what keeps a 40-parameter category from re-walking each
+        element's whole parameter list 40 times."""
+        found = {}
+        try:
+            for p in element.Parameters:
+                try:
+                    name = p.Definition.Name
+                except:
+                    continue
+                # An element can carry the same name twice (instance + shared);
+                # any one of them holding a value is enough to pass.
+                if found.get(name):
+                    continue
+                found[name] = self._param_has_value(p)
+        except:
+            pass
+        return found
+
+    def _get_type_param_map(self, element):
+        """Parameter map of the element's type, cached per type.
+
+        Plenty of IFC+SG parameters (FireRating, IfcExportAs, material data)
+        are type parameters. Checking instances only reported every one of
+        them as missing on every element."""
+        try:
+            type_id = element.GetTypeId()
+        except:
+            return {}
+        if type_id is None or type_id == ElementId.InvalidElementId:
+            return {}
+
+        key = _eid_int(type_id)
+        if key in self._type_cache:
+            return self._type_cache[key]
+
+        type_map = {}
+        try:
+            el_type = self.doc.GetElement(type_id)
+            if el_type is not None:
+                type_map = self._collect_param_map(el_type)
+        except:
+            type_map = {}
+
+        self._type_cache[key] = type_map
+        return type_map
+
+    def _lookup(self, param_map, lower_map, param_name):
+        """Has-value lookup: exact name first, then case-insensitive.
+
+        Config files and Revit shared parameters disagree on casing often
+        enough ("FireRating" vs "Firerating") that an exact-only match
+        produced failures for parameters that are actually filled in."""
+        if param_name in param_map:
+            return param_map[param_name]
+        return lower_map.get(param_name.strip().lower())
     
     def run_check(self, config, progress_callback=None):
         """
@@ -421,7 +572,8 @@ class ParamChecker:
         """
         results = []
         self._element_cache = {}
-        
+        self._type_cache = {}
+
         total_checks = 0
         for d_data in config.disciplines.values():
             if not d_data.get("enabled", True):
@@ -432,40 +584,62 @@ class ParamChecker:
                 total_checks += len(c_data.get("params", []))
         
         current = 0
-        
+
         for disc_name, disc_data in config.disciplines.items():
             if not disc_data.get("enabled", True):
                 continue
-            
+
             for cat_name, cat_data in disc_data.get("categories", {}).items():
                 if not cat_data.get("enabled", True):
                     continue
-                
-                elements = self._get_elements(cat_name)
-                
+
+                params = cat_data.get("params", [])
+                mapped = self.is_mapped(cat_name)
+                if progress_callback:
+                    progress_callback(current, total_checks,
+                                      "{} > {}".format(disc_name, cat_name))
+                elements = self._get_elements(cat_name) if mapped else []
+
                 if not elements:
-                    for param_name in cat_data.get("params", []):
+                    for param_name in params:
                         results.append(CheckResult(
                             disc_name, cat_name, param_name,
-                            "no_elements", 0, 0))
+                            "no_elements", 0, 0, None, not mapped))
                         current += 1
-                        if progress_callback:
-                            progress_callback(current, total_checks)
+                    if progress_callback:
+                        progress_callback(current, total_checks,
+                                          "{} > {}".format(disc_name, cat_name))
                     continue
-                
-                for param_name in cat_data.get("params", []):
-                    missing_ids = []
-                    total = len(elements)
-                    
-                    for el in elements:
-                        try:
-                            if not self._check_param_has_value(el, param_name):
-                                missing_ids.append(_eid_int(el.Id))
-                        except:
-                            pass
-                    
-                    missing = len(missing_ids)
-                    
+
+                # One pass over the elements collecting every wanted parameter
+                # at once, rather than one full pass per parameter.
+                missing_ids = dict((p, []) for p in params)
+                total = len(elements)
+
+                for el in elements:
+                    try:
+                        inst_map = self._collect_param_map(el)
+                        type_map = self._get_type_param_map(el)
+                        inst_lower = dict((k.strip().lower(), v)
+                                          for k, v in inst_map.items())
+                        type_lower = dict((k.strip().lower(), v)
+                                          for k, v in type_map.items())
+                        el_id = _eid_int(el.Id)
+                    except:
+                        continue
+
+                    for param_name in params:
+                        has = self._lookup(inst_map, inst_lower, param_name)
+                        if not has:
+                            # Fall back to the type - a value there is what
+                            # gets exported to IFC for this element.
+                            has = self._lookup(type_map, type_lower, param_name)
+                        if not has:
+                            missing_ids[param_name].append(el_id)
+
+                for param_name in params:
+                    missing = len(missing_ids[param_name])
+
                     if missing == 0:
                         status = "pass"
                     elif missing == total:
@@ -473,38 +647,66 @@ class ParamChecker:
                         status = "fail"
                     else:
                         status = "warning"  # Partial
-                    
+
                     results.append(CheckResult(
                         disc_name, cat_name, param_name,
-                        status, total, missing, missing_ids[:100]))
-                    
+                        status, total, missing,
+                        missing_ids[param_name][:MAX_STORED_IDS]))
+
                     current += 1
-                    if progress_callback:
-                        progress_callback(current, total_checks)
-        
+
+                if progress_callback:
+                    progress_callback(current, total_checks,
+                                      "{} > {}".format(disc_name, cat_name))
+
         return results
 
 
 # =====================================================================
 # EXCEL REPORT
 # =====================================================================
+XLSX_FORMAT = 51  # xlOpenXMLWorkbook - SaveAs must be told, or Excel picks
+                  # its own default format and the .xlsx name lies about it.
+
+INVALID_FILENAME_CHARS = '\\/:*?"<>|\r\n\t'
+MAX_PATH = 250    # Excel refuses to save beyond the Windows path limit
+
+
+def safe_filename(text, max_length=40):
+    """Filename-safe, length-capped version of a piece of text.
+
+    Revit project names on CORENET jobs run to 250+ characters with commas
+    and brackets in them. Dropped into a filename they blow past the Windows
+    path limit and Excel's SaveAs fails - which is exactly what stopped the
+    export from working."""
+    if not text:
+        return ""
+    cleaned = "".join(" " if c in INVALID_FILENAME_CHARS else c for c in text)
+    cleaned = " ".join(cleaned.split())        # collapse runs of whitespace
+    cleaned = cleaned.strip(" .")              # Windows dislikes both at the end
+    if len(cleaned) > max_length:
+        cleaned = cleaned[:max_length].strip(" .")
+    return cleaned
+
+
 class ExcelReporter:
     """Generate Excel report for IFC-SG parameter check"""
-    
+
     def __init__(self, doc):
         self.doc = doc
-    
+
     def _rgb(self, r, g, b):
         return r + (g * 256) + (b * 256 * 256)
-    
+
     def generate(self, config, results, filepath):
         clr.AddReference('Microsoft.Office.Interop.Excel')
         from Microsoft.Office.Interop import Excel as ExcelInterop
-        
+
         excel_app = ExcelInterop.ApplicationClass()
         excel_app.Visible = False
         excel_app.DisplayAlerts = False
-        
+
+        wb = None
         try:
             wb = excel_app.Workbooks.Add()
             
@@ -555,7 +757,8 @@ class ExcelReporter:
             ws2.Name = "Detailed Results"
             
             headers = ["Discipline", "Category", "Parameter", "Status",
-                       "Total Elements", "Missing Count", "Element IDs (sample)"]
+                       "Total Elements", "Missing Count", "Element IDs (sample)",
+                       "Note"]
             for i, h in enumerate(headers, 1):
                 ws2.Cells[1, i].Value2 = h
                 ws2.Cells[1, i].Font.Bold = True
@@ -577,13 +780,15 @@ class ExcelReporter:
                 ws2.Cells[row, 5].Value2 = r.total_elements
                 ws2.Cells[row, 6].Value2 = r.missing_count
                 ws2.Cells[row, 7].Value2 = ", ".join(str(eid) for eid in r.element_ids[:20])
-                
+                if getattr(r, "unmapped", False):
+                    ws2.Cells[row, 8].Value2 = "Category not supported by this checker"
+
                 color = status_colors.get(r.status)
                 if color:
                     ws2.Cells[row, 4].Interior.Color = color
                 row += 1
-            
-            ws2.Columns["A:G"].AutoFit()
+
+            ws2.Columns["A:H"].AutoFit()
             
             # --- Sheet 3: Failed Only ---
             ws3 = wb.Sheets.Add(After=wb.Sheets[wb.Sheets.Count])
@@ -610,16 +815,23 @@ class ExcelReporter:
                 ws3.Range["A2:E2"].Merge()
             
             ws3.Columns["A:E"].AutoFit()
-            
-            wb.SaveAs(filepath)
+
+            wb.SaveAs(filepath, XLSX_FORMAT)
             wb.Close()
             excel_app.Quit()
             System.Runtime.InteropServices.Marshal.ReleaseComObject(excel_app)
             return True
-            
+
         except Exception as e:
+            # Clean up without letting the cleanup itself throw - a bare
+            # wb.Close() here used to raise NameError when the failure
+            # happened before the workbook existed, hiding the real error.
             try:
-                wb.Close(False)
+                if wb is not None:
+                    wb.Close(False)
+            except:
+                pass
+            try:
                 excel_app.Quit()
                 System.Runtime.InteropServices.Marshal.ReleaseComObject(excel_app)
             except:
@@ -633,9 +845,9 @@ class ExcelReporter:
 XAML_STR = '''
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="IFC-SG Parameter Checker v1.0 - DQT"
+        Title="IFC-SG Parameter Checker v1.1 - DQT"
         Height="820" Width="1150"
-        MinHeight="650" MinWidth="900"
+        MinHeight="600" MinWidth="880"
         WindowStartupLocation="CenterScreen"
         Background="#FEF8E7">
     
@@ -710,7 +922,7 @@ XAML_STR = '''
                 </StackPanel>
                 <StackPanel Grid.Column="1" VerticalAlignment="Center" HorizontalAlignment="Right">
                     <TextBlock Text="DQT" FontSize="14" FontWeight="Bold" Foreground="#C89650"/>
-                    <TextBlock Text="v1.0" FontSize="9" Foreground="#999" HorizontalAlignment="Right"/>
+                    <TextBlock Text="v1.1" FontSize="9" Foreground="#999" HorizontalAlignment="Right"/>
                 </StackPanel>
             </Grid>
         </Border>
@@ -807,16 +1019,28 @@ XAML_STR = '''
                         <RowDefinition Height="*"/>
                     </Grid.RowDefinitions>
                     
-                    <TextBlock Grid.Row="0" Text="Disciplines / Categories" FontWeight="Bold" 
+                    <TextBlock Grid.Row="0" Text="Disciplines / Categories" FontWeight="Bold"
                                FontSize="12" Foreground="#5D4E37" Margin="0,0,0,6"/>
-                    
-                    <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,6">
-                        <Button x:Name="btnExpandAll" Content="Expand" 
-                                Style="{StaticResource BtnSecondary}" Padding="6,3" FontSize="10" Margin="0,0,4,0"/>
-                        <Button x:Name="btnCollapseAll" Content="Collapse" 
-                                Style="{StaticResource BtnSecondary}" Padding="6,3" FontSize="10"/>
+
+                    <StackPanel Grid.Row="1" Margin="0,0,0,6">
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                            <Button x:Name="btnExpandAll" Content="Expand"
+                                    Style="{StaticResource BtnSecondary}" Padding="6,3" FontSize="10" Margin="0,0,4,0"/>
+                            <Button x:Name="btnCollapseAll" Content="Collapse"
+                                    Style="{StaticResource BtnSecondary}" Padding="6,3" FontSize="10"/>
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="Tick:" FontSize="10" VerticalAlignment="Center"
+                                       Foreground="#888" Margin="0,0,5,0"/>
+                            <Button x:Name="btnTreeAll" Content="All"
+                                    Style="{StaticResource BtnSecondary}" Padding="6,3" FontSize="10" Margin="0,0,4,0"/>
+                            <Button x:Name="btnTreeNone" Content="None"
+                                    Style="{StaticResource BtnSecondary}" Padding="6,3" FontSize="10" Margin="0,0,4,0"/>
+                            <Button x:Name="btnTreeInvert" Content="Invert"
+                                    Style="{StaticResource BtnSecondary}" Padding="6,3" FontSize="10"/>
+                        </StackPanel>
                     </StackPanel>
-                    
+
                     <TreeView x:Name="tvCategories" Grid.Row="2" 
                               BorderBrush="#E0E0E0" BorderThickness="1" Background="White">
                     </TreeView>
@@ -829,10 +1053,11 @@ XAML_STR = '''
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
                         <RowDefinition Height="*"/>
                     </Grid.RowDefinitions>
-                    
-                    <TextBlock Grid.Row="0" x:Name="txtResultHeader" Text="Load a config and click Run Check" 
+
+                    <TextBlock Grid.Row="0" x:Name="txtResultHeader" Text="Load a config and click Run Check"
                                FontWeight="Bold" FontSize="12" Foreground="#5D4E37" Margin="0,0,0,4"/>
                     
                     <!-- Filter bar -->
@@ -852,9 +1077,30 @@ XAML_STR = '''
                         <TextBlock Text="Search:" FontSize="11" VerticalAlignment="Center" Margin="0,0,6,0" Foreground="#888"/>
                         <TextBox x:Name="txtSearch" Width="150" Padding="4,3" FontSize="11"/>
                     </StackPanel>
-                    
+
+                    <!-- Multi-select bar -->
+                    <Border Grid.Row="2" Background="#FAF6EC" BorderBrush="#E8E0D0"
+                            BorderThickness="1" CornerRadius="3" Padding="6,4" Margin="0,0,0,6">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="Multi-select:" FontSize="11" VerticalAlignment="Center"
+                                       Margin="0,0,6,0" Foreground="#5D4E37" FontWeight="SemiBold"/>
+                            <Button x:Name="btnTickAll" Content="Select All"
+                                    Style="{StaticResource BtnSecondary}" Padding="8,3" FontSize="10" Margin="0,0,3,0"/>
+                            <Button x:Name="btnTickNone" Content="Un-select"
+                                    Style="{StaticResource BtnSecondary}" Padding="8,3" FontSize="10" Margin="0,0,3,0"/>
+                            <Button x:Name="btnTickInvert" Content="Invert"
+                                    Style="{StaticResource BtnSecondary}" Padding="8,3" FontSize="10" Margin="0,0,3,0"/>
+                            <Button x:Name="btnTickFailed" Content="Tick Failed"
+                                    Style="{StaticResource BtnSecondary}" Padding="8,3" FontSize="10" Margin="0,0,10,0"/>
+                            <TextBlock x:Name="txtTickCount" Text="0 rows ticked" FontSize="11"
+                                       VerticalAlignment="Center" Foreground="#888" Margin="0,0,10,0"/>
+                            <Button x:Name="btnSelectTicked" Content="&#x25BA; Select Ticked in Revit"
+                                    Style="{StaticResource BtnPrimary}" Padding="10,3" FontSize="10" IsEnabled="False"/>
+                        </StackPanel>
+                    </Border>
+
                     <!-- Results list -->
-                    <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
+                    <ScrollViewer Grid.Row="3" VerticalScrollBarVisibility="Auto">
                         <StackPanel x:Name="spResults"/>
                     </ScrollViewer>
                 </Grid>
@@ -884,7 +1130,7 @@ XAML_STR = '''
         <!-- Row 5: Footer -->
         <Border Grid.Row="5" Background="#F5F0E0" CornerRadius="3" Padding="8,4">
             <Grid>
-                <TextBlock Text="IFC-SG Parameter Checker v1.0 | Dang Quoc Truong (DQT)" 
+                <TextBlock Text="IFC-SG Parameter Checker v1.1 | Dang Quoc Truong (DQT)" 
                            FontSize="9" Foreground="#999" HorizontalAlignment="Left"/>
                 <TextBlock x:Name="txtFooter" Text="" 
                            FontSize="9" Foreground="#999" HorizontalAlignment="Right"/>
@@ -907,31 +1153,79 @@ class IFCSGCheckerWindow:
         self.all_results = []
         self.checker = ParamChecker(doc)
         self.reporter = ExcelReporter(doc)
-        
+        # Row checkboxes currently on screen: [(CheckBox, CheckResult), ...]
+        self.row_checks = []
+        self.disc_checks = []
+        self.cat_checks = []
+        # Guards the discipline -> categories cascade during bulk ticking.
+        self._suspend_cascade = False
+
         # Parse XAML
         self.window = XamlReader.Parse(XAML_STR)
-        
+
         self._get_controls()
+        self._apply_ui_scale()
         self._bind_events()
         self._load_saved_configs()
-        
+
         self.txtFooter.Text = "{} | {}".format(
             doc.ProjectInformation.Name or "Untitled",
             datetime.datetime.now().strftime("%Y-%m-%d"))
-    
+
+    def _apply_ui_scale(self):
+        """Scale the whole window by UI_SCALE.
+
+        One layout transform on the root grid enlarges text, icons, buttons
+        and spacing by the same factor, including the rows built in code -
+        far safer than editing every FontSize and Width by hand and missing
+        some. The window grows to match, then gets clamped to the screen so
+        it still fits on a laptop."""
+        try:
+            root = self.window.Content
+            root.LayoutTransform = ScaleTransform(UI_SCALE, UI_SCALE)
+        except:
+            return
+
+        try:
+            work = System.Windows.SystemParameters.WorkArea
+            max_w = work.Width * 0.96
+            max_h = work.Height * 0.94
+            self.window.Width = min(BASE_WIDTH * UI_SCALE, max_w)
+            self.window.Height = min(BASE_HEIGHT * UI_SCALE, max_h)
+            self.window.MinWidth = min(880 * UI_SCALE, max_w)
+            self.window.MinHeight = min(600 * UI_SCALE, max_h)
+        except:
+            pass
+
+    def _pump_ui(self):
+        """Let WPF repaint mid-operation.
+
+        The check and the export both run on the UI thread (the Revit API
+        demands it), so without this the status text never actually appears
+        and the window looks frozen."""
+        try:
+            self.window.Dispatcher.Invoke(
+                System.Windows.Threading.DispatcherPriority.Background,
+                System.Action(lambda: None))
+        except:
+            pass
+
     def _get_controls(self):
         names = [
             "cmbConfig", "btnImportXML", "btnImportExcel", "btnSaveConfig", "btnDeleteConfig",
             "txtTotalParams", "txtCategories", "txtPassed", "txtFailed", "txtWarning", "txtNoElem",
             "tvCategories", "btnExpandAll", "btnCollapseAll",
+            "btnTreeAll", "btnTreeNone", "btnTreeInvert",
             "txtResultHeader", "spResults",
-            "btnFilterAll", "btnFilterFail", "btnFilterWarn", "btnFilterPass", 
+            "btnFilterAll", "btnFilterFail", "btnFilterWarn", "btnFilterPass",
             "btnSelectAllFailed", "txtSearch",
+            "btnTickAll", "btnTickNone", "btnTickInvert", "btnTickFailed",
+            "txtTickCount", "btnSelectTicked",
             "txtStatus", "btnRunCheck", "btnExportExcel", "btnClose", "txtFooter"
         ]
         for name in names:
             setattr(self, name, self.window.FindName(name))
-    
+
     def _bind_events(self):
         self.btnImportXML.Click += self._on_import_xml
         self.btnImportExcel.Click += self._on_import_excel
@@ -940,6 +1234,14 @@ class IFCSGCheckerWindow:
         self.cmbConfig.SelectionChanged += self._on_config_changed
         self.btnExpandAll.Click += self._on_expand_all
         self.btnCollapseAll.Click += self._on_collapse_all
+        self.btnTreeAll.Click += lambda s, e: self._set_tree_checked("all")
+        self.btnTreeNone.Click += lambda s, e: self._set_tree_checked("none")
+        self.btnTreeInvert.Click += lambda s, e: self._set_tree_checked("invert")
+        self.btnTickAll.Click += lambda s, e: self._set_rows_ticked("all")
+        self.btnTickNone.Click += lambda s, e: self._set_rows_ticked("none")
+        self.btnTickInvert.Click += lambda s, e: self._set_rows_ticked("invert")
+        self.btnTickFailed.Click += lambda s, e: self._set_rows_ticked("failed")
+        self.btnSelectTicked.Click += self._on_select_ticked
         self.btnFilterAll.Click += lambda s, e: self._apply_filter("all")
         self.btnFilterFail.Click += lambda s, e: self._apply_filter("fail")
         self.btnFilterWarn.Click += lambda s, e: self._apply_filter("warning")
@@ -971,9 +1273,17 @@ class IFCSGCheckerWindow:
                 self.config = ParamCheckConfig.from_json(path)
                 self._refresh_tree()
                 self._update_config_stats()
-                self.btnRunCheck.IsEnabled = True
-                self.txtStatus.Text = "Config loaded: {} ({})".format(
-                    self.config.name, self.config.source)
+                d, c, p = self.config.get_total_stats()
+                self.btnRunCheck.IsEnabled = p > 0
+                if p == 0:
+                    # A config that parsed to nothing used to load silently
+                    # and then "check" zero parameters.
+                    self.txtStatus.Text = (
+                        "Config '{}' has no parameters in it - re-import the "
+                        "source XML or pick another config.".format(self.config.name))
+                else:
+                    self.txtStatus.Text = "Config loaded: {} ({}) - {} params".format(
+                        self.config.name, self.config.source, p)
             except Exception as e:
                 self.txtStatus.Text = "Error loading config: {}".format(str(e))
     
@@ -985,7 +1295,20 @@ class IFCSGCheckerWindow:
         
         if dlg.ShowDialog() == DialogResult.OK:
             try:
-                self.config = ParamCheckConfig.from_xml(dlg.FileName)
+                # Validate before replacing the loaded config, so a dud file
+                # cannot leave the window pointing at an empty one.
+                imported = ParamCheckConfig.from_xml(dlg.FileName)
+                d, c, p = imported.get_total_stats()
+                if p == 0:
+                    System.Windows.MessageBox.Show(
+                        "No parameters found in that XML.\n\nExpected "
+                        "Heading / Section / Check elements as written by the "
+                        "Autodesk Model Checker.",
+                        "Nothing imported", MessageBoxButton.OK,
+                        MessageBoxImage.Warning)
+                    return
+
+                self.config = imported
                 # Auto-save as JSON
                 name = os.path.splitext(os.path.basename(dlg.FileName))[0]
                 save_path = os.path.join(CONFIG_DIR, name + ".json")
@@ -1013,7 +1336,18 @@ class IFCSGCheckerWindow:
         
         if dlg.ShowDialog() == DialogResult.OK:
             try:
-                self.config = ParamCheckConfig.from_excel(dlg.FileName)
+                imported = ParamCheckConfig.from_excel(dlg.FileName)
+                d, c, p = imported.get_total_stats()
+                if p == 0:
+                    System.Windows.MessageBox.Show(
+                        "No parameters found in that sheet.\n\nExpected "
+                        "column A = Discipline, B = Category, C = Parameter, "
+                        "with a header row.",
+                        "Nothing imported", MessageBoxButton.OK,
+                        MessageBoxImage.Warning)
+                    return
+
+                self.config = imported
                 name = os.path.splitext(os.path.basename(dlg.FileName))[0]
                 save_path = os.path.join(CONFIG_DIR, name + ".json")
                 self.config.to_json(save_path)
@@ -1061,11 +1395,13 @@ class IFCSGCheckerWindow:
     # =================================================================
     def _refresh_tree(self):
         self.tvCategories.Items.Clear()
+        self.disc_checks = []   # [(CheckBox, discipline name)]
+        self.cat_checks = []    # [(CheckBox, discipline name, category name)]
         if not self.config:
             return
-        
+
         converter = BrushConverter()
-        
+
         for disc_name, disc_data in self.config.disciplines.items():
             # Discipline node
             disc_item = TreeViewItem()
@@ -1081,7 +1417,8 @@ class IFCSGCheckerWindow:
             chk_disc.Tag = disc_name
             chk_disc.Checked += self._on_disc_toggled
             chk_disc.Unchecked += self._on_disc_toggled
-            
+            self.disc_checks.append((chk_disc, disc_name))
+
             lbl_disc = TextBlock()
             lbl_disc.Text = u"{} ({} categories)".format(
                 disc_name, len(disc_data.get("categories", {})))
@@ -1110,12 +1447,21 @@ class IFCSGCheckerWindow:
                 chk_cat.Tag = "{}|{}".format(disc_name, cat_name)
                 chk_cat.Checked += self._on_cat_toggled
                 chk_cat.Unchecked += self._on_cat_toggled
-                
+                self.cat_checks.append((chk_cat, disc_name, cat_name))
+
                 param_count = len(cat_data.get("params", []))
                 lbl_cat = TextBlock()
                 lbl_cat.Text = u"{} ({} params)".format(cat_name, param_count)
                 lbl_cat.FontSize = 11
-                
+                if not self.checker.is_mapped(cat_name):
+                    # Flag it here rather than letting the whole category come
+                    # back as a silent row of "no elements" after the run.
+                    lbl_cat.Text += u"  - not supported"
+                    try:
+                        lbl_cat.Foreground = converter.ConvertFromString("#B0A48C")
+                    except:
+                        pass
+
                 cat_sp.Children.Add(chk_cat)
                 cat_sp.Children.Add(lbl_cat)
                 cat_item.Header = cat_sp
@@ -1126,9 +1472,18 @@ class IFCSGCheckerWindow:
     
     def _on_disc_toggled(self, sender, args):
         disc_name = str(sender.Tag)
+        state = bool(sender.IsChecked)
         if disc_name in self.config.disciplines:
-            self.config.disciplines[disc_name]["enabled"] = bool(sender.IsChecked)
-    
+            self.config.disciplines[disc_name]["enabled"] = state
+
+        # Ticking a discipline ticks everything under it, so one click covers
+        # a whole discipline instead of twenty categories.
+        if not self._suspend_cascade:
+            for chk, chk_disc, _cat in self.cat_checks:
+                if chk_disc == disc_name and bool(chk.IsChecked) != state:
+                    chk.IsChecked = System.Nullable[System.Boolean](state)
+        self._update_selection_status()
+
     def _on_cat_toggled(self, sender, args):
         tag = str(sender.Tag)
         parts = tag.split("|")
@@ -1138,15 +1493,65 @@ class IFCSGCheckerWindow:
                 cats = self.config.disciplines[disc].get("categories", {})
                 if cat in cats:
                     cats[cat]["enabled"] = bool(sender.IsChecked)
-    
+        self._update_selection_status()
+
+    def _set_tree_checked(self, mode):
+        """Tick every discipline and category at once: all / none / invert.
+
+        The discipline cascade is suspended for the duration so that setting
+        the parent boxes does not immediately overwrite the category states
+        this is trying to set."""
+        if not self.config:
+            return
+
+        self._suspend_cascade = True
+        try:
+            # Disciplines stay on for "invert" - an unticked discipline skips
+            # its categories wholesale, which would hide the inversion.
+            disc_state = (mode != "none")
+            for chk, _disc in self.disc_checks:
+                chk.IsChecked = System.Nullable[System.Boolean](disc_state)
+
+            for chk, _disc, _cat in self.cat_checks:
+                if mode == "all":
+                    state = True
+                elif mode == "none":
+                    state = False
+                else:
+                    state = not bool(chk.IsChecked)
+                chk.IsChecked = System.Nullable[System.Boolean](state)
+        finally:
+            self._suspend_cascade = False
+
+        self._update_selection_status()
+
+    def _update_selection_status(self):
+        """Show how much of the config the next run will actually cover."""
+        if not self.config:
+            return
+        cats = 0
+        params = 0
+        for disc_name, disc_data in self.config.disciplines.items():
+            if not disc_data.get("enabled", True):
+                continue
+            for _cat_name, cat_data in disc_data.get("categories", {}).items():
+                if not cat_data.get("enabled", True):
+                    continue
+                cats += 1
+                params += len(cat_data.get("params", []))
+        self.txtTotalParams.Text = str(params)
+        self.txtCategories.Text = str(cats)
+        self.txtStatus.Text = "{} categories / {} parameters selected".format(
+            cats, params)
+
     def _on_expand_all(self, sender, args):
         for item in self.tvCategories.Items:
             item.IsExpanded = True
-    
+
     def _on_collapse_all(self, sender, args):
         for item in self.tvCategories.Items:
             item.IsExpanded = False
-    
+
     def _update_config_stats(self):
         if self.config:
             d, c, p = self.config.get_total_stats()
@@ -1162,9 +1567,16 @@ class IFCSGCheckerWindow:
         
         self.txtStatus.Text = "Running IFC-SG parameter checks..."
         self.window.Cursor = System.Windows.Input.Cursors.Wait
-        
+        self.btnRunCheck.IsEnabled = False
+        self._pump_ui()
+
+        def on_progress(current, total, label=""):
+            self.txtStatus.Text = "Checking {}/{} - {}".format(
+                current, total, label)
+            self._pump_ui()
+
         try:
-            self.results = self.checker.run_check(self.config)
+            self.results = self.checker.run_check(self.config, on_progress)
             self.all_results = list(self.results)
             
             # Update cards
@@ -1184,15 +1596,21 @@ class IFCSGCheckerWindow:
             self.btnExportExcel.IsEnabled = True
             self.btnSelectAllFailed.IsEnabled = True
             self.txtResultHeader.Text = "Check Results ({} checks)".format(len(self.results))
-            self.txtStatus.Text = "Done: {} passed, {} failed, {} partial, {} no elements".format(
+
+            unmapped = len([r for r in self.results if getattr(r, "unmapped", False)])
+            status = "Done: {} passed, {} failed, {} partial, {} no elements".format(
                 passed, failed, warning, no_elem)
-            
+            if unmapped:
+                status += " ({} in categories this tool cannot collect)".format(unmapped)
+            self.txtStatus.Text = status
+
         except Exception as e:
             self.txtStatus.Text = "Error: {}".format(str(e))
             System.Windows.MessageBox.Show(
                 "Error:\n{}".format(traceback.format_exc()),
                 "Error", MessageBoxButton.OK, MessageBoxImage.Error)
         finally:
+            self.btnRunCheck.IsEnabled = True
             self.window.Cursor = System.Windows.Input.Cursors.Arrow
     
     def _apply_filter(self, filter_type):
@@ -1273,6 +1691,7 @@ class IFCSGCheckerWindow:
     
     def _render_results(self, results):
         self.spResults.Children.Clear()
+        self.row_checks = []
         converter = BrushConverter()
         
         status_bg = {
@@ -1327,7 +1746,6 @@ class IFCSGCheckerWindow:
                 stat = cat_stats.get(stat_key, {})
                 pct = stat.get("pct", 0)
                 cat_pass = stat.get("pass", 0)
-                cat_total = stat.get("total", 0)
                 cat_no_elem = stat.get("no_elements", 0)
                 cat_fail = stat.get("fail", 0)
                 cat_warn = stat.get("warning", 0)
@@ -1518,6 +1936,8 @@ class IFCSGCheckerWindow:
                 pass
             
             row_grid = Grid()
+            c0 = ColumnDefinition()
+            c0.Width = System.Windows.GridLength(22)
             c1 = ColumnDefinition()
             c1.Width = System.Windows.GridLength(28)
             c2 = ColumnDefinition()
@@ -1526,11 +1946,24 @@ class IFCSGCheckerWindow:
             c3.Width = System.Windows.GridLength(120)
             c4 = ColumnDefinition()
             c4.Width = System.Windows.GridLength(55)
+            row_grid.ColumnDefinitions.Add(c0)
             row_grid.ColumnDefinitions.Add(c1)
             row_grid.ColumnDefinitions.Add(c2)
             row_grid.ColumnDefinitions.Add(c3)
             row_grid.ColumnDefinitions.Add(c4)
-            
+
+            # Tick box - lets several rows be picked and sent to Revit as one
+            # selection instead of one row at a time.
+            row_chk = CheckBox()
+            row_chk.VerticalAlignment = System.Windows.VerticalAlignment.Center
+            row_chk.Cursor = System.Windows.Input.Cursors.Hand
+            row_chk.IsEnabled = bool(r.element_ids)
+            row_chk.Checked += self._on_row_tick_changed
+            row_chk.Unchecked += self._on_row_tick_changed
+            Grid.SetColumn(row_chk, 0)
+            row_grid.Children.Add(row_chk)
+            self.row_checks.append((row_chk, r))
+
             # Icon
             icon = TextBlock()
             icon.Text = status_icon.get(r.status, "?")
@@ -1541,20 +1974,21 @@ class IFCSGCheckerWindow:
                     status_fg.get(r.status, "#666"))
             except:
                 pass
-            Grid.SetColumn(icon, 0)
+            Grid.SetColumn(icon, 1)
             row_grid.Children.Add(icon)
-            
+
             # Param name
             name_txt = TextBlock()
             name_txt.Text = r.param_name
             name_txt.FontSize = 11
             name_txt.VerticalAlignment = System.Windows.VerticalAlignment.Center
-            Grid.SetColumn(name_txt, 1)
+            Grid.SetColumn(name_txt, 2)
             row_grid.Children.Add(name_txt)
-            
+
             # Count info
             if r.status == "no_elements":
-                count_text = "No elements"
+                count_text = "Not supported" if getattr(r, "unmapped", False) \
+                    else "No elements"
             elif r.status == "pass":
                 count_text = "{} OK".format(r.total_elements)
             else:
@@ -1570,7 +2004,7 @@ class IFCSGCheckerWindow:
                     status_fg.get(r.status, "#888"))
             except:
                 pass
-            Grid.SetColumn(count_txt, 2)
+            Grid.SetColumn(count_txt, 3)
             row_grid.Children.Add(count_txt)
             
             # Select button for failed/warning params
@@ -1588,49 +2022,140 @@ class IFCSGCheckerWindow:
                 except:
                     pass
                 sel_btn.BorderThickness = System.Windows.Thickness(1)
-                sel_btn.Tag = list(r.element_ids)[:200]
+                sel_btn.Tag = list(r.element_ids)[:MAX_STORED_IDS]
                 sel_btn.Click += self._on_select_btn_click
-                Grid.SetColumn(sel_btn, 3)
+                Grid.SetColumn(sel_btn, 4)
                 row_grid.Children.Add(sel_btn)
             
             row_border.Child = row_grid
             self.spResults.Children.Add(row_border)
-    
+
+        # Rebuilding the list drops every tick box, so reset the counter.
+        self._update_tick_count()
+
     def _on_select_btn_click(self, sender, args):
         """Handle select button click - select elements in Revit"""
         ids = sender.Tag
         if ids:
             self._select_elements_in_revit(ids)
+
+    # =================================================================
+    # MULTI-SELECT (row tick boxes)
+    # =================================================================
+    def _on_row_tick_changed(self, sender, args):
+        self._update_tick_count()
+
+    def _set_rows_ticked(self, mode):
+        """Bulk tick the visible result rows: all / none / invert / failed.
+
+        Only rows that actually carry element ids can be ticked - ticking a
+        passing row would contribute nothing to the Revit selection."""
+        for chk, result in self.row_checks:
+            if not chk.IsEnabled:
+                continue
+            if mode == "all":
+                state = True
+            elif mode == "none":
+                state = False
+            elif mode == "failed":
+                state = result.status in ("fail", "warning")
+            else:
+                state = not bool(chk.IsChecked)
+            chk.IsChecked = System.Nullable[System.Boolean](state)
+        self._update_tick_count()
+
+    def _ticked_results(self):
+        return [r for chk, r in self.row_checks if bool(chk.IsChecked)]
+
+    def _update_tick_count(self):
+        ticked = self._ticked_results()
+        ids = set()
+        for r in ticked:
+            ids.update(r.element_ids)
+        self.txtTickCount.Text = "{} rows ticked / {} elements".format(
+            len(ticked), len(ids))
+        self.btnSelectTicked.IsEnabled = len(ids) > 0
+
+    def _on_select_ticked(self, sender, args):
+        """Select every element behind the ticked rows, in one go."""
+        ids = set()
+        for r in self._ticked_results():
+            ids.update(r.element_ids)
+        if not ids:
+            self.txtStatus.Text = "Tick at least one row that has elements."
+            return
+        self._select_elements_in_revit(list(ids))
     
     # =================================================================
     # EXPORT
     # =================================================================
+    def _default_report_name(self):
+        """Suggested report filename, short enough for Windows to accept.
+
+        The project name is sanitised and capped: a real CORENET project name
+        is long enough on its own to push the full path past the Windows
+        limit, which made SaveAs fail every time."""
+        try:
+            project = safe_filename(doc.ProjectInformation.Name, 40)
+        except:
+            project = ""
+        stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        if project:
+            name = "IFC-SG_Check_{}_{}".format(project, stamp)
+        else:
+            name = "IFC-SG_Check_{}".format(stamp)
+
+        # Trim further if the folder path itself is deep.
+        room = MAX_PATH - len(REPORTS_DIR) - len(".xlsx") - 1
+        if room > 20 and len(name) > room:
+            name = "IFC-SG_Check_{}".format(stamp)
+        return name
+
     def _on_export_excel(self, sender, args):
-        if not self.results or not self.config:
+        if not self.all_results or not self.config:
+            self.txtStatus.Text = "Run a check first - there is nothing to export."
             return
         from System.Windows.Forms import SaveFileDialog, DialogResult
-        
+
         dlg = SaveFileDialog()
         dlg.Filter = "Excel Files (*.xlsx)|*.xlsx"
-        dlg.FileName = "IFC-SG_Check_{}_{}".format(
-            doc.ProjectInformation.Name or "Project",
-            datetime.datetime.now().strftime("%Y%m%d_%H%M%S"))
+        dlg.DefaultExt = "xlsx"
+        dlg.AddExtension = True
+        dlg.FileName = self._default_report_name()
         dlg.InitialDirectory = REPORTS_DIR
-        
+
         if dlg.ShowDialog() == DialogResult.OK:
+            path = dlg.FileName
+            if not path.lower().endswith(".xlsx"):
+                path += ".xlsx"
+
+            if len(path) > MAX_PATH:
+                System.Windows.MessageBox.Show(
+                    "That path is {} characters long - Excel cannot save "
+                    "beyond about {}.\n\nPick a shorter file name or a folder "
+                    "closer to the drive root.".format(len(path), MAX_PATH),
+                    "Path too long", MessageBoxButton.OK, MessageBoxImage.Warning)
+                return
+
             self.txtStatus.Text = "Exporting..."
             self.window.Cursor = System.Windows.Input.Cursors.Wait
+            self._pump_ui()
             try:
-                self.reporter.generate(self.config, self.all_results, dlg.FileName)
-                self.txtStatus.Text = "Exported: {}".format(os.path.basename(dlg.FileName))
+                self.reporter.generate(self.config, self.all_results, path)
+                self.txtStatus.Text = "Exported: {}".format(os.path.basename(path))
                 result = System.Windows.MessageBox.Show(
                     "Report exported!\nOpen now?", "Done",
                     MessageBoxButton.YesNo, MessageBoxImage.Information)
                 if result == MessageBoxResult.Yes:
-                    os.startfile(dlg.FileName)
+                    os.startfile(path)
             except Exception as e:
+                self.txtStatus.Text = "Export failed: {}".format(str(e))
+                # Show the whole traceback - "export does not work" with no
+                # detail is impossible to act on.
                 System.Windows.MessageBox.Show(
-                    "Export error:\n{}".format(str(e)),
+                    "Export error:\n{}\n\nMake sure Microsoft Excel is "
+                    "installed and the file is not already open.\n\n{}".format(
+                        str(e), traceback.format_exc()),
                     "Error", MessageBoxButton.OK, MessageBoxImage.Error)
             finally:
                 self.window.Cursor = System.Windows.Input.Cursors.Arrow
