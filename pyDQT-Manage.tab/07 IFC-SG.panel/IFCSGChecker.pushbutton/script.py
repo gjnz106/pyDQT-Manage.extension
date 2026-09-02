@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-IFC-SG Parameter Checker v1.1 - DQT
+IFC-SG Parameter Checker v1.2 - DQT
 Checks that required IFC+SG parameters exist and have values in Revit model elements.
 Supports import from:
   - Autodesk Model Checker XML configuration files
@@ -845,7 +845,7 @@ class ExcelReporter:
 XAML_STR = '''
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="IFC-SG Parameter Checker v1.1 - DQT"
+        Title="IFC-SG Parameter Checker v1.2 - DQT"
         Height="820" Width="1150"
         MinHeight="600" MinWidth="880"
         WindowStartupLocation="CenterScreen"
@@ -922,7 +922,7 @@ XAML_STR = '''
                 </StackPanel>
                 <StackPanel Grid.Column="1" VerticalAlignment="Center" HorizontalAlignment="Right">
                     <TextBlock Text="DQT" FontSize="14" FontWeight="Bold" Foreground="#C89650"/>
-                    <TextBlock Text="v1.1" FontSize="9" Foreground="#999" HorizontalAlignment="Right"/>
+                    <TextBlock Text="v1.2" FontSize="9" Foreground="#999" HorizontalAlignment="Right"/>
                 </StackPanel>
             </Grid>
         </Border>
@@ -1039,6 +1039,8 @@ XAML_STR = '''
                             <Button x:Name="btnTreeInvert" Content="Invert"
                                     Style="{StaticResource BtnSecondary}" Padding="6,3" FontSize="10"/>
                         </StackPanel>
+                        <TextBlock Text="Shift + click to tick a range" FontSize="9"
+                                   Foreground="#AAA" Margin="0,3,0,0"/>
                     </StackPanel>
 
                     <TreeView x:Name="tvCategories" Grid.Row="2" 
@@ -1092,6 +1094,8 @@ XAML_STR = '''
                                     Style="{StaticResource BtnSecondary}" Padding="8,3" FontSize="10" Margin="0,0,3,0"/>
                             <Button x:Name="btnTickFailed" Content="Tick Failed"
                                     Style="{StaticResource BtnSecondary}" Padding="8,3" FontSize="10" Margin="0,0,10,0"/>
+                            <TextBlock Text="(Shift + click = range)" FontSize="10"
+                                       VerticalAlignment="Center" Foreground="#AAA" Margin="0,0,10,0"/>
                             <TextBlock x:Name="txtTickCount" Text="0 rows ticked" FontSize="11"
                                        VerticalAlignment="Center" Foreground="#888" Margin="0,0,10,0"/>
                             <Button x:Name="btnSelectTicked" Content="&#x25BA; Select Ticked in Revit"
@@ -1130,7 +1134,7 @@ XAML_STR = '''
         <!-- Row 5: Footer -->
         <Border Grid.Row="5" Background="#F5F0E0" CornerRadius="3" Padding="8,4">
             <Grid>
-                <TextBlock Text="IFC-SG Parameter Checker v1.1 | Dang Quoc Truong (DQT)" 
+                <TextBlock Text="IFC-SG Parameter Checker v1.2 | Dang Quoc Truong (DQT)" 
                            FontSize="9" Foreground="#999" HorizontalAlignment="Left"/>
                 <TextBlock x:Name="txtFooter" Text="" 
                            FontSize="9" Foreground="#999" HorizontalAlignment="Right"/>
@@ -1159,6 +1163,9 @@ class IFCSGCheckerWindow:
         self.cat_checks = []
         # Guards the discipline -> categories cascade during bulk ticking.
         self._suspend_cascade = False
+        # Anchors for shift + click range ticking.
+        self._last_cat_index = None
+        self._last_row_index = None
 
         # Parse XAML
         self.window = XamlReader.Parse(XAML_STR)
@@ -1274,7 +1281,7 @@ class IFCSGCheckerWindow:
                 self._refresh_tree()
                 self._update_config_stats()
                 d, c, p = self.config.get_total_stats()
-                self.btnRunCheck.IsEnabled = p > 0
+                self._update_selection_status()
                 if p == 0:
                     # A config that parsed to nothing used to load silently
                     # and then "check" zero parameters.
@@ -1397,6 +1404,7 @@ class IFCSGCheckerWindow:
         self.tvCategories.Items.Clear()
         self.disc_checks = []   # [(CheckBox, discipline name)]
         self.cat_checks = []    # [(CheckBox, discipline name, category name)]
+        self._last_cat_index = None
         if not self.config:
             return
 
@@ -1447,6 +1455,8 @@ class IFCSGCheckerWindow:
                 chk_cat.Tag = "{}|{}".format(disc_name, cat_name)
                 chk_cat.Checked += self._on_cat_toggled
                 chk_cat.Unchecked += self._on_cat_toggled
+                chk_cat.PreviewMouseLeftButtonDown += self._on_cat_preview_click
+                chk_cat.ToolTip = "Shift + click to tick a range of categories"
                 self.cat_checks.append((chk_cat, disc_name, cat_name))
 
                 param_count = len(cat_data.get("params", []))
@@ -1467,9 +1477,96 @@ class IFCSGCheckerWindow:
                 cat_item.Header = cat_sp
                 
                 disc_item.Items.Add(cat_item)
-            
+
             self.tvCategories.Items.Add(disc_item)
+
+        # A config saved while a discipline was off but its categories were
+        # still on would otherwise load into that same dead state.
+        self._sync_all_disciplines()
     
+    # =================================================================
+    # SHIFT + CLICK RANGE TICKING
+    # =================================================================
+    def _shift_held(self):
+        try:
+            modifiers = System.Windows.Input.Keyboard.Modifiers
+            shift = System.Windows.Input.ModifierKeys.Shift
+            return (modifiers & shift) == shift
+        except:
+            return False
+
+    def _index_of(self, pairs, checkbox):
+        for index, entry in enumerate(pairs):
+            if entry[0] is checkbox:
+                return index
+        return None
+
+    def _range_tick(self, pairs, checkbox, anchor, on_done):
+        """Tick or untick every box between the anchor and the clicked one.
+
+        Returns the new anchor, or None when this was not a shift-click and
+        the caller should just record the plain click. The clicked box is set
+        here rather than left to WPF, so the caller marks the event handled
+        to stop it toggling a second time."""
+        index = self._index_of(pairs, checkbox)
+        if index is None:
+            return None
+        if anchor is None or anchor >= len(pairs) or anchor == index:
+            return None
+
+        # The clicked box drives the whole range, so shift-clicking a ticked
+        # box clears the range and shift-clicking an empty one fills it.
+        state = not bool(checkbox.IsChecked)
+        low, high = min(anchor, index), max(anchor, index)
+
+        self._suspend_cascade = True
+        try:
+            for position in range(low, high + 1):
+                target = pairs[position][0]
+                if target.IsEnabled:
+                    target.IsChecked = System.Nullable[System.Boolean](state)
+        finally:
+            self._suspend_cascade = False
+
+        on_done()
+        return anchor
+
+    def _on_cat_preview_click(self, sender, args):
+        if self._shift_held():
+            def done():
+                self._sync_all_disciplines()
+                self._update_selection_status()
+
+            if self._range_tick(self.cat_checks, sender,
+                                self._last_cat_index, done) is not None:
+                args.Handled = True     # the range set it; do not toggle again
+                return
+        self._last_cat_index = self._index_of(self.cat_checks, sender)
+
+    def _on_row_preview_click(self, sender, args):
+        if self._shift_held():
+            if self._range_tick(self.row_checks, sender,
+                                self._last_row_index,
+                                self._update_tick_count) is not None:
+                args.Handled = True
+                return
+        self._last_row_index = self._index_of(self.row_checks, sender)
+
+    def _set_checked(self, checkbox, state):
+        """Set a checkbox without letting the cascade run.
+
+        Used whenever the code, rather than the user, moves a box - the
+        Checked/Unchecked handlers still record the config change, they just
+        do not push the change back the other way and fight themselves."""
+        if bool(checkbox.IsChecked) == bool(state):
+            return
+        previous = self._suspend_cascade
+        self._suspend_cascade = True
+        try:
+            checkbox.IsChecked = System.Nullable[System.Boolean](bool(state))
+        finally:
+            self._suspend_cascade = previous
+
     def _on_disc_toggled(self, sender, args):
         disc_name = str(sender.Tag)
         state = bool(sender.IsChecked)
@@ -1479,39 +1576,62 @@ class IFCSGCheckerWindow:
         # Ticking a discipline ticks everything under it, so one click covers
         # a whole discipline instead of twenty categories.
         if not self._suspend_cascade:
-            for chk, chk_disc, _cat in self.cat_checks:
-                if chk_disc == disc_name and bool(chk.IsChecked) != state:
-                    chk.IsChecked = System.Nullable[System.Boolean](state)
-        self._update_selection_status()
+            previous = self._suspend_cascade
+            self._suspend_cascade = True
+            try:
+                for chk, chk_disc, _cat in self.cat_checks:
+                    if chk_disc == disc_name:
+                        chk.IsChecked = System.Nullable[System.Boolean](state)
+            finally:
+                self._suspend_cascade = previous
+            self._update_selection_status()
 
     def _on_cat_toggled(self, sender, args):
         tag = str(sender.Tag)
         parts = tag.split("|")
+        disc = None
         if len(parts) == 2:
             disc, cat = parts
             if disc in self.config.disciplines:
                 cats = self.config.disciplines[disc].get("categories", {})
                 if cat in cats:
                     cats[cat]["enabled"] = bool(sender.IsChecked)
-        self._update_selection_status()
+
+        if not self._suspend_cascade:
+            if disc:
+                self._sync_discipline(disc)
+            self._update_selection_status()
+
+    def _sync_discipline(self, disc_name):
+        """Make a discipline follow its categories: on when any of them is.
+
+        A discipline that stays unticked makes run_check skip every category
+        under it, so ticking a category while its discipline was off looked
+        like Run Check doing nothing at all."""
+        any_on = False
+        for chk, chk_disc, _cat in self.cat_checks:
+            if chk_disc == disc_name and bool(chk.IsChecked):
+                any_on = True
+                break
+        for chk, chk_disc in self.disc_checks:
+            if chk_disc == disc_name:
+                self._set_checked(chk, any_on)
+                break
+
+    def _sync_all_disciplines(self):
+        for _chk, disc_name in self.disc_checks:
+            self._sync_discipline(disc_name)
 
     def _set_tree_checked(self, mode):
         """Tick every discipline and category at once: all / none / invert.
 
-        The discipline cascade is suspended for the duration so that setting
-        the parent boxes does not immediately overwrite the category states
-        this is trying to set."""
+        Only the categories are set here; the disciplines are reconciled
+        afterwards so a parent can never end up contradicting its children."""
         if not self.config:
             return
 
         self._suspend_cascade = True
         try:
-            # Disciplines stay on for "invert" - an unticked discipline skips
-            # its categories wholesale, which would hide the inversion.
-            disc_state = (mode != "none")
-            for chk, _disc in self.disc_checks:
-                chk.IsChecked = System.Nullable[System.Boolean](disc_state)
-
             for chk, _disc, _cat in self.cat_checks:
                 if mode == "all":
                     state = True
@@ -1523,15 +1643,16 @@ class IFCSGCheckerWindow:
         finally:
             self._suspend_cascade = False
 
+        self._sync_all_disciplines()
         self._update_selection_status()
 
-    def _update_selection_status(self):
-        """Show how much of the config the next run will actually cover."""
-        if not self.config:
-            return
+    def _selection_totals(self):
+        """(categories, parameters) the next run will actually cover."""
         cats = 0
         params = 0
-        for disc_name, disc_data in self.config.disciplines.items():
+        if not self.config:
+            return cats, params
+        for _disc_name, disc_data in self.config.disciplines.items():
             if not disc_data.get("enabled", True):
                 continue
             for _cat_name, cat_data in disc_data.get("categories", {}).items():
@@ -1539,10 +1660,23 @@ class IFCSGCheckerWindow:
                     continue
                 cats += 1
                 params += len(cat_data.get("params", []))
+        return cats, params
+
+    def _update_selection_status(self):
+        """Show how much of the config the next run will actually cover."""
+        if not self.config:
+            return
+        cats, params = self._selection_totals()
         self.txtTotalParams.Text = str(params)
         self.txtCategories.Text = str(cats)
-        self.txtStatus.Text = "{} categories / {} parameters selected".format(
-            cats, params)
+        # Run Check used to stay enabled with nothing selected and then
+        # silently produce no results, which read as the tool being dead.
+        self.btnRunCheck.IsEnabled = params > 0
+        if params > 0:
+            self.txtStatus.Text = "{} categories / {} parameters selected".format(
+                cats, params)
+        else:
+            self.txtStatus.Text = "Nothing selected - tick at least one category."
 
     def _on_expand_all(self, sender, args):
         for item in self.tvCategories.Items:
@@ -1564,7 +1698,19 @@ class IFCSGCheckerWindow:
     def _on_run_check(self, sender, args):
         if not self.config:
             return
-        
+
+        cats, params = self._selection_totals()
+        if params == 0:
+            # Say so instead of running an empty check and reporting nothing,
+            # which is indistinguishable from the button not working.
+            self.txtStatus.Text = "Nothing selected - tick at least one category."
+            System.Windows.MessageBox.Show(
+                "No categories are ticked, so there is nothing to check.\n\n"
+                "Tick the disciplines or categories you want on the left, or "
+                "press Tick: All.",
+                "Nothing selected", MessageBoxButton.OK, MessageBoxImage.Warning)
+            return
+
         self.txtStatus.Text = "Running IFC-SG parameter checks..."
         self.window.Cursor = System.Windows.Input.Cursors.Wait
         self.btnRunCheck.IsEnabled = False
@@ -1610,7 +1756,7 @@ class IFCSGCheckerWindow:
                 "Error:\n{}".format(traceback.format_exc()),
                 "Error", MessageBoxButton.OK, MessageBoxImage.Error)
         finally:
-            self.btnRunCheck.IsEnabled = True
+            self.btnRunCheck.IsEnabled = self._selection_totals()[1] > 0
             self.window.Cursor = System.Windows.Input.Cursors.Arrow
     
     def _apply_filter(self, filter_type):
@@ -1692,6 +1838,7 @@ class IFCSGCheckerWindow:
     def _render_results(self, results):
         self.spResults.Children.Clear()
         self.row_checks = []
+        self._last_row_index = None
         converter = BrushConverter()
         
         status_bg = {
@@ -1960,6 +2107,8 @@ class IFCSGCheckerWindow:
             row_chk.IsEnabled = bool(r.element_ids)
             row_chk.Checked += self._on_row_tick_changed
             row_chk.Unchecked += self._on_row_tick_changed
+            row_chk.PreviewMouseLeftButtonDown += self._on_row_preview_click
+            row_chk.ToolTip = "Shift + click to tick a range of rows"
             Grid.SetColumn(row_chk, 0)
             row_grid.Children.Add(row_chk)
             self.row_checks.append((row_chk, r))
@@ -2043,25 +2192,32 @@ class IFCSGCheckerWindow:
     # MULTI-SELECT (row tick boxes)
     # =================================================================
     def _on_row_tick_changed(self, sender, args):
-        self._update_tick_count()
+        # Recounting on every box would be quadratic during a bulk tick, and
+        # a full run has hundreds of rows - the bulk callers count once.
+        if not self._suspend_cascade:
+            self._update_tick_count()
 
     def _set_rows_ticked(self, mode):
         """Bulk tick the visible result rows: all / none / invert / failed.
 
         Only rows that actually carry element ids can be ticked - ticking a
         passing row would contribute nothing to the Revit selection."""
-        for chk, result in self.row_checks:
-            if not chk.IsEnabled:
-                continue
-            if mode == "all":
-                state = True
-            elif mode == "none":
-                state = False
-            elif mode == "failed":
-                state = result.status in ("fail", "warning")
-            else:
-                state = not bool(chk.IsChecked)
-            chk.IsChecked = System.Nullable[System.Boolean](state)
+        self._suspend_cascade = True
+        try:
+            for chk, result in self.row_checks:
+                if not chk.IsEnabled:
+                    continue
+                if mode == "all":
+                    state = True
+                elif mode == "none":
+                    state = False
+                elif mode == "failed":
+                    state = result.status in ("fail", "warning")
+                else:
+                    state = not bool(chk.IsChecked)
+                chk.IsChecked = System.Nullable[System.Boolean](state)
+        finally:
+            self._suspend_cascade = False
         self._update_tick_count()
 
     def _ticked_results(self):
