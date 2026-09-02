@@ -1,1 +1,2 @@
 title: "Subtype\nDefiner"
+tooltip: "Load the official IFC+SG Industry Mapping Excel and batch-assign IFC Export Class + Predefined Type to Revit elements, grouped by Family/Type. Auto-Assign fills in everything still missing; Apply to Selected/ALL lets you pick a specific subtype per component."
