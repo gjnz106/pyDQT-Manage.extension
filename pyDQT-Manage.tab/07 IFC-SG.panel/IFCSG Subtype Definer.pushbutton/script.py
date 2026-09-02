@@ -67,45 +67,86 @@ bc = BrushConverter()
 # Revit Category Name -> BuiltInCategory
 # ==============================================================================
 
+def _bic(*names):
+    """First BuiltInCategory that exists in this Revit version.
+
+    Category enum members come and go between releases - OST_Toposolid only
+    exists from Revit 2024 - so resolve by name and fall back rather than
+    referencing a member that may not be there (which would crash the whole
+    script at import time, before the window even opens)."""
+    for name in names:
+        try:
+            value = getattr(BuiltInCategory, name, None)
+            if value is not None:
+                return value
+        except:
+            pass
+    return None
+
+
 REVIT_CAT_MAP = {
-    "Areas": [BuiltInCategory.OST_Areas],
-    "Ceilings": [BuiltInCategory.OST_Ceilings],
-    "Columns": [BuiltInCategory.OST_Columns],
-    "Curtain Systems": [BuiltInCategory.OST_CurtainWallPanels],
-    "Curtain Wall Panels": [BuiltInCategory.OST_CurtainWallPanels],
-    "Doors": [BuiltInCategory.OST_Doors],
-    "Duct Accessories": [BuiltInCategory.OST_DuctAccessory],
-    "Duct Fittings": [BuiltInCategory.OST_DuctFitting],
-    "Ducts": [BuiltInCategory.OST_DuctCurves],
-    "Electrical Equipment": [BuiltInCategory.OST_ElectricalEquipment],
-    "Fire Alarm Devices": [BuiltInCategory.OST_FireAlarmDevices],
-    "Floors": [BuiltInCategory.OST_Floors],
-    "Furniture": [BuiltInCategory.OST_Furniture],
-    "Generic Models": [BuiltInCategory.OST_GenericModel],
-    "Levels": [BuiltInCategory.OST_Levels],
-    "Lighting Fixtures": [BuiltInCategory.OST_LightingFixtures],
-    "Mechanical Equipment": [BuiltInCategory.OST_MechanicalEquipment],
-    "Parking": [BuiltInCategory.OST_Parking],
-    "Pipe Accessories": [BuiltInCategory.OST_PipeAccessory],
-    "Pipe Fittings": [BuiltInCategory.OST_PipeFitting],
-    "Pipes": [BuiltInCategory.OST_PipeCurves],
-    "Planting": [BuiltInCategory.OST_Planting],
-    "Plumbing Fixtures": [BuiltInCategory.OST_PlumbingFixtures],
-    "Railings": [BuiltInCategory.OST_StairsRailing],
-    "Ramps": [BuiltInCategory.OST_Ramps],
-    "Roofs": [BuiltInCategory.OST_Roofs],
-    "Rooms": [BuiltInCategory.OST_Rooms],
-    "Shaft Openings": [BuiltInCategory.OST_ShaftOpening],
-    "Specialty Equipment": [BuiltInCategory.OST_SpecialityEquipment],
-    "Sprinklers": [BuiltInCategory.OST_Sprinklers],
-    "Stairs": [BuiltInCategory.OST_Stairs],
-    "Structural Columns": [BuiltInCategory.OST_StructuralColumns],
-    "Structural Foundations": [BuiltInCategory.OST_StructuralFoundation],
-    "Structural Framing": [BuiltInCategory.OST_StructuralFraming],
-    "Toposolid": [BuiltInCategory.OST_Topography],
-    "Walls": [BuiltInCategory.OST_Walls],
-    "Windows": [BuiltInCategory.OST_Windows],
+    "Areas": [_bic("OST_Areas")],
+    "Casework": [_bic("OST_Casework")],
+    "Ceilings": [_bic("OST_Ceilings")],
+    "Columns": [_bic("OST_Columns")],
+    "Curtain Systems": [_bic("OST_CurtainWallPanels")],
+    "Curtain Wall Panels": [_bic("OST_CurtainWallPanels")],
+    "Curtain Wall Mullions": [_bic("OST_CurtainWallMullions")],
+    "Doors": [_bic("OST_Doors")],
+    "Duct Accessories": [_bic("OST_DuctAccessory")],
+    "Duct Fittings": [_bic("OST_DuctFitting")],
+    "Ducts": [_bic("OST_DuctCurves")],
+    "Electrical Equipment": [_bic("OST_ElectricalEquipment")],
+    "Electrical Fixtures": [_bic("OST_ElectricalFixtures")],
+    "Fire Alarm Devices": [_bic("OST_FireAlarmDevices")],
+    "Floors": [_bic("OST_Floors")],
+    "Furniture": [_bic("OST_Furniture")],
+    "Generic Models": [_bic("OST_GenericModel")],
+    "Levels": [_bic("OST_Levels")],
+    "Lighting Fixtures": [_bic("OST_LightingFixtures")],
+    "Mechanical Equipment": [_bic("OST_MechanicalEquipment")],
+    "Parking": [_bic("OST_Parking")],
+    "Pipe Accessories": [_bic("OST_PipeAccessory")],
+    "Pipe Fittings": [_bic("OST_PipeFitting")],
+    "Pipes": [_bic("OST_PipeCurves")],
+    "Planting": [_bic("OST_Planting")],
+    "Plumbing Fixtures": [_bic("OST_PlumbingFixtures")],
+    "Railings": [_bic("OST_StairsRailing")],
+    "Ramps": [_bic("OST_Ramps")],
+    "Roofs": [_bic("OST_Roofs")],
+    "Rooms": [_bic("OST_Rooms")],
+    "Shaft Openings": [_bic("OST_ShaftOpening")],
+    "Spaces": [_bic("OST_MEPSpaces")],
+    "Specialty Equipment": [_bic("OST_SpecialityEquipment")],
+    "Sprinklers": [_bic("OST_Sprinklers")],
+    "Stairs": [_bic("OST_Stairs")],
+    "Structural Columns": [_bic("OST_StructuralColumns")],
+    "Structural Foundations": [_bic("OST_StructuralFoundation")],
+    "Structural Framing": [_bic("OST_StructuralFraming")],
+    # Toposolid (Revit 2024+) is its own category - OST_Topography is the old
+    # toposurface and finds nothing in a toposolid-based External Works model.
+    "Toposolid": [_bic("OST_Toposolid", "OST_Topography")],
+    "Toposolids": [_bic("OST_Toposolid", "OST_Topography")],
+    "Topography": [_bic("OST_Topography")],
+    "Walls": [_bic("OST_Walls")],
+    "Windows": [_bic("OST_Windows")],
 }
+# Drop any entry a Revit version doesn't have (kept None by _bic) so a
+# lookup falls through to "unmapped" instead of collecting on None.
+REVIT_CAT_MAP = dict((k, [b for b in v if b is not None])
+                      for k, v in REVIT_CAT_MAP.items())
+
+# Case/whitespace-insensitive lookup - the government Excel's "Suggested
+# Revit Representation" column is hand-typed and inconsistent (extra spaces,
+# different casing), and an exact-match miss used to fail silently: the
+# component would just show 0 elements with no indication why.
+REVIT_CAT_LOOKUP = dict((k.strip().lower(), k) for k in REVIT_CAT_MAP)
+
+
+def resolve_revit_categories(name):
+    """BuiltInCategory list for an Excel category name, or [] if unknown."""
+    key = REVIT_CAT_LOOKUP.get(str(name).strip().lower())
+    return REVIT_CAT_MAP.get(key, []) if key else []
 
 
 # ==============================================================================
@@ -113,36 +154,73 @@ REVIT_CAT_MAP = {
 # ==============================================================================
 
 def read_excel_headers(filepath):
-    """Read sheet names and column headers from Excel without full parse."""
+    """Read sheet names and column headers from Excel without full parse.
+
+    A COP mapping workbook typically has several sheets (cover, notes,
+    pilot list, mapping...) and not all of them hold a normal data table -
+    a chart sheet or one with no UsedRange used to abort the ENTIRE read on
+    the first bad sheet, discarding headers already read from good ones.
+    Each sheet is now read independently and a bad one is skipped."""
     clr.AddReference("Microsoft.Office.Interop.Excel")
     import Microsoft.Office.Interop.Excel as Excel
 
-    app = Excel.ApplicationClass()
-    app.Visible = False
-    app.DisplayAlerts = False
+    app = None
+    wb = None
     result = {"sheets": [], "headers": {}}
+    skipped = []
 
     try:
+        app = Excel.ApplicationClass()
+        app.Visible = False
+        app.DisplayAlerts = False
         wb = app.Workbooks.Open(filepath)
+
         for i in range(1, wb.Sheets.Count + 1):
-            sname = wb.Sheets[i].Name
-            result["sheets"].append(sname)
-            headers = []
-            ws = wb.Sheets[i]
-            for c in range(1, min(ws.UsedRange.Columns.Count + 1, 30)):
-                val = ws.Cells[1, c].Value2
-                h = str(val).strip().replace("\n", " ") if val else "(empty)"
-                headers.append(h)
-            result["headers"][sname] = headers
+            sname = "sheet {}".format(i)
+            try:
+                ws = wb.Sheets[i]
+                sname = ws.Name
+                headers = []
+                used = ws.UsedRange
+                col_count = used.Columns.Count if used is not None else 0
+                for c in range(1, min(col_count + 1, 30)):
+                    val = ws.Cells[1, c].Value2
+                    if val is None:
+                        h = "(empty)"
+                    else:
+                        h = str(val).strip().replace("\n", " ")
+                        if h == "":
+                            h = "(empty)"
+                    headers.append(h)
+                result["sheets"].append(sname)
+                result["headers"][sname] = headers
+            except Exception as ex:
+                skipped.append("{} ({})".format(sname, str(ex)))
+                continue
+
         wb.Close(False)
+        wb = None
     except Exception as ex:
         output.print_md("**Excel Error:** {}".format(str(ex)))
         return None
     finally:
         try:
-            app.Quit()
+            if wb is not None:
+                wb.Close(False)
         except:
             pass
+        try:
+            if app is not None:
+                app.Quit()
+        except:
+            pass
+
+    if skipped:
+        output.print_md("**Skipped {} sheet(s) that could not be read:** {}".format(
+            len(skipped), ", ".join(skipped)))
+    if not result["sheets"]:
+        output.print_md("**Excel Error:** no readable sheets found in the file.")
+        return None
     return result
 
 
@@ -151,8 +229,6 @@ def show_column_mapping_dialog(excel_info, filepath):
     Returns dict with keys: sheet, component, entity, subtype, revit, agency
     Each value is a column index (1-based) or 0 if not mapped.
     """
-    from System.Windows.Controls import ComboBox as WPFComboBox, ComboBoxItem
-
     MAP_XAML = """
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -274,6 +350,34 @@ def show_column_mapping_dialog(excel_info, filepath):
                         best_idx = i + 1
             cmb.SelectedIndex = best_idx
 
+    # A flag rather than relying on handler-attachment order: WPF can defer
+    # a ComboBox's SelectionChanged until the control is actually loaded
+    # into the visual tree, which happens during ShowDialog() below - by
+    # then the handler IS attached, so the "set SelectedIndex before
+    # wiring the handler" ordering doesn't reliably prevent a double fire.
+    # This is what let an unguarded exception from that first, unexpected
+    # fire escape all the way out through ShowDialog() and crash the tool.
+    ready = {"flag": False}
+
+    def safe_handler(fn):
+        """Swallow and report anything a dialog event handler raises,
+        instead of letting it unwind through ShowDialog() and crash the
+        whole tool - the exact way this dialog used to be able to bring the
+        entire window down from what looks like a single button click."""
+        def wrapped(s, e):
+            if not ready["flag"]:
+                return
+            try:
+                fn(s, e)
+            except Exception as ex:
+                import traceback
+                output.print_md("**Column Mapping dialog error:**")
+                output.print_md("```\n{}\n```".format(traceback.format_exc()))
+                WPFMessageBox.Show(
+                    "Something went wrong in the column mapping dialog:\n{}".format(str(ex)),
+                    "Error", MessageBoxButton.OK, MessageBoxImage.Error)
+        return wrapped
+
     # Populate sheets
     for sname in excel_info["sheets"]:
         cmbSheet.Items.Add(sname)
@@ -283,14 +387,14 @@ def show_column_mapping_dialog(excel_info, filepath):
         if "pilot" in sname.lower() or "mapping" in sname.lower():
             best_sheet = i
             break
-    cmbSheet.SelectedIndex = best_sheet
 
     def on_sheet_changed(s, e):
         sel = cmbSheet.SelectedItem
         if sel:
             populate_combos(str(sel))
 
-    cmbSheet.SelectionChanged += on_sheet_changed
+    cmbSheet.SelectionChanged += safe_handler(on_sheet_changed)
+    cmbSheet.SelectedIndex = best_sheet
     populate_combos(excel_info["sheets"][best_sheet])
 
     def on_ok(s, e):
@@ -312,8 +416,13 @@ def show_column_mapping_dialog(excel_info, filepath):
     def on_cancel(s, e):
         win.Close()
 
-    win.FindName("btnOK").Click += on_ok
-    win.FindName("btnCancel").Click += on_cancel
+    win.FindName("btnOK").Click += safe_handler(on_ok)
+    win.FindName("btnCancel").Click += safe_handler(on_cancel)
+    # Only now let the handlers actually run - the manual populate_combos()
+    # call just above already did the initial fill, so a deferred replay of
+    # the SelectedIndex assignment before this point is intentionally a
+    # no-op rather than a second, uncontrolled pass.
+    ready["flag"] = True
     win.ShowDialog()
     return result
 
@@ -332,12 +441,15 @@ def load_mapping_with_dialog(filepath):
     clr.AddReference("Microsoft.Office.Interop.Excel")
     import Microsoft.Office.Interop.Excel as Excel
 
-    app = Excel.ApplicationClass()
-    app.Visible = False
-    app.DisplayAlerts = False
+    app = None
+    wb = None
     mapping = {}
+    bad_rows = []
 
     try:
+        app = Excel.ApplicationClass()
+        app.Visible = False
+        app.DisplayAlerts = False
         wb = app.Workbooks.Open(filepath)
         ws = wb.Sheets[col_result["sheet"]]
         rows = ws.UsedRange.Rows.Count
@@ -349,59 +461,79 @@ def load_mapping_with_dialog(filepath):
         c_agency = col_result.get("agency", 0)
 
         for r in range(2, rows + 1):
-            raw_comp = ws.Cells[r, c_comp].Value2
-            if raw_comp is None:
+            # One malformed row (a merged cell, a stray chart object) used to
+            # abort the whole import and discard every row already read.
+            try:
+                raw_comp = ws.Cells[r, c_comp].Value2
+                if raw_comp is None:
+                    continue
+                comp = str(raw_comp).strip()
+                if not comp:
+                    continue
+
+                raw_entity = ws.Cells[r, c_ent].Value2
+                entity = str(raw_entity).strip() if raw_entity is not None else ""
+
+                subtypes_in_cell = []
+                if c_sub:
+                    raw_sub = ws.Cells[r, c_sub].Value2
+                    if raw_sub is not None and str(raw_sub).strip() not in \
+                            ("N.A", "N.A.", "nan", ""):
+                        for s in str(raw_sub).split(","):
+                            s = s.strip()
+                            if s and s not in ("N.A", "N.A."):
+                                subtypes_in_cell.append(s)
+
+                revit_cat = ""
+                if c_rev:
+                    raw_revit = ws.Cells[r, c_rev].Value2
+                    revit_cat = str(raw_revit).strip() if raw_revit is not None else ""
+
+                agency = ""
+                if c_agency:
+                    raw_ag = ws.Cells[r, c_agency].Value2
+                    agency = str(raw_ag).strip() if raw_ag is not None else ""
+
+                if comp not in mapping:
+                    mapping[comp] = {
+                        "ifc_entities": set(), "subtypes": set(),
+                        "revit_categories": set(), "agencies": set(),
+                    }
+                m = mapping[comp]
+                if entity:
+                    m["ifc_entities"].add(entity)
+                for st in subtypes_in_cell:
+                    m["subtypes"].add(st)
+                if revit_cat and revit_cat not in ("N.A", "N.A."):
+                    m["revit_categories"].add(revit_cat)
+                if agency:
+                    m["agencies"].add(agency)
+            except Exception as ex:
+                bad_rows.append("row {}: {}".format(r, str(ex)))
                 continue
-            comp = str(raw_comp).strip()
-            if not comp:
-                continue
-
-            raw_entity = ws.Cells[r, c_ent].Value2
-            entity = str(raw_entity).strip() if raw_entity else ""
-
-            subtypes_in_cell = []
-            if c_sub:
-                raw_sub = ws.Cells[r, c_sub].Value2
-                if raw_sub and str(raw_sub).strip() not in ("N.A", "N.A.", "nan", ""):
-                    for s in str(raw_sub).split(","):
-                        s = s.strip()
-                        if s and s not in ("N.A", "N.A."):
-                            subtypes_in_cell.append(s)
-
-            revit_cat = ""
-            if c_rev:
-                raw_revit = ws.Cells[r, c_rev].Value2
-                revit_cat = str(raw_revit).strip() if raw_revit else ""
-
-            agency = ""
-            if c_agency:
-                raw_ag = ws.Cells[r, c_agency].Value2
-                agency = str(raw_ag).strip() if raw_ag else ""
-
-            if comp not in mapping:
-                mapping[comp] = {
-                    "ifc_entities": set(), "subtypes": set(),
-                    "revit_categories": set(), "agencies": set(),
-                }
-            m = mapping[comp]
-            if entity:
-                m["ifc_entities"].add(entity)
-            for st in subtypes_in_cell:
-                m["subtypes"].add(st)
-            if revit_cat and revit_cat not in ("N.A", "N.A."):
-                m["revit_categories"].add(revit_cat)
-            if agency:
-                m["agencies"].add(agency)
 
         wb.Close(False)
+        wb = None
     except Exception as ex:
         output.print_md("**Excel Error:** {}".format(str(ex)))
         return None
     finally:
         try:
-            app.Quit()
+            if wb is not None:
+                wb.Close(False)
         except:
             pass
+        try:
+            if app is not None:
+                app.Quit()
+        except:
+            pass
+
+    if bad_rows:
+        output.print_md("**Skipped {} row(s) that could not be read:**".format(
+            len(bad_rows)))
+        for line in bad_rows[:30]:
+            output.print_md("- " + line)
 
     for comp, m in mapping.items():
         m["ifc_entities"] = sorted(m["ifc_entities"])
@@ -619,7 +751,7 @@ def build_type_rows(elems):
 XAML_STR = """
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="IFC-SG Subtype Definer | pyDQT"
+        Title="IFC-SG Subtype Definer v1.1 | pyDQT"
         Width="1150" Height="740"
         WindowStartupLocation="CenterScreen"
         Background="%%BACKGROUND%%">
@@ -834,13 +966,16 @@ class IFCSGSubtypeWindow(object):
         # Style DataGrid column headers
         self._style_column_headers()
 
-        # Events
-        self.lstComponents.SelectionChanged += self._on_comp_selected
+        # Events - _on_load_excel guards itself (it needs to restore txtHeader
+        # on failure); every other handler is wrapped here so a bug in one
+        # click can no longer bring the whole tool down mid-session the way
+        # it did before.
+        self.lstComponents.SelectionChanged += self._guard(self._on_comp_selected)
         self.window.FindName("btnLoadExcel").Click += self._on_load_excel
-        self.window.FindName("btnAutoAssign").Click += self._on_auto_assign
-        self.window.FindName("btnApply").Click += self._on_apply_selected
-        self.window.FindName("btnApplyAll").Click += self._on_apply_all
-        self.txtFilter.TextChanged += self._on_filter_changed
+        self.window.FindName("btnAutoAssign").Click += self._guard(self._on_auto_assign)
+        self.window.FindName("btnApply").Click += self._guard(self._on_apply_selected)
+        self.window.FindName("btnApplyAll").Click += self._guard(self._on_apply_all)
+        self.txtFilter.TextChanged += self._guard(self._on_filter_changed)
 
         # State
         self.mapping = {}
@@ -849,6 +984,31 @@ class IFCSGSubtypeWindow(object):
         self._comp_names = []
         self._all_entries = []
         self._all_comp_names_list = []
+
+    def _guard(self, handler):
+        """Wrap a WPF event handler so it cannot crash the whole tool.
+
+        Any exception raised inside a Click/SelectionChanged/TextChanged
+        callback used to propagate straight out through WPF's dispatcher and
+        take the entire window down - the pyRevit output panel would show a
+        wall of CLR interpreter frames with no indication of what actually
+        went wrong. This reports the real error instead and lets the window
+        keep working."""
+        def wrapped(sender, args):
+            try:
+                handler(sender, args)
+            except Exception as ex:
+                import traceback
+                output.print_md("## Error")
+                output.print_md("```\n{}\n```".format(traceback.format_exc()))
+                try:
+                    WPFMessageBox.Show(
+                        "Something went wrong:\n{}\n\nSee the pyRevit output "
+                        "window for the full error.".format(str(ex)),
+                        "Error", MessageBoxButton.OK, MessageBoxImage.Error)
+                except:
+                    pass
+        return wrapped
 
     def _setup_columns(self):
         """Create DataGrid columns programmatically."""
@@ -930,7 +1090,23 @@ class IFCSGSubtypeWindow(object):
         self.txtHeader.Text = "Reading Excel headers..."
         self.window.UpdateLayout()
 
-        mapping = load_mapping_with_dialog(dlg.FileName)
+        # Nothing between here and the header text being restored below was
+        # guarded before - any exception in the column-mapping dialog or the
+        # parse crashed the whole tool with the status stuck on "Reading
+        # Excel headers..." and no way to recover except restarting it.
+        try:
+            mapping = load_mapping_with_dialog(dlg.FileName)
+        except Exception as ex:
+            import traceback
+            output.print_md("## Load Mapping Excel error")
+            output.print_md("```\n{}\n```".format(traceback.format_exc()))
+            WPFMessageBox.Show(
+                "Could not load that Excel file:\n{}\n\nSee the pyRevit output "
+                "window for the full error.".format(str(ex)),
+                "Load Error", MessageBoxButton.OK, MessageBoxImage.Error)
+            self.txtHeader.Text = "Load Industry Mapping Excel to start"
+            return
+
         if not mapping:
             self.txtHeader.Text = "Load Industry Mapping Excel to start"
             return
@@ -953,13 +1129,17 @@ class IFCSGSubtypeWindow(object):
         self._comp_names = []
         total_elems = 0
         entries = []  # (comp_name, count, entity_str, sub_count)
+        unmapped_cats = set()
 
         for comp_name in sorted(self.mapping.keys()):
             m = self.mapping[comp_name]
             bics = []
             for rc in m["revit_categories"]:
-                if rc in REVIT_CAT_MAP:
-                    bics.extend(REVIT_CAT_MAP[rc])
+                found = resolve_revit_categories(rc)
+                if found:
+                    bics.extend(found)
+                else:
+                    unmapped_cats.add(rc)
             elems = collect_elements_for_bics(bics) if bics else []
             count = len(elems)
             total_elems += count
@@ -983,8 +1163,14 @@ class IFCSGSubtypeWindow(object):
             self.lstComponents.Items.Add(item)
             self._comp_names.append(comp_name)
 
-        self.txtSummary.Text = "{} components | {} elements in model".format(
+        summary = "{} components | {} elements in model".format(
             len(self.mapping), total_elems)
+        if unmapped_cats:
+            summary += "  |  {} Revit category name(s) not recognised (see output)".format(
+                len(unmapped_cats))
+            output.print_md("**Revit categories from the Excel that this tool "
+                            "does not recognise:** " + ", ".join(sorted(unmapped_cats)))
+        self.txtSummary.Text = summary
 
     def _make_comp_listitem(self, comp_name, count, entity_str, sub_count):
         """Create a styled ListBoxItem for a component."""
@@ -1189,16 +1375,16 @@ class IFCSGSubtypeWindow(object):
                     if is_ud and set_obj and obj_value:
                         obj_ok = set_ifc_object_type(target, obj_value, use_type)
 
-                    if entity_ok and pdt_ok:
+                    if entity_ok and pdt_ok and obj_ok:
                         type_ok = True
                         debug_lines.append("[OK] {} '{}' -> {} on {} (id:{})".format(
                             target_label, row.Family + ":" + row.TypeName,
                             pdt_value, target_label, target.Id.IntegerValue))
                         break  # Success on this target, skip next
                     else:
-                        debug_lines.append("[FAIL] {} '{}' entity={} pdt={} on {} (id:{})".format(
+                        debug_lines.append("[FAIL] {} '{}' entity={} pdt={} obj={} on {} (id:{})".format(
                             target_label, row.Family + ":" + row.TypeName,
-                            entity_ok, pdt_ok, target_label, target.Id.IntegerValue))
+                            entity_ok, pdt_ok, obj_ok, target_label, target.Id.IntegerValue))
 
                 if type_ok:
                     ok += 1
