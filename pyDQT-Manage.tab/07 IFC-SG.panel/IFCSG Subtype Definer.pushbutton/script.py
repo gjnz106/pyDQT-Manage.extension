@@ -150,17 +150,219 @@ def resolve_revit_categories(name):
 
 
 # ==============================================================================
-# Excel Reader (COM Interop) + Column Mapping Dialog
+# Excel Reader - built-in .xlsx (zip/XML) reader, no Office needed, with a
+# COM Interop fallback for legacy .xls files.
+#
+# clr.AddReference("Microsoft.Office.Interop.Excel") can fail even on a
+# machine where Excel itself works perfectly: modern Click-to-Run installs
+# of Microsoft 365 frequently do not register the Excel Primary Interop
+# Assembly in the GAC the way the old MSI installer used to. That is exactly
+# what "Could not add reference to assembly Microsoft.Office.Interop.Excel"
+# means, and no amount of try/except around the COM calls fixes it - the
+# assembly plain isn't there to load.
+#
+# .xlsx has been a zip archive of XML parts since Excel 2007, so it can be
+# read directly with .NET's built-in System.IO.Compression (part of the
+# .NET Framework Revit itself requires - no Office install of any kind
+# needed) plus the xml.etree.ElementTree already used elsewhere in this
+# suite. COM Interop is kept only as a fallback for the legacy binary .xls
+# format, which is not a zip file at all.
 # ==============================================================================
 
-def read_excel_headers(filepath):
-    """Read sheet names and column headers from Excel without full parse.
+_XLSX_NS_MAIN = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+_XLSX_NS_R = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
+_XLSX_NS_PR = "{http://schemas.openxmlformats.org/package/2006/relationships}"
 
-    A COP mapping workbook typically has several sheets (cover, notes,
-    pilot list, mapping...) and not all of them hold a normal data table -
-    a chart sheet or one with no UsedRange used to abort the ENTIRE read on
-    the first bad sheet, discarding headers already read from good ones.
-    Each sheet is now read independently and a bad one is skipped."""
+
+def _xlsx_col_index(cell_ref):
+    """'C5' -> 3 (1-based column index). None if the reference is odd."""
+    import re
+    m = re.match(r'^([A-Za-z]+)\d+$', cell_ref or "")
+    if not m:
+        return None
+    idx = 0
+    for ch in m.group(1).upper():
+        idx = idx * 26 + (ord(ch) - ord('A') + 1)
+    return idx
+
+
+def _xlsx_cell_value(c_el, shared):
+    """Text/number value of one <c> cell element, resolving shared strings."""
+    import xml.etree.ElementTree as ET
+    t = c_el.get("t")
+    if t == "s":
+        v_el = c_el.find(_XLSX_NS_MAIN + "v")
+        if v_el is None or v_el.text is None:
+            return None
+        try:
+            idx = int(v_el.text)
+        except ValueError:
+            return None
+        return shared[idx] if 0 <= idx < len(shared) else None
+    if t == "inlineStr":
+        is_el = c_el.find(_XLSX_NS_MAIN + "is")
+        if is_el is None:
+            return None
+        return "".join(t_el.text or "" for t_el in is_el.iter(_XLSX_NS_MAIN + "t"))
+    v_el = c_el.find(_XLSX_NS_MAIN + "v")
+    if v_el is None or v_el.text is None:
+        return None
+    text = v_el.text
+    if t == "str":
+        return text
+    if t == "b":
+        return "TRUE" if text == "1" else "FALSE"
+    # Plain number - format the way Cells[].Value2 would (str(val)), so the
+    # rest of the parsing logic (which was written against COM output)
+    # behaves identically regardless of which reader supplied the value.
+    try:
+        f = float(text)
+        return str(int(f)) if f == int(f) and abs(f) < 1e15 else str(f)
+    except ValueError:
+        return text
+
+
+def _read_zip_entry_text(archive, path):
+    """Full text of one part inside the .xlsx zip, or None if absent."""
+    entry = archive.GetEntry(path)
+    if entry is None:
+        return None
+    from System.IO import StreamReader
+    stream = entry.Open()
+    reader = StreamReader(stream)
+    try:
+        return reader.ReadToEnd()
+    finally:
+        reader.Close()
+
+
+def _xlsx_shared_strings(archive):
+    import xml.etree.ElementTree as ET
+    text = _read_zip_entry_text(archive, "xl/sharedStrings.xml")
+    if not text:
+        return []
+    root = ET.fromstring(text.encode("utf-8"))
+    strings = []
+    for si in root.findall(_XLSX_NS_MAIN + "si"):
+        strings.append("".join(t.text or "" for t in si.iter(_XLSX_NS_MAIN + "t")))
+    return strings
+
+
+def _xlsx_sheet_list(archive):
+    """[(sheet_name, worksheet_part_path), ...] in workbook order."""
+    import xml.etree.ElementTree as ET
+    wb_text = _read_zip_entry_text(archive, "xl/workbook.xml")
+    if not wb_text:
+        return []
+    wb_root = ET.fromstring(wb_text.encode("utf-8"))
+
+    rel_map = {}
+    rels_text = _read_zip_entry_text(archive, "xl/_rels/workbook.xml.rels")
+    if rels_text:
+        rels_root = ET.fromstring(rels_text.encode("utf-8"))
+        for rel in rels_root.findall(_XLSX_NS_PR + "Relationship"):
+            rel_map[rel.get("Id")] = rel.get("Target")
+
+    sheets_el = wb_root.find(_XLSX_NS_MAIN + "sheets")
+    if sheets_el is None:
+        return []
+
+    result = []
+    for sheet_el in sheets_el.findall(_XLSX_NS_MAIN + "sheet"):
+        name = sheet_el.get("name") or ""
+        target = rel_map.get(sheet_el.get(_XLSX_NS_R + "id"))
+        if not target:
+            continue
+        target = target.replace("\\", "/").lstrip("/")
+        if not target.startswith("xl/"):
+            target = "xl/" + target
+        result.append((name, target))
+    return result
+
+
+def _xlsx_read_rows(archive, path, shared):
+    """{row_number: {col_index: value}} for a worksheet part.
+
+    A single malformed <row> is skipped rather than failing the whole
+    sheet - the same row-level resilience the COM path has."""
+    import xml.etree.ElementTree as ET
+    text = _read_zip_entry_text(archive, path)
+    if not text:
+        raise Exception("empty or missing worksheet part: " + path)
+    root = ET.fromstring(text.encode("utf-8"))
+    sheet_data = root.find(_XLSX_NS_MAIN + "sheetData")
+    rows = {}
+    if sheet_data is None:
+        return rows
+    for row_el in sheet_data.findall(_XLSX_NS_MAIN + "row"):
+        try:
+            row_num = int(row_el.get("r"))
+            cells = {}
+            for c_el in row_el.findall(_XLSX_NS_MAIN + "c"):
+                col_idx = _xlsx_col_index(c_el.get("r"))
+                if col_idx is not None:
+                    cells[col_idx] = _xlsx_cell_value(c_el, shared)
+            if cells:
+                rows[row_num] = cells
+        except Exception:
+            continue
+    return rows
+
+
+def _read_xlsx_native(filepath):
+    """Read every sheet of a .xlsx file directly as zip+XML - no Excel or
+    any Office component required. Returns the read_excel_headers() shape
+    plus "_native_rows": {sheet_name: {row: {col: value}}} so
+    load_mapping_with_dialog can reuse this same read for the full parse
+    instead of opening the file (or Excel) a second time."""
+    clr.AddReference("System.IO.Compression")
+    clr.AddReference("System.IO.Compression.FileSystem")
+    from System.IO.Compression import ZipFile
+
+    archive = ZipFile.OpenRead(filepath)
+    try:
+        shared = _xlsx_shared_strings(archive)
+        sheet_list = _xlsx_sheet_list(archive)
+        if not sheet_list:
+            raise Exception("workbook.xml lists no sheets")
+
+        result = {"sheets": [], "headers": {}, "_native_rows": {}}
+        skipped = []
+        for name, path in sheet_list:
+            try:
+                rows = _xlsx_read_rows(archive, path, shared)
+            except Exception as ex:
+                skipped.append("{} ({})".format(name, str(ex)))
+                continue
+
+            header_row = rows.get(1, {})
+            max_col = min(max(header_row.keys()) if header_row else 0, 29)
+            headers = []
+            for c in range(1, max_col + 1):
+                val = header_row.get(c)
+                if val is None:
+                    headers.append("(empty)")
+                else:
+                    h = str(val).strip().replace("\n", " ")
+                    headers.append(h if h else "(empty)")
+
+            result["sheets"].append(name)
+            result["headers"][name] = headers
+            result["_native_rows"][name] = rows
+
+        if skipped:
+            output.print_md("**Skipped {} sheet(s) that could not be read:** {}".format(
+                len(skipped), ", ".join(skipped)))
+        if not result["sheets"]:
+            raise Exception("no readable sheets found in the file")
+        return result
+    finally:
+        archive.Dispose()
+
+
+def _read_excel_via_com(filepath):
+    """Legacy path for the binary .xls format (not a zip file, so the
+    native reader above cannot open it) - needs Excel + its Interop PIA."""
     clr.AddReference("Microsoft.Office.Interop.Excel")
     import Microsoft.Office.Interop.Excel as Excel
 
@@ -222,6 +424,23 @@ def read_excel_headers(filepath):
         output.print_md("**Excel Error:** no readable sheets found in the file.")
         return None
     return result
+
+
+def read_excel_headers(filepath):
+    """Read sheet names and column headers from a workbook.
+
+    Tries the built-in .xlsx reader first (works with no Office installed
+    at all); falls back to Excel COM Interop only for a legacy .xls file or
+    if the native reader itself cannot make sense of the file."""
+    if filepath.lower().endswith((".xlsx", ".xlsm")):
+        try:
+            return _read_xlsx_native(filepath)
+        except Exception as ex:
+            output.print_md(
+                "*(Built-in Excel reader could not read this file directly - "
+                "falling back to Microsoft Excel: {})*".format(str(ex)))
+
+    return _read_excel_via_com(filepath)
 
 
 def show_column_mapping_dialog(excel_info, filepath):
@@ -427,6 +646,54 @@ def show_column_mapping_dialog(excel_info, filepath):
     return result
 
 
+def _cell_str(value):
+    return str(value).strip() if value is not None else ""
+
+
+def _parse_row_into_mapping(mapping, get_cell, r, c_comp, c_ent, c_sub, c_rev, c_agency):
+    """Fold one data row into `mapping`, keyed by component name.
+
+    Shared by both the native reader and the COM fallback below - `get_cell`
+    is the only thing that differs between them, so this logic (and any fix
+    to it) can't drift between the two backends."""
+    raw_comp = get_cell(r, c_comp)
+    if raw_comp is None:
+        return
+    comp = _cell_str(raw_comp)
+    if not comp:
+        return
+
+    entity = _cell_str(get_cell(r, c_ent)) if c_ent else ""
+
+    subtypes_in_cell = []
+    if c_sub:
+        raw_sub = get_cell(r, c_sub)
+        sub_str = _cell_str(raw_sub)
+        if raw_sub is not None and sub_str not in ("N.A", "N.A.", "nan", ""):
+            for s in sub_str.split(","):
+                s = s.strip()
+                if s and s not in ("N.A", "N.A."):
+                    subtypes_in_cell.append(s)
+
+    revit_cat = _cell_str(get_cell(r, c_rev)) if c_rev else ""
+    agency = _cell_str(get_cell(r, c_agency)) if c_agency else ""
+
+    if comp not in mapping:
+        mapping[comp] = {
+            "ifc_entities": set(), "subtypes": set(),
+            "revit_categories": set(), "agencies": set(),
+        }
+    m = mapping[comp]
+    if entity:
+        m["ifc_entities"].add(entity)
+    for st in subtypes_in_cell:
+        m["subtypes"].add(st)
+    if revit_cat and revit_cat not in ("N.A", "N.A."):
+        m["revit_categories"].add(revit_cat)
+    if agency:
+        m["agencies"].add(agency)
+
+
 def load_mapping_with_dialog(filepath):
     """Load Excel with Column Mapping Dialog."""
     excel_info = read_excel_headers(filepath)
@@ -437,97 +704,75 @@ def load_mapping_with_dialog(filepath):
     if not col_result.get("ok"):
         return None
 
-    # Now parse with user-selected columns
-    clr.AddReference("Microsoft.Office.Interop.Excel")
-    import Microsoft.Office.Interop.Excel as Excel
+    sheet_name = col_result["sheet"]
+    c_comp = col_result["component"]
+    c_ent = col_result["entity"]
+    c_sub = col_result.get("subtype", 0)
+    c_rev = col_result.get("revit", 0)
+    c_agency = col_result.get("agency", 0)
 
-    app = None
-    wb = None
     mapping = {}
     bad_rows = []
 
-    try:
-        app = Excel.ApplicationClass()
-        app.Visible = False
-        app.DisplayAlerts = False
-        wb = app.Workbooks.Open(filepath)
-        ws = wb.Sheets[col_result["sheet"]]
-        rows = ws.UsedRange.Rows.Count
+    native_rows = excel_info.get("_native_rows", {}).get(sheet_name)
+    if native_rows is not None:
+        # read_excel_headers already read every row of this sheet via the
+        # built-in .xlsx reader - reuse it instead of opening the file (or
+        # Excel) again.
+        def get_cell(row, col, _rows=native_rows):
+            return _rows.get(row, {}).get(col)
 
-        c_comp = col_result["component"]
-        c_ent = col_result["entity"]
-        c_sub = col_result.get("subtype", 0)
-        c_rev = col_result.get("revit", 0)
-        c_agency = col_result.get("agency", 0)
-
-        for r in range(2, rows + 1):
-            # One malformed row (a merged cell, a stray chart object) used to
-            # abort the whole import and discard every row already read.
+        for r in sorted(row for row in native_rows if row >= 2):
             try:
-                raw_comp = ws.Cells[r, c_comp].Value2
-                if raw_comp is None:
-                    continue
-                comp = str(raw_comp).strip()
-                if not comp:
-                    continue
-
-                raw_entity = ws.Cells[r, c_ent].Value2
-                entity = str(raw_entity).strip() if raw_entity is not None else ""
-
-                subtypes_in_cell = []
-                if c_sub:
-                    raw_sub = ws.Cells[r, c_sub].Value2
-                    if raw_sub is not None and str(raw_sub).strip() not in \
-                            ("N.A", "N.A.", "nan", ""):
-                        for s in str(raw_sub).split(","):
-                            s = s.strip()
-                            if s and s not in ("N.A", "N.A."):
-                                subtypes_in_cell.append(s)
-
-                revit_cat = ""
-                if c_rev:
-                    raw_revit = ws.Cells[r, c_rev].Value2
-                    revit_cat = str(raw_revit).strip() if raw_revit is not None else ""
-
-                agency = ""
-                if c_agency:
-                    raw_ag = ws.Cells[r, c_agency].Value2
-                    agency = str(raw_ag).strip() if raw_ag is not None else ""
-
-                if comp not in mapping:
-                    mapping[comp] = {
-                        "ifc_entities": set(), "subtypes": set(),
-                        "revit_categories": set(), "agencies": set(),
-                    }
-                m = mapping[comp]
-                if entity:
-                    m["ifc_entities"].add(entity)
-                for st in subtypes_in_cell:
-                    m["subtypes"].add(st)
-                if revit_cat and revit_cat not in ("N.A", "N.A."):
-                    m["revit_categories"].add(revit_cat)
-                if agency:
-                    m["agencies"].add(agency)
+                _parse_row_into_mapping(mapping, get_cell, r, c_comp, c_ent,
+                                        c_sub, c_rev, c_agency)
             except Exception as ex:
                 bad_rows.append("row {}: {}".format(r, str(ex)))
-                continue
+    else:
+        # Legacy .xls, or the native reader could not handle this file -
+        # same COM Interop path as before, now sharing the row logic above.
+        clr.AddReference("Microsoft.Office.Interop.Excel")
+        import Microsoft.Office.Interop.Excel as Excel
 
-        wb.Close(False)
+        app = None
         wb = None
-    except Exception as ex:
-        output.print_md("**Excel Error:** {}".format(str(ex)))
-        return None
-    finally:
         try:
-            if wb is not None:
-                wb.Close(False)
-        except:
-            pass
-        try:
-            if app is not None:
-                app.Quit()
-        except:
-            pass
+            app = Excel.ApplicationClass()
+            app.Visible = False
+            app.DisplayAlerts = False
+            wb = app.Workbooks.Open(filepath)
+            ws = wb.Sheets[sheet_name]
+            row_count = ws.UsedRange.Rows.Count
+
+            def get_cell(row, col, _ws=ws):
+                return _ws.Cells[row, col].Value2
+
+            for r in range(2, row_count + 1):
+                # One malformed row (a merged cell, a stray chart object)
+                # used to abort the whole import and discard every row
+                # already read.
+                try:
+                    _parse_row_into_mapping(mapping, get_cell, r, c_comp, c_ent,
+                                            c_sub, c_rev, c_agency)
+                except Exception as ex:
+                    bad_rows.append("row {}: {}".format(r, str(ex)))
+
+            wb.Close(False)
+            wb = None
+        except Exception as ex:
+            output.print_md("**Excel Error:** {}".format(str(ex)))
+            return None
+        finally:
+            try:
+                if wb is not None:
+                    wb.Close(False)
+            except:
+                pass
+            try:
+                if app is not None:
+                    app.Quit()
+            except:
+                pass
 
     if bad_rows:
         output.print_md("**Skipped {} row(s) that could not be read:**".format(
@@ -751,7 +996,7 @@ def build_type_rows(elems):
 XAML_STR = """
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="IFC-SG Subtype Definer v1.1 | pyDQT"
+        Title="IFC-SG Subtype Definer v1.2 | pyDQT"
         Width="1150" Height="740"
         WindowStartupLocation="CenterScreen"
         Background="%%BACKGROUND%%">
@@ -1083,7 +1328,7 @@ class IFCSGSubtypeWindow(object):
     def _on_load_excel(self, sender, args):
         dlg = OpenFileDialog()
         dlg.Title = "Select IFC-SG Industry Mapping Excel"
-        dlg.Filter = "Excel Files|*.xlsx;*.xls"
+        dlg.Filter = "Excel Files|*.xlsx;*.xlsm;*.xls"
         if dlg.ShowDialog() != WFDialogResult.OK:
             return
 
