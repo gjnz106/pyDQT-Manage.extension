@@ -1,1 +1,2 @@
 title: "IFCSG\nChecker"
+tooltip: "Check that the IFC+SG parameters required by CORENET X exist and carry a value on the model's elements. Import the rules from an Autodesk Model Checker XML or an Excel mapping, tick the disciplines and categories to cover, then select the failing elements in Revit or export the result to Excel."
