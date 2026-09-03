@@ -917,13 +917,12 @@ XAML_STR = '''
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
                 <StackPanel Grid.Column="0">
-                    <TextBlock Text="&#x1F4CB; IFC-SG Parameter Checker" FontSize="20" FontWeight="Bold" Foreground="#333"/>
-                    <TextBlock Text="Check required IFC+SG parameters in Revit model" FontSize="11" Foreground="#666" Margin="0,3,0,0"/>
+                    <TextBlock Text="IFC-SG Parameter Checker v1.2" FontSize="17" FontWeight="Bold"/>
+                    <TextBlock Text="by Dang Quoc Truong (DQT)" FontSize="10" Foreground="#5D4E37"/>
+                    <TextBlock Text="Check required IFC+SG parameters in Revit model" FontSize="11" Foreground="#5D4E37" Margin="0,2,0,0"/>
                 </StackPanel>
-                <StackPanel Grid.Column="1" VerticalAlignment="Center" HorizontalAlignment="Right">
-                    <TextBlock Text="DQT" FontSize="14" FontWeight="Bold" Foreground="#C89650"/>
-                    <TextBlock Text="v1.2" FontSize="9" Foreground="#999" HorizontalAlignment="Right"/>
-                </StackPanel>
+                <Button x:Name="btnHelp" Grid.Column="1" Content="? Help" Padding="10,4"
+                        Background="White" VerticalAlignment="Center"/>
             </Grid>
         </Border>
         
@@ -1228,12 +1227,14 @@ class IFCSGCheckerWindow:
             "btnSelectAllFailed", "txtSearch",
             "btnTickAll", "btnTickNone", "btnTickInvert", "btnTickFailed",
             "txtTickCount", "btnSelectTicked",
-            "txtStatus", "btnRunCheck", "btnExportExcel", "btnClose", "txtFooter"
+            "txtStatus", "btnRunCheck", "btnExportExcel", "btnClose", "txtFooter",
+            "btnHelp"
         ]
         for name in names:
             setattr(self, name, self.window.FindName(name))
 
     def _bind_events(self):
+        self.btnHelp.Click += self._on_help
         self.btnImportXML.Click += self._on_import_xml
         self.btnImportExcel.Click += self._on_import_excel
         self.btnSaveConfig.Click += self._on_save_config
@@ -1263,6 +1264,33 @@ class IFCSGCheckerWindow:
     # =================================================================
     # CONFIG MANAGEMENT
     # =================================================================
+    def _on_help(self, sender, args):
+        """Help text for the ? button in the header (Family Manager pattern)."""
+        System.Windows.MessageBox.Show(
+            "IFC-SG Parameter Checker\n\n"
+            "Checks that the parameters CORENET X requires actually exist and "
+            "carry a value on the model's elements, then lets you select the "
+            "failing ones straight in Revit.\n\n"
+            "STAT CARDS\n"
+            "  PARAMS / CATEGORIES - size of the selected requirement set\n"
+            "  PASSED   - every element has the parameter filled in\n"
+            "  FAILED   - no element has it (usually the parameter is absent)\n"
+            "  PARTIAL  - some elements have it, some do not\n"
+            "  NO ELEM  - nothing of that category in this model\n\n"
+            "WORKFLOW\n"
+            "  1. Load a config (Import XML / Excel, or pick a saved one)\n"
+            "  2. Tick the disciplines and categories to cover - Tick All / "
+            "None / Invert, and Shift+Click for a range\n"
+            "  3. Run Check, then filter the results (All / Failed / Partial / "
+            "Passed) or search\n"
+            "  4. Tick result rows and press Select Ticked in Revit, or use a "
+            "row's own Select button\n"
+            "  5. Export Excel writes Summary / Detailed / Failed sheets\n\n"
+            "A category the tool cannot collect is marked \"not supported\" "
+            "rather than being reported as simply empty.",
+            "Parameter Checker - Help",
+            MessageBoxButton.OK, MessageBoxImage.Information)
+
     def _load_saved_configs(self):
         self.cmbConfig.Items.Clear()
         if os.path.exists(CONFIG_DIR):

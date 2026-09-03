@@ -898,13 +898,15 @@ PREVIEW_XAML = """
       <RowDefinition Height="*"/><RowDefinition Height="Auto"/>
     </Grid.RowDefinitions>
 
-    <Border Grid.Row="0" Background="#F0CC88" CornerRadius="6" Padding="15,10" Margin="0,0,0,10">
-      <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+    <Border Grid.Row="0" Background="#F0CC88" CornerRadius="5" Padding="12,8" Margin="0,0,0,10">
+      <Grid>
         <StackPanel>
-          <TextBlock Text="IFC-SG Auto Assign v3.0" FontSize="20" FontWeight="Bold" Foreground="#333"/>
-          <TextBlock x:Name="txtSummary" FontSize="11" Foreground="#666"/>
+          <TextBlock Text="IFC-SG Auto Assign v3.0" FontSize="17" FontWeight="Bold"/>
+          <TextBlock Text="by Dang Quoc Truong (DQT)" FontSize="10" Foreground="#5D4E37"/>
+          <TextBlock x:Name="txtSummary" FontSize="11" Foreground="#5D4E37" Margin="0,2,0,0"/>
         </StackPanel>
-        <TextBlock Grid.Column="1" Text="DQT" FontSize="11" Foreground="#666" VerticalAlignment="Center" FontStyle="Italic"/>
+        <Button x:Name="btnHelp" Content="? Help" Padding="10,4" Background="White"
+                HorizontalAlignment="Right" VerticalAlignment="Center"/>
       </Grid>
     </Border>
 
@@ -968,6 +970,30 @@ PREVIEW_XAML = """
 # =====================================================================
 # Preview Dialog
 # =====================================================================
+def show_help():
+    """Help text for the ? button in the header (Family Manager pattern)."""
+    forms.alert(
+        "IFC-SG Auto Assign\n\n"
+        "Assigns the IFC export class to every Family Type by matching its "
+        "name against the IFC+SG Industry Mapping.\n\n"
+        "STAT CARDS\n"
+        "  CATEGORIES - Revit categories found in the mapping\n"
+        "  ELEMENTS   - elements those categories hold in this model\n"
+        "  UNMATCHED  - types no mapping entry could be found for\n"
+        "  SOURCE     - where the mapping came from (Excel or built-in)\n\n"
+        "WORKFLOW\n"
+        "  1. Pick the mapping source (Excel file or the built-in table)\n"
+        "  2. Review the preview - filter by search, category or source\n"
+        "  3. Select rows and use Change IFC to fix anything unmatched\n"
+        "  4. Overwrite / Empty only decides whether existing values are kept\n"
+        "  5. Apply writes the assignment to the Family Types\n\n"
+        "PREDEFINED vs USERDEFINED\n"
+        "  No * in the mapping -> Export to IFC As = IfcEntity.PredefinedType\n"
+        "  * prefix            -> Export to IFC As = IfcEntity, and the name "
+        "without the * goes into IfcObjectType",
+        title="Auto Assign - Help")
+
+
 def show_preview(elems_by_cat, mapping, src):
     win = _load_xaml(PREVIEW_XAML)
     result = {"ok":False,"mode":"assign_all","final_mapping":[]}
@@ -985,6 +1011,7 @@ def show_preview(elems_by_cat, mapping, src):
     tc = len(set(r["category"] for r in mrows))
     um = sum(1 for r in mrows if r["source"] == "Unmatched")
     win.FindName("txtSummary").Text = "Family Type mapping | Select rows + Change IFC for unmatched"
+    win.FindName("btnHelp").Click += lambda s_, a_: show_help()
     win.FindName("txtCatCount").Text = str(tc)
     win.FindName("txtElemCount").Text = str(te)
     win.FindName("txtUnmatched").Text = str(um)
