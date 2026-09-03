@@ -309,17 +309,47 @@ def _xlsx_read_rows(archive, path, shared):
     return rows
 
 
+def _open_xlsx_archive(filepath):
+    """Open a .xlsx as a zip archive, tolerating the file being open in
+    Excel at the same time.
+
+    ZipFile.OpenRead() asks for FileShare.Read, which Windows refuses with
+    a sharing violation ("the process cannot access the file because it is
+    being used by another process") while Excel holds the workbook open -
+    the single most likely state for a mapping file the user just
+    downloaded and looked at. Opening the FileStream ourselves with
+    FileShare.ReadWrite | FileShare.Delete reads it happily either way.
+
+    Returns (archive, stream); the caller must dispose both."""
+    clr.AddReference("System.IO.Compression")
+    try:
+        # Only the static ZipFile helper lives here and we no longer use it;
+        # a machine missing this assembly must not lose the whole reader.
+        clr.AddReference("System.IO.Compression.FileSystem")
+    except:
+        pass
+    from System.IO import FileStream, FileMode, FileAccess, FileShare
+    from System.IO.Compression import ZipArchive, ZipArchiveMode
+
+    stream = FileStream(filepath, FileMode.Open, FileAccess.Read,
+                        FileShare.ReadWrite | FileShare.Delete)
+    try:
+        return ZipArchive(stream, ZipArchiveMode.Read), stream
+    except:
+        try:
+            stream.Close()
+        except:
+            pass
+        raise
+
+
 def _read_xlsx_native(filepath):
     """Read every sheet of a .xlsx file directly as zip+XML - no Excel or
     any Office component required. Returns the read_excel_headers() shape
     plus "_native_rows": {sheet_name: {row: {col: value}}} so
     load_mapping_with_dialog can reuse this same read for the full parse
     instead of opening the file (or Excel) a second time."""
-    clr.AddReference("System.IO.Compression")
-    clr.AddReference("System.IO.Compression.FileSystem")
-    from System.IO.Compression import ZipFile
-
-    archive = ZipFile.OpenRead(filepath)
+    archive, stream = _open_xlsx_archive(filepath)
     try:
         shared = _xlsx_shared_strings(archive)
         sheet_list = _xlsx_sheet_list(archive)
@@ -357,7 +387,14 @@ def _read_xlsx_native(filepath):
             raise Exception("no readable sheets found in the file")
         return result
     finally:
-        archive.Dispose()
+        try:
+            archive.Dispose()
+        except:
+            pass
+        try:
+            stream.Close()
+        except:
+            pass
 
 
 def _read_excel_via_com(filepath):
@@ -426,16 +463,57 @@ def _read_excel_via_com(filepath):
     return result
 
 
+class ExcelReadError(Exception):
+    """A read failure with a message worth putting in front of the user."""
+
+
+def _brief_error(ex, max_lines=6, max_chars=600):
+    """The readable part of an exception message.
+
+    A .NET exception surfaced through IronPython carries its whole CLR
+    stack inside str(), which turned the error dialog into a wall of
+    interpreter frames with the one useful line buried at the top."""
+    text = str(ex).strip()
+    lines = []
+    for line in text.splitlines():
+        if line.strip().startswith("at "):   # start of the CLR stack trace
+            break
+        lines.append(line)
+        if len(lines) >= max_lines:
+            break
+    brief = "\n".join(lines).strip() or text
+    return brief[:max_chars]
+
+
+def _looks_like_file_lock(ex):
+    """True when the failure is Windows refusing access to the file itself
+    rather than anything about the workbook's contents."""
+    text = str(ex).lower()
+    return ("another process" in text          # sharing violation
+            or "being used by" in text
+            or "access to the path" in text    # permissions
+            or "denied" in text)
+
+
 def read_excel_headers(filepath):
     """Read sheet names and column headers from a workbook.
 
-    Tries the built-in .xlsx reader first (works with no Office installed
-    at all); falls back to Excel COM Interop only for a legacy .xls file or
-    if the native reader itself cannot make sense of the file."""
+    A .xlsx/.xlsm is read directly (no Office needed). Excel COM Interop is
+    only used for the legacy binary .xls format, or when a .xlsx turns out
+    not to be readable as a zip at all - never as a retry for a file the OS
+    would not let us open, because Excel automation cannot get past that
+    either and its own failure ("Could not add reference to assembly
+    Microsoft.Office.Interop.Excel" on a machine without the Interop
+    assembly registered) then buries the real reason."""
     if filepath.lower().endswith((".xlsx", ".xlsm")):
         try:
             return _read_xlsx_native(filepath)
         except Exception as ex:
+            if _looks_like_file_lock(ex):
+                raise ExcelReadError(
+                    "Windows would not let the file be opened:\n{}\n\n"
+                    "If the workbook is open in Excel, close it (or copy the "
+                    "file somewhere else) and try again.".format(_brief_error(ex)))
             output.print_md(
                 "*(Built-in Excel reader could not read this file directly - "
                 "falling back to Microsoft Excel: {})*".format(str(ex)))
@@ -593,7 +671,7 @@ def show_column_mapping_dialog(excel_info, filepath):
                 output.print_md("**Column Mapping dialog error:**")
                 output.print_md("```\n{}\n```".format(traceback.format_exc()))
                 WPFMessageBox.Show(
-                    "Something went wrong in the column mapping dialog:\n{}".format(str(ex)),
+                    "Something went wrong in the column mapping dialog:\n{}".format(_brief_error(ex)),
                     "Error", MessageBoxButton.OK, MessageBoxImage.Error)
         return wrapped
 
@@ -996,7 +1074,7 @@ def build_type_rows(elems):
 XAML_STR = """
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="IFC-SG Subtype Definer v1.2 | pyDQT"
+        Title="IFC-SG Subtype Definer v1.3 | pyDQT"
         Width="1150" Height="740"
         WindowStartupLocation="CenterScreen"
         Background="%%BACKGROUND%%">
@@ -1249,7 +1327,7 @@ class IFCSGSubtypeWindow(object):
                 try:
                     WPFMessageBox.Show(
                         "Something went wrong:\n{}\n\nSee the pyRevit output "
-                        "window for the full error.".format(str(ex)),
+                        "window for the full error.".format(_brief_error(ex)),
                         "Error", MessageBoxButton.OK, MessageBoxImage.Error)
                 except:
                     pass
@@ -1341,13 +1419,20 @@ class IFCSGSubtypeWindow(object):
         # Excel headers..." and no way to recover except restarting it.
         try:
             mapping = load_mapping_with_dialog(dlg.FileName)
+        except ExcelReadError as ex:
+            # Already a plain-language message about the file itself.
+            output.print_md("## Load Mapping Excel error\n\n{}".format(str(ex)))
+            WPFMessageBox.Show(str(ex), "Cannot read the file",
+                               MessageBoxButton.OK, MessageBoxImage.Warning)
+            self.txtHeader.Text = "Load Industry Mapping Excel to start"
+            return
         except Exception as ex:
             import traceback
             output.print_md("## Load Mapping Excel error")
             output.print_md("```\n{}\n```".format(traceback.format_exc()))
             WPFMessageBox.Show(
-                "Could not load that Excel file:\n{}\n\nSee the pyRevit output "
-                "window for the full error.".format(str(ex)),
+                "Could not load that Excel file:\n\n{}\n\nSee the pyRevit "
+                "output window for the full error.".format(_brief_error(ex)),
                 "Load Error", MessageBoxButton.OK, MessageBoxImage.Error)
             self.txtHeader.Text = "Load Industry Mapping Excel to start"
             return
