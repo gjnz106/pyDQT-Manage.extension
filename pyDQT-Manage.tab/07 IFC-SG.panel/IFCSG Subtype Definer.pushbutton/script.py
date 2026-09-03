@@ -1081,6 +1081,7 @@ XAML_STR = """
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="52"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="26"/>
         </Grid.RowDefinitions>
@@ -1093,14 +1094,20 @@ XAML_STR = """
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
                 <StackPanel VerticalAlignment="Center">
-                    <TextBlock Text="IFC-SG Subtype Definer" FontSize="17"
+                    <TextBlock Text="IFC-SG Subtype Definer v1.3" FontSize="17"
                                FontWeight="Bold" Foreground="%%TEXT_PRIMARY%%"/>
+                    <TextBlock Text="by Dang Quoc Truong (DQT)" FontSize="10"
+                               Foreground="%%TEXT_DARK%%"/>
                     <TextBlock x:Name="txtHeader"
                                Text="Load Industry Mapping Excel to start"
                                FontSize="10.5" Foreground="%%TEXT_DARK%%" Opacity="0.8"/>
                 </StackPanel>
                 <StackPanel Grid.Column="1" Orientation="Horizontal"
                             VerticalAlignment="Center">
+                    <Button x:Name="btnHelp" Content="? Help"
+                            Padding="10,4" Margin="0,0,8,0"
+                            Background="White" Foreground="%%TEXT_DARK%%"
+                            BorderBrush="%%BORDER%%" BorderThickness="1" Cursor="Hand"/>
                     <Button x:Name="btnAutoAssign" Content="Auto-Assign"
                             Padding="12,6" Margin="0,0,8,0"
                             Background="%%BUTTON_PRI_BG%%" Foreground="%%BUTTON_PRI_FG%%"
@@ -1114,8 +1121,52 @@ XAML_STR = """
             </Grid>
         </Border>
 
+        <!-- STAT CARDS (same row of cards as Family Manager v2.0) -->
+        <Grid Grid.Row="1" Margin="10,8,10,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <Border Grid.Column="0" Background="%%CARD_BG%%" BorderBrush="%%BORDER%%"
+                    BorderThickness="1" CornerRadius="4" Padding="10,5" Margin="0,0,4,0">
+                <StackPanel>
+                    <TextBlock Text="COMPONENTS" FontSize="9" Foreground="%%TEXT_SECONDARY%%"/>
+                    <TextBlock x:Name="txtCardComponents" Text="0" FontSize="20"
+                               FontWeight="Bold" Foreground="#2196F3"/>
+                </StackPanel>
+            </Border>
+            <Border Grid.Column="1" Background="%%CARD_BG%%" BorderBrush="%%BORDER%%"
+                    BorderThickness="1" CornerRadius="4" Padding="10,5" Margin="4,0">
+                <StackPanel>
+                    <TextBlock Text="ELEMENTS" FontSize="9" Foreground="%%TEXT_SECONDARY%%"/>
+                    <TextBlock x:Name="txtCardElements" Text="0" FontSize="20"
+                               FontWeight="Bold" Foreground="#E5B85C"/>
+                </StackPanel>
+            </Border>
+            <Border Grid.Column="2" Background="%%CARD_BG%%" BorderBrush="%%BORDER%%"
+                    BorderThickness="1" CornerRadius="4" Padding="10,5" Margin="4,0">
+                <StackPanel>
+                    <TextBlock Text="UNRECOGNISED CATEGORIES" FontSize="9"
+                               Foreground="%%TEXT_SECONDARY%%"/>
+                    <TextBlock x:Name="txtCardUnmapped" Text="0" FontSize="20"
+                               FontWeight="Bold" Foreground="#F44336"/>
+                </StackPanel>
+            </Border>
+            <Border Grid.Column="3" Background="%%CARD_BG%%" BorderBrush="%%BORDER%%"
+                    BorderThickness="1" CornerRadius="4" Padding="10,5" Margin="4,0,0,0">
+                <StackPanel>
+                    <TextBlock Text="SOURCE" FontSize="9" Foreground="%%TEXT_SECONDARY%%"/>
+                    <TextBlock x:Name="txtCardSource" Text="-" FontSize="14"
+                               FontWeight="Bold" Foreground="#4CAF50"
+                               TextTrimming="CharacterEllipsis"/>
+                </StackPanel>
+            </Border>
+        </Grid>
+
         <!-- MAIN -->
-        <Grid Grid.Row="1" Margin="10,6,10,6">
+        <Grid Grid.Row="2" Margin="10,6,10,6">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="265"/>
                 <ColumnDefinition Width="8"/>
@@ -1232,7 +1283,7 @@ XAML_STR = """
         </Grid>
 
         <!-- FOOTER -->
-        <Border Grid.Row="2" Background="%%FOOTER_BG%%">
+        <Border Grid.Row="3" Background="%%FOOTER_BG%%">
             <TextBlock Text="Copyright (c) 2026 by Dang Quoc Truong (DQT)"
                        Foreground="%%TEXT_DARK%%" FontSize="10"
                        HorizontalAlignment="Center" VerticalAlignment="Center"/>
@@ -1274,6 +1325,10 @@ class IFCSGSubtypeWindow(object):
         self.txtFilter = self.window.FindName("txtFilter")
         self.lstComponents = self.window.FindName("lstComponents")
         self.txtSummary = self.window.FindName("txtSummary")
+        self.txtCardComponents = self.window.FindName("txtCardComponents")
+        self.txtCardElements = self.window.FindName("txtCardElements")
+        self.txtCardUnmapped = self.window.FindName("txtCardUnmapped")
+        self.txtCardSource = self.window.FindName("txtCardSource")
         self.txtCompName = self.window.FindName("txtCompName")
         self.txtCompInfo = self.window.FindName("txtCompInfo")
         self.txtAgencies = self.window.FindName("txtAgencies")
@@ -1293,6 +1348,7 @@ class IFCSGSubtypeWindow(object):
         # on failure); every other handler is wrapped here so a bug in one
         # click can no longer bring the whole tool down mid-session the way
         # it did before.
+        self.window.FindName("btnHelp").Click += self._guard(self._on_help)
         self.lstComponents.SelectionChanged += self._guard(self._on_comp_selected)
         self.window.FindName("btnLoadExcel").Click += self._on_load_excel
         self.window.FindName("btnAutoAssign").Click += self._guard(self._on_auto_assign)
@@ -1307,6 +1363,36 @@ class IFCSGSubtypeWindow(object):
         self._comp_names = []
         self._all_entries = []
         self._all_comp_names_list = []
+
+    def _on_help(self, sender, args):
+        """Help text for the ? button in the header (Family Manager pattern)."""
+        WPFMessageBox.Show(
+            "IFC-SG Subtype Definer\n\n"
+            "Reads the official IFC+SG Industry Mapping and assigns the IFC "
+            "Entity plus Predefined Type to the matching Revit types.\n\n"
+            "WORKFLOW\n"
+            "  1. Load Mapping Excel - a column-mapping dialog appears if the "
+            "sheet's headers are not the expected ones\n"
+            "  2. Pick a component on the left; the grid shows its Family/Type "
+            "rows with how many instances each has and their status\n"
+            "     OK = entity + subtype set, No Sub = entity only, Not Set = "
+            "neither\n"
+            "  3. Choose a subtype, then Apply to Selected (Ctrl+Click for "
+            "several rows) or Apply to ALL\n"
+            "  4. Auto-Assign fills in everything still missing in one pass, "
+            "with a preview first - it never overwrites what is already set\n\n"
+            "OPTIONS\n"
+            "  Apply to Type   - write on the Family Type rather than the "
+            "instance\n"
+            "  Also set IFC Entity - write Export to IFC As as well as the "
+            "subtype\n"
+            "  Set ObjectType for USERDEFINED - a * subtype writes "
+            "USERDEFINED plus the name into IfcObjectType\n\n"
+            "The .xlsx is read directly, so Microsoft Excel does not need to "
+            "be installed - and the file may stay open in Excel while you "
+            "load it.",
+            "Subtype Definer - Help",
+            MessageBoxButton.OK, MessageBoxImage.Information)
 
     def _guard(self, handler):
         """Wrap a WPF event handler so it cannot crash the whole tool.
@@ -1445,6 +1531,7 @@ class IFCSGSubtypeWindow(object):
         import System.IO
         fname = System.IO.Path.GetFileName(dlg.FileName)
         self.txtHeader.Text = "Loaded: {} ({} components)".format(fname, len(mapping))
+        self.txtCardSource.Text = fname
         self._populate_component_list()
 
     def _populate_component_list(self):
@@ -1492,6 +1579,11 @@ class IFCSGSubtypeWindow(object):
             item = self._make_comp_listitem(comp_name, count, entity_str, sub_count)
             self.lstComponents.Items.Add(item)
             self._comp_names.append(comp_name)
+
+        # Stat cards
+        self.txtCardComponents.Text = str(len(self.mapping))
+        self.txtCardElements.Text = str(total_elems)
+        self.txtCardUnmapped.Text = str(len(unmapped_cats))
 
         summary = "{} components | {} elements in model".format(
             len(self.mapping), total_elems)

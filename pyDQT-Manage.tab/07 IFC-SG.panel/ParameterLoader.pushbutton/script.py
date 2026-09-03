@@ -1148,13 +1148,12 @@ XAML_STR = '''
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
                 <StackPanel>
-                    <TextBlock Text="&#x2795; IFC-SG Parameter Loader" FontSize="20" FontWeight="Bold" Foreground="#333"/>
-                    <TextBlock Text="Add required IFC+SG parameters to model categories" FontSize="11" Foreground="#666" Margin="0,3,0,0"/>
+                    <TextBlock Text="IFC-SG Parameter Loader v1.0" FontSize="17" FontWeight="Bold"/>
+                    <TextBlock Text="by Dang Quoc Truong (DQT)" FontSize="10" Foreground="#5D4E37"/>
+                    <TextBlock Text="Add required IFC+SG parameters to model categories" FontSize="11" Foreground="#5D4E37" Margin="0,2,0,0"/>
                 </StackPanel>
-                <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                    <TextBlock Text="DQT" FontSize="14" FontWeight="Bold" Foreground="#C89650"/>
-                    <TextBlock Text="v1.0" FontSize="9" Foreground="#999" HorizontalAlignment="Right"/>
-                </StackPanel>
+                <Button x:Name="btnHelp" Grid.Column="1" Content="? Help" Padding="10,4"
+                        Background="White" VerticalAlignment="Center"/>
             </Grid>
         </Border>
         
@@ -1349,12 +1348,37 @@ class ParamLoaderWindow:
             "txtSearch", "btnShowAll", "btnShowNew", "btnShowExist",
             "btnSortName", "btnSortGroup", "btnSortCat", "btnSortStatus", "chkHeaderAll",
             "spParams", "txtLog",
-            "txtStatus", "btnAddParams", "btnClose"
+            "txtStatus", "btnAddParams", "btnClose", "btnHelp"
         ]
         for n in names:
             setattr(self, n, self.window.FindName(n))
     
+    def _on_help(self, sender, args):
+        """Help text for the ? button in the header (Family Manager pattern)."""
+        System.Windows.MessageBox.Show(
+            "IFC-SG Parameter Loader\n\n"
+            "Creates the project parameters the IFC+SG requirements ask for "
+            "and binds them to the right categories, so a model starts out "
+            "with every field the checker will look for.\n\n"
+            "STAT CARDS\n"
+            "  TOTAL      - parameters in the imported requirement list\n"
+            "  EXISTING   - already present in this model\n"
+            "  TO ADD     - missing, and what the Add button will create\n"
+            "  CATEGORIES - distinct categories the list touches\n\n"
+            "WORKFLOW\n"
+            "  1. Import from an Autodesk Model Checker XML or an Excel "
+            "mapping\n"
+            "  2. Filter/sort the list, tick the parameters you want\n"
+            "     (Select New picks everything not already in the model)\n"
+            "  3. Add Parameters creates them as Instance project parameters\n"
+            "  4. The Activity Log records exactly what was created\n\n"
+            "Parameters with no category in the source file prompt for the "
+            "categories to bind them to, rather than being skipped.",
+            "Parameter Loader - Help",
+            MessageBoxButton.OK, MessageBoxImage.Information)
+
     def _bind_events(self):
+        self.btnHelp.Click += self._on_help
         self.btnImportXML.Click += self._on_import_xml
         self.btnImportExcel.Click += self._on_import_excel
         self.btnSelectNew.Click += self._on_select_new
