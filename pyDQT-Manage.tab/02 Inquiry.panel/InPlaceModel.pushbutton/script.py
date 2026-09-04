@@ -24,6 +24,22 @@ import re, datetime, codecs, os, tempfile
 # ============================================================================
 get_elementid_value = get_elementid_value_func()
 
+
+def _open_help_page(html_filename):
+    """Open this tool's page from the shared _Inquiry_Help folder in the
+    default browser. Returns True on success, False if the caller should
+    fall back to the in-app help text (e.g. the folder went missing)."""
+    try:
+        panel_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        path = os.path.join(panel_dir, "_Inquiry_Help", html_filename)
+        if not os.path.isfile(path):
+            return False
+        os.startfile(path)
+        return True
+    except Exception:
+        return False
+
+
 def _eid_int(eid):
     """Get integer value from ElementId - compatible with Revit 2024-2026"""
     if eid is None:
@@ -229,6 +245,7 @@ MAIN_XAML = """
                     <TextBlock Text="by Dang Quoc Truong (DQT)" FontSize="10" Foreground="#5D4E37" Margin="0,2,0,0"/>
                 </StackPanel>
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                    <Button x:Name="btnHelp" Content="? Help" Padding="10,4" Background="White" Margin="0,0,5,0"/>
                     <Button x:Name="btnSettings" Content="⚙ Settings" Padding="10,4" Background="White" Margin="0,0,5,0"/>
                 </StackPanel>
             </Grid>
@@ -587,6 +604,7 @@ class InPlaceManagerWindow(WPFWindow):
         self.dataGrid.MouseDoubleClick += self.on_double_click
         
         self.btnSettings.Click += self.show_settings
+        self.btnHelp.Click += self.on_help
         self.btnSelectAll.Click += self.select_all
         self.btnClear.Click += self.select_none
         self.btnSelectIssues.Click += self.select_issues
@@ -1139,6 +1157,33 @@ class InPlaceManagerWindow(WPFWindow):
     
     def close_window(self, s, e):
         self.Close()
+
+    def on_help(self, s, e):
+        if _open_help_page("in_place_model.html"):
+            return
+        forms.alert(
+            "In-Place Model Manager\n\n"
+            "Lists every In-Place Family in the model with its geometry "
+            "complexity and any naming/quality issues, so the ones worth "
+            "converting to a real loadable family (or deleting) are easy "
+            "to find.\n\n"
+            "STAT CARDS\n"
+            "  TOTAL       - in-place families found\n"
+            "  SELECTED    - rows currently selected in the grid\n"
+            "  CATEGORIES  - distinct categories they use\n"
+            "  ISSUES      - rows flagged with a naming or complexity issue\n\n"
+            "STATUS COLOURS\n"
+            "  Green = OK, Orange = Warning (getting complex), "
+            "Red = Error (very high face count) - thresholds are set in "
+            "Settings.\n\n"
+            "WORKFLOW\n"
+            "  Search / Filter / Category narrow the list.\n"
+            "  Zoom To, Select, Isolate act on the selected rows.\n"
+            "  Rename applies a naming pattern; To Family converts the "
+            "selected in-place family to a real loadable family; Delete "
+            "removes it.\n"
+            "  CSV / Report export the visible list.",
+            title="In-Place Model Manager - Help")
 
 
 # ============================================================================

@@ -7,6 +7,7 @@ other worksets hidden) so each workset can be reviewed independently.
 __title__ = "Workset\nChecker"
 __author__ = "DQT"
 
+import os
 import clr
 clr.AddReference('RevitAPI')
 clr.AddReference('RevitAPIUI')
@@ -17,6 +18,21 @@ from pyrevit.compat import get_elementid_value_func
 from Autodesk.Revit.DB import *
 
 get_elementid_value = get_elementid_value_func()
+
+
+def _open_help_page(html_filename):
+    """Open this tool's page from the shared _Inquiry_Help folder in the
+    default browser. Returns True on success, False if the caller should
+    fall back to the in-app help text (e.g. the folder went missing)."""
+    try:
+        panel_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        path = os.path.join(panel_dir, "_Inquiry_Help", html_filename)
+        if not os.path.isfile(path):
+            return False
+        os.startfile(path)
+        return True
+    except Exception:
+        return False
 
 
 def _eid_int(eid):
@@ -176,10 +192,14 @@ MAIN_XAML = """
 
         <!-- Header -->
         <Border Grid.Row="0" Background="#F0CC88" CornerRadius="5" Padding="12,8" Margin="0,0,0,10">
-            <StackPanel>
-                <TextBlock Text="Workset Checker" FontSize="17" FontWeight="Bold"/>
-                <TextBlock Text="Auto-generate QC views per workset - by Dang Quoc Truong (DQT)" FontSize="10" Foreground="#5D4E37" Margin="0,2,0,0"/>
-            </StackPanel>
+            <Grid>
+                <StackPanel>
+                    <TextBlock Text="Workset Checker" FontSize="17" FontWeight="Bold"/>
+                    <TextBlock Text="Auto-generate QC views per workset - by Dang Quoc Truong (DQT)" FontSize="10" Foreground="#5D4E37" Margin="0,2,0,0"/>
+                </StackPanel>
+                <Button x:Name="btnHelp" Content="? Help" Padding="10,4" Background="White"
+                        HorizontalAlignment="Right" VerticalAlignment="Center"/>
+            </Grid>
         </Border>
 
         <!-- Summary cards -->
@@ -284,6 +304,7 @@ class WorksetCheckerWindow(WPFWindow):
         self.btnRefresh.Click += self.refresh
         self.btnGenerate.Click += self.on_generate
         self.btnClose.Click += self.close_window
+        self.btnHelp.Click += self.on_help
 
         self.load_data()
         self.update_ui()
@@ -382,6 +403,26 @@ class WorksetCheckerWindow(WPFWindow):
 
     def close_window(self, s, e):
         self.Close()
+
+    def on_help(self, s, e):
+        if _open_help_page("workset_checker.html"):
+            return
+        forms.alert(
+            "Workset Checker\n\n"
+            "Generates one 3D view per selected workset, isolating it - "
+            "every other workset is hidden - so it can be reviewed on its "
+            "own.\n\n"
+            "STAT CARDS\n"
+            "  TOTAL WORKSETS  - user worksets in this model\n"
+            "  SELECTED        - rows currently selected in the grid\n"
+            "  EXISTING VIEWS  - how many already have a matching QC view\n\n"
+            "WORKFLOW\n"
+            "  1. Set the view name Prefix and the options on the left\n"
+            "  2. Select the worksets to generate views for\n"
+            "  3. Generate Views - reruns update the existing view instead "
+            "of duplicating it, when Reuse is on\n\n"
+            "Only available on workshared models.",
+            title="Workset Checker - Help")
 
 
 # ============================================================================

@@ -44,6 +44,22 @@ import codecs
 import traceback
 import datetime
 
+
+def _open_help_page(html_filename):
+    """Open this tool's page from the shared _Inquiry_Help folder in the
+    default browser. Returns True on success, False if the caller should
+    fall back to the in-app help text (e.g. the folder went missing)."""
+    try:
+        panel_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        path = os.path.join(panel_dir, "_Inquiry_Help", html_filename)
+        if not os.path.isfile(path):
+            return False
+        os.startfile(path)
+        return True
+    except Exception:
+        return False
+
+
 # =====================================================================
 # REVIT API COMPATIBILITY (2024/2025/2026+)
 # =====================================================================
@@ -1520,13 +1536,11 @@ XAML_STR = '''
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
                 <StackPanel Grid.Column="0">
-                    <TextBlock Text="&#x2714; Model Checker" FontSize="20" FontWeight="Bold" Foreground="#333"/>
-                    <TextBlock Text="Rule-based BIM model compliance checker" FontSize="11" Foreground="#666" Margin="0,3,0,0"/>
+                    <TextBlock Text="&#x2714; Model Checker v1.0" FontSize="20" FontWeight="Bold" Foreground="#333"/>
+                    <TextBlock Text="by Dang Quoc Truong (DQT) - Rule-based BIM model compliance checker" FontSize="11" Foreground="#666" Margin="0,3,0,0"/>
                 </StackPanel>
-                <StackPanel Grid.Column="1" VerticalAlignment="Center" HorizontalAlignment="Right">
-                    <TextBlock Text="DQT" FontSize="14" FontWeight="Bold" Foreground="#C89650"/>
-                    <TextBlock Text="v1.0" FontSize="9" Foreground="#999" HorizontalAlignment="Right"/>
-                </StackPanel>
+                <Button x:Name="btnHelp" Grid.Column="1" Content="? Help" Padding="10,4" Background="White"
+                        HorizontalAlignment="Right" VerticalAlignment="Center"/>
             </Grid>
         </Border>
         
@@ -1794,7 +1808,7 @@ class ModelCheckerWindow:
             "txtRuleId", "txtRuleDesc", "txtRuleType", "txtRuleSeverity",
             "spParams", "btnSaveParams",
             "txtStatus", "btnRunCheck", "btnExportExcel", "btnClose",
-            "txtFooterInfo"
+            "txtFooterInfo", "btnHelp"
         ]
         for name in names:
             ctrl = self.window.FindName(name)
@@ -1815,6 +1829,7 @@ class ModelCheckerWindow:
         self.btnRunCheck.Click += self._on_run_check
         self.btnExportExcel.Click += self._on_export_excel
         self.btnClose.Click += self._on_close
+        self.btnHelp.Click += self._on_help
     
     # =================================================================
     # CHECKSET MANAGEMENT
@@ -2454,7 +2469,35 @@ class ModelCheckerWindow:
     
     def _on_close(self, sender, args):
         self.window.Close()
-    
+
+    def _on_help(self, sender, args):
+        if _open_help_page("model_checker.html"):
+            return
+        MessageBox.Show(
+            "Model Checker\n\n"
+            "Runs a rule-based BIM compliance check against the model - "
+            "Project Settings (Revit version, Project Info, Survey/Base "
+            "Point, Design Options, Worksets, Starting View, True North), "
+            "Naming Conventions (Views, Sheets, Levels, Grids, Families) "
+            "and Model Performance (file size, warnings, CAD imports, "
+            "in-place families, RVT links, groups, line patterns, rooms, "
+            "duplicate marks) - using a JSON checkset you can customise.\n\n"
+            "STAT CARDS\n"
+            "  TOTAL RULES  - rules in the current checkset\n"
+            "  PASSED       - rules that met the requirement\n"
+            "  FAILED       - rules that did not\n"
+            "  INFO         - informational findings, not failures\n"
+            "  SKIPPED      - rules that could not be evaluated\n\n"
+            "WORKFLOW\n"
+            "  1. Pick a Checkset - New / Duplicate / Import / Export / "
+            "Delete manage them\n"
+            "  2. Tick the rules to run (Select All / None)\n"
+            "  3. Select a rule to see its details and, if it has any, "
+            "edit its parameters - Save Parameters keeps the change\n"
+            "  4. Run Check, then Export Excel for the report",
+            "Model Checker - Help",
+            MessageBoxButton.OK, MessageBoxImage.Information)
+
     def show(self):
         self.window.ShowDialog()
 

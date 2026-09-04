@@ -8,6 +8,7 @@ __title__ = "Warning\nManage"
 __author__ = "dangquoctruong - DQT"
 __doc__ = "Comprehensive tool for managing and resolving Revit warnings with impact analysis"
 
+import os
 import clr
 clr.AddReference("System")
 clr.AddReference("System.Windows.Forms")
@@ -48,6 +49,21 @@ DQT_TEXT = Color.FromRgb(51, 51, 51)           # #333333
 # Using partial match to handle potential variations in warning text
 IDENTICAL_INSTANCES_KEY_PHRASE = "identical instances in the same place"
 IDENTICAL_INSTANCES_DISPLAY_TEXT = "There are identical instances in the same place. This will result in double counting in schedules."
+
+
+def _open_help_page(html_filename):
+    """Open this tool's page from the shared _Inquiry_Help folder in the
+    default browser. Returns True on success, False if the caller should
+    fall back to the in-app help text (e.g. the folder went missing)."""
+    try:
+        panel_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        path = os.path.join(panel_dir, "_Inquiry_Help", html_filename)
+        if not os.path.isfile(path):
+            return False
+        os.startfile(path)
+        return True
+    except Exception:
+        return False
 
 
 def id_val(eid):
@@ -263,7 +279,24 @@ class WarningManager(Window):
         header_stack.Children.Add(title_label)
         header_stack.Children.Add(subtitle_label)
         header_stack.Children.Add(self.load_status_label)
-        header_border.Child = header_stack
+
+        header_grid = Grid()
+        header_grid.ColumnDefinitions.Add(ColumnDefinition(Width=System.Windows.GridLength(1, System.Windows.GridUnitType.Star)))
+        header_grid.ColumnDefinitions.Add(ColumnDefinition(Width=System.Windows.GridLength.Auto))
+        Grid.SetColumn(header_stack, 0)
+        header_grid.Children.Add(header_stack)
+
+        self.btn_help = Button()
+        self.btn_help.Content = "? Help"
+        self.btn_help.Padding = Thickness(10, 4, 10, 4)
+        self.btn_help.Background = Brushes.White
+        self.btn_help.Foreground = SolidColorBrush(DQT_TEXT)
+        self.btn_help.VerticalAlignment = VerticalAlignment.Center
+        self.btn_help.Click += self.help_click
+        Grid.SetColumn(self.btn_help, 1)
+        header_grid.Children.Add(self.btn_help)
+
+        header_border.Child = header_grid
         main_grid.Children.Add(header_border)
         
         # ===== TOOLBARS =====
@@ -2453,6 +2486,43 @@ class WarningManager(Window):
 
     def close_click(self, sender, e):
         self.Close()
+
+    def help_click(self, sender, e):
+        if _open_help_page("warning_manager.html"):
+            return
+        forms.alert(
+            "WARNING MANAGER\n\n"
+            "Browse, filter, and resolve Revit model warnings, with impact "
+            "analysis before you delete anything.\n\n"
+            "VIEWS\n"
+            "- Grouped Warnings: warnings collapsed by type, with a count per group.\n"
+            "- All Warnings: a flat, paginated list of every individual warning.\n\n"
+            "QUICK ACTIONS TOOLBAR\n"
+            "- Refresh: reload warnings from the current document.\n"
+            "- Load All Warnings: load the full warning list (skips the initial page limit).\n"
+            "- Select All: select every element referenced by the visible warnings.\n"
+            "- Batch Operations: mark all resolved, select/isolate all elements, export "
+            "the filtered list to Excel, or clear resolved warnings.\n"
+            "- View History: see a log of actions already taken in this session, with "
+            "an option to clear it.\n"
+            "- Export Excel / Export PDF: save the current (filtered) warning list to a "
+            "report file (PDF export needs the reportlab package).\n"
+            "- Close: close the Warning Manager window.\n\n"
+            "FILTERING\n"
+            "- Quick filter chips narrow the list to a warning category with one click; "
+            "Clear Filters resets them.\n"
+            "- Use the search box (Ctrl+F) to find warnings by text.\n\n"
+            "DUPLICATE / IDENTICAL INSTANCE WARNINGS\n"
+            "Opening a duplicate-instance warning shows every affected element with an "
+            "impact rating (NO / LOW / HIGH impact) so you can see what else references "
+            "an element before deleting it.\n\n"
+            "KEYBOARD SHORTCUTS\n"
+            "- F5: Refresh\n"
+            "- Ctrl+A: Select All\n"
+            "- Ctrl+F: focus the search box\n\n"
+            "Dang Quoc Truong - DQT (c) 2026",
+            title="Warning Manager Help"
+        )
 
     def load_all_warnings_click(self, sender, e):
         """Load ALL warnings in the document"""

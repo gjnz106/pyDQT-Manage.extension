@@ -61,6 +61,22 @@ import datetime
 import codecs
 from collections import OrderedDict
 
+
+def _open_help_page(html_filename):
+    """Open this tool's page from the shared _Inquiry_Help folder in the
+    default browser. Returns True on success, False if the caller should
+    fall back to the in-app help text (e.g. the folder went missing)."""
+    try:
+        panel_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        path = os.path.join(panel_dir, "_Inquiry_Help", html_filename)
+        if not os.path.isfile(path):
+            return False
+        os.startfile(path)
+        return True
+    except Exception:
+        return False
+
+
 # ============================================================
 # DQT BRAND COLORS
 # ============================================================
@@ -745,8 +761,11 @@ class ModelHealthWindow(Window):
         c1.Width = GridLength(1, GridUnitType.Star)
         c2 = ColumnDefinition()
         c2.Width = GridLength(1, GridUnitType.Auto)
+        c3 = ColumnDefinition()
+        c3.Width = GridLength(1, GridUnitType.Auto)
         g.ColumnDefinitions.Add(c1)
         g.ColumnDefinitions.Add(c2)
+        g.ColumnDefinitions.Add(c3)
 
         left = StackPanel()
         title = TextBlock()
@@ -783,6 +802,18 @@ class ModelHealthWindow(Window):
         right.Children.Add(t2)
         WPFGrid.SetColumn(right, 1)
         g.Children.Add(right)
+
+        self.btn_help = Button()
+        self.btn_help.Content = "? Help"
+        self.btn_help.Background = brush("#FFFFFF")
+        self.btn_help.Foreground = brush(DQT_TEXT_DARK)
+        self.btn_help.Padding = Thickness(10, 4, 10, 4)
+        self.btn_help.Margin = Thickness(12, 0, 0, 0)
+        self.btn_help.VerticalAlignment = VerticalAlignment.Center
+        self.btn_help.Cursor = Cursors.Hand
+        self.btn_help.Click += self._on_help
+        WPFGrid.SetColumn(self.btn_help, 2)
+        g.Children.Add(self.btn_help)
 
         border.Child = g
         return border
@@ -1387,6 +1418,29 @@ class ModelHealthWindow(Window):
     # ----------------------------------------------------------
     # EVENTS
     # ----------------------------------------------------------
+    def _on_help(self, sender, args):
+        if _open_help_page("model_health_check.html"):
+            return
+        MessageBox.Show(
+            "Model Health Check\n\n"
+            "Analyzes the model against 17 metrics (file size, warnings, "
+            "CAD imports/links, in-place families, RVT links, worksets, "
+            "views, sheets, groups, design options, reference planes, "
+            "detail lines, filled regions, unplaced rooms, unpinned links, "
+            "duplicate elements) and combines them into one weighted "
+            "score.\n\n"
+            "HEALTH SCALE\n"
+            "  Good / Acceptable / Warning / Concerning / Critical / Severe\n"
+            "  - each metric's row in the heatmap is coloured on this same "
+            "scale.\n\n"
+            "WORKFLOW\n"
+            "  Re-Analyze re-runs all metrics against the current model.\n"
+            "  Each row in the recommendations list can Select Elements to "
+            "select the offending elements straight in Revit.\n"
+            "  Export Report saves the dashboard as a report file.",
+            "Model Health Check - Help",
+            MessageBoxButton.OK, MessageBoxImage.Information)
+
     def _on_refresh(self, sender, args):
         self._run_analysis()
 
