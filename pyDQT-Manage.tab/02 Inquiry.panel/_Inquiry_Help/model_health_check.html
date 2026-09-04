@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Model Health Check - Inquiry Help</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page-header">
+  <div class="inner">
+    <div>
+      <h1>Model Health Check</h1>
+      <p class="subtitle">by Dang Quoc Truong (DQT)</p>
+    </div>
+    <span class="badge">Score dashboard</span>
+  </div>
+</div>
+
+<div class="wrap">
+  <p class="crumbs"><a href="index.html">Inquiry Toolset</a><span>&rsaquo;</span>Model Health Check</p>
+
+  <div class="card">
+    <h2>What it does</h2>
+    <p class="lede">
+      Analyzes the model against 17 metrics - file size, warnings, CAD
+      imports/links, in-place families, RVT links, worksets, views, sheets,
+      groups, design options, reference planes, detail lines, filled
+      regions, unplaced rooms, unpinned links, duplicate elements - and
+      combines them into one weighted health score with a colour-coded
+      heatmap.
+    </p>
+  </div>
+
+  <div class="card">
+    <h2>Health scale</h2>
+    <p>Each metric's row in the heatmap is coloured on this same scale, from
+      best to worst:</p>
+    <dl class="kv">
+      <dt class="v-green">Good</dt><dd>within a healthy range</dd>
+      <dt class="v-green">Acceptable</dt><dd>fine, worth keeping an eye on</dd>
+      <dt class="v-gold">Warning</dt><dd>starting to add up</dd>
+      <dt class="v-orange">Concerning</dt><dd>worth addressing soon</dd>
+      <dt class="v-red">Critical</dt><dd>likely already causing pain</dd>
+      <dt class="v-red">Severe</dt><dd>well outside the healthy range</dd>
+    </dl>
+  </div>
+
+  <div class="card">
+    <h2>Workflow</h2>
+    <ol class="steps">
+      <li><b>Re-Analyze</b> re-runs all 17 metrics against the current
+        model.</li>
+      <li>Read the overall score and grade, then scan the heatmap for
+        red/orange rows.</li>
+      <li>Each row in the recommendations list has <b>Select Elements</b> to
+        select the offending elements straight in Revit.</li>
+      <li><b>Export Report</b> saves the dashboard as a report file.</li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <h2>Good to know</h2>
+    <div class="box tip">
+      This tool only reads the model - fixing a flagged metric (purging
+      unused content, resolving warnings, converting in-place families,
+      etc.) means switching to the matching tool elsewhere in pyDQT.
+    </div>
+  </div>
+
+  <div class="pagenav">
+    <a class="prev" href="group_manager.html"><span class="dir">&larr; Previous</span>Group Manager</a>
+    <a class="next" href="in_place_model.html"><span class="dir">Next tool &rarr;</span>In-Place Model Manager</a>
+  </div>
+  <footer class="site">Inquiry Toolset &middot; Dang Quoc Truong (DQT) &copy; 2026</footer>
+</div>
+</body>
+</html>

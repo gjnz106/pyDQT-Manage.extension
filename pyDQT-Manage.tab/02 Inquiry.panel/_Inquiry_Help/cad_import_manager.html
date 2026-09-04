@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>CAD Import Manager - Inquiry Help</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page-header">
+  <div class="inner">
+    <div>
+      <h1>CAD Import Manager</h1>
+      <p class="subtitle">by Dang Quoc Truong (DQT)</p>
+    </div>
+    <span class="badge">CAD cleanup</span>
+  </div>
+</div>
+
+<div class="wrap">
+  <p class="crumbs"><a href="index.html">Inquiry Toolset</a><span>&rsaquo;</span>CAD Import Manager</p>
+
+  <div class="card">
+    <h2>What it does</h2>
+    <p class="lede">
+      Lists every imported and linked CAD file (DWG/DXF/etc.) in the model
+      with who created it, which workset and view it's in, and its level -
+      so stray or duplicate CAD content is easy to find and remove.
+    </p>
+  </div>
+
+  <div class="card">
+    <h2>Stat cards</h2>
+    <dl class="kv">
+      <dt class="v-dark">Total</dt><dd>CAD imports + links found</dd>
+      <dt class="v-green">Imports</dt><dd>files imported directly into the model</dd>
+      <dt class="v-gold">Links</dt><dd>files linked (not imported) into the model</dd>
+      <dt class="v-dark">Selected</dt><dd>rows currently ticked in the grid</dd>
+    </dl>
+  </div>
+
+  <div class="card">
+    <h2>Filters</h2>
+    <dl class="kv">
+      <dt class="v-dark">Search</dt><dd>matches name, creator, workset or view</dd>
+      <dt class="v-dark">Type</dt><dd>All / Import only / Link only</dd>
+    </dl>
+  </div>
+
+  <div class="card">
+    <h2>Workflow</h2>
+    <ol class="steps">
+      <li>Search and/or filter by Type to narrow the grid.</li>
+      <li><b>Select in Model</b> or <b>Zoom To</b> to jump to the ticked
+        CAD file(s) in Revit.</li>
+      <li><b>Export CSV</b> to save the current (filtered) list.</li>
+      <li><b>Delete</b> removes the ticked CAD import/link; <b>Close</b>
+        exits the tool.</li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <h2>Good to know</h2>
+    <div class="box tip">
+      Double-click a row's ID to copy it; double-click elsewhere on the row
+      to select + zoom to that file directly.
+    </div>
+    <div class="box warn">
+      Delete is permanent for that model session beyond Ctrl+Z - double-check
+      the selection (or use Zoom To first) before deleting CAD content other
+      people may depend on.
+    </div>
+  </div>
+
+  <div class="pagenav">
+    <a class="prev" href="workset_checker.html"><span class="dir">&larr; Previous</span>Workset Checker</a>
+    <a class="next" href="image_manager.html"><span class="dir">Next tool &rarr;</span>Image Manager</a>
+  </div>
+  <footer class="site">Inquiry Toolset &middot; Dang Quoc Truong (DQT) &copy; 2026</footer>
+</div>
+</body>
+</html>

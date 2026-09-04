@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Model Checker - Inquiry Help</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page-header">
+  <div class="inner">
+    <div>
+      <h1>Model Checker</h1>
+      <p class="subtitle">by Dang Quoc Truong (DQT)</p>
+    </div>
+    <span class="badge">Compliance</span>
+  </div>
+</div>
+
+<div class="wrap">
+  <p class="crumbs"><a href="index.html">Inquiry Toolset</a><span>&rsaquo;</span>Model Checker</p>
+
+  <div class="card">
+    <h2>What it does</h2>
+    <p class="lede">
+      Runs a rule-based BIM compliance check against the model using a JSON
+      checkset you can customise - covering Project Settings, Naming
+      Conventions and Model Performance.
+    </p>
+    <dl class="kv">
+      <dt class="v-dark">Project Settings</dt><dd>Revit version, Project Info, Survey/Base Point, Design Options, Worksets, Starting View, True North</dd>
+      <dt class="v-dark">Naming Conventions</dt><dd>Views, Sheets, Levels, Grids, Families</dd>
+      <dt class="v-dark">Model Performance</dt><dd>file size, warnings, CAD imports, in-place families, RVT links, groups, line patterns, rooms, duplicate marks</dd>
+    </dl>
+  </div>
+
+  <div class="card">
+    <h2>Stat cards</h2>
+    <dl class="kv">
+      <dt class="v-dark">Total Rules</dt><dd>rules in the current checkset</dd>
+      <dt class="v-green">Passed</dt><dd>rules that met the requirement</dd>
+      <dt class="v-red">Failed</dt><dd>rules that did not</dd>
+      <dt class="v-blue">Info</dt><dd>informational findings, not failures</dd>
+      <dt class="v-grey">Skipped</dt><dd>rules that could not be evaluated</dd>
+    </dl>
+  </div>
+
+  <div class="card">
+    <h2>Workflow</h2>
+    <ol class="steps">
+      <li>Pick a <b>Checkset</b> - New / Duplicate / Import / Export /
+        Delete manage them.</li>
+      <li>Tick the rules to run (<b>Select All</b> / <b>None</b>).</li>
+      <li>Select a rule to see its details and, if it has any, edit its
+        parameters - <b>Save Parameters</b> keeps the change.</li>
+      <li><b>Run Check</b>, then <b>Export Excel</b> for the report.</li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <h2>Good to know</h2>
+    <div class="box tip">
+      Checksets are JSON, so a checkset built for one project's BEP can be
+      exported and imported into another project rather than rebuilt by
+      hand.
+    </div>
+  </div>
+
+  <div class="pagenav">
+    <a class="prev" href="material_manager.html"><span class="dir">&larr; Previous</span>Material Manager</a>
+    <a class="next" href="warning_manager.html"><span class="dir">Next tool &rarr;</span>Warning Manager</a>
+  </div>
+  <footer class="site">Inquiry Toolset &middot; Dang Quoc Truong (DQT) &copy; 2026</footer>
+</div>
+</body>
+</html>

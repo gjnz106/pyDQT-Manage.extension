@@ -35,10 +35,26 @@ from System.Collections.ObjectModel import ObservableCollection
 from System.ComponentModel import INotifyPropertyChanged, PropertyChangedEventArgs
 
 import re
+import os
 
 from pyrevit import revit, DB, forms
 
 doc = revit.doc
+
+
+def _open_help_page(html_filename):
+    """Open this tool's page from the shared _Inquiry_Help folder in the
+    default browser. Returns True on success, False if the caller should
+    fall back to the in-app help text (e.g. the folder went missing)."""
+    try:
+        panel_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        path = os.path.join(panel_dir, "_Inquiry_Help", html_filename)
+        if not os.path.isfile(path):
+            return False
+        os.startfile(path)
+        return True
+    except Exception:
+        return False
 
 
 # ============================================================================
@@ -1133,6 +1149,10 @@ class MaterialManagerWindow(Window):
         border.Padding = Thickness(12, 8, 12, 8)
         border.Margin = Thickness(0, 0, 0, 10)
 
+        grid = Grid()
+        grid.ColumnDefinitions.Add(ColumnDefinition(Width=GridLength(1, GridUnitType.Star)))
+        grid.ColumnDefinitions.Add(ColumnDefinition(Width=GridLength.Auto))
+
         panel = StackPanel()
 
         title = TextBlock()
@@ -1149,7 +1169,20 @@ class MaterialManagerWindow(Window):
         subtitle.Margin = Thickness(0, 2, 0, 0)
         panel.Children.Add(subtitle)
 
-        border.Child = panel
+        Grid.SetColumn(panel, 0)
+        grid.Children.Add(panel)
+
+        btn_help = Button()
+        btn_help.Content = "? Help"
+        btn_help.Padding = Thickness(10, 4, 10, 4)
+        btn_help.Background = _brush(Config.WHITE)
+        btn_help.Foreground = _brush(Config.TEXT_DARK)
+        btn_help.VerticalAlignment = VerticalAlignment.Center
+        btn_help.Click += self._on_help
+        Grid.SetColumn(btn_help, 1)
+        grid.Children.Add(btn_help)
+
+        border.Child = grid
         return border
 
     def _create_summary_cards(self):
@@ -1685,6 +1718,30 @@ class MaterialManagerWindow(Window):
     def _on_refresh(self, sender, args):
         self._load_data()
         MessageBox.Show("Data refreshed!", "Info", MessageBoxButton.OK, MessageBoxImage.Information)
+
+    def _on_help(self, sender, args):
+        if _open_help_page("material_manager.html"):
+            return
+        MessageBox.Show(
+            "Material Manager\n\n"
+            "Lists every Material in the model with how many elements use "
+            "it, so unused materials can be found and cleaned up.\n\n"
+            "STAT CARDS\n"
+            "  TOTAL     - materials in the model\n"
+            "  VISIBLE   - materials left after Search/Filter/Category\n"
+            "  SELECTED  - rows currently ticked\n"
+            "  IN USE    - materials with at least one element using them\n"
+            "  UNUSED    - materials with none - purge candidates\n\n"
+            "WORKFLOW\n"
+            "  Search / Filter by Usage / Filter by Category narrow the "
+            "list.\n"
+            "  Rename renames one material; Batch Rename applies a "
+            "Prefix/Suffix, Find/Replace, Remove or Case change to every "
+            "ticked row at once.\n"
+            "  Duplicate copies a material; Delete removes the ticked "
+            "ones.",
+            "Material Manager - Help",
+            MessageBoxButton.OK, MessageBoxImage.Information)
 
     def _on_rename(self, sender, args):
         selected = self._get_selected_items()

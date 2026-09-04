@@ -27,6 +27,21 @@ import os
 get_elementid_value = get_elementid_value_func()
 
 
+def _open_help_page(html_filename):
+    """Open this tool's page from the shared _Inquiry_Help folder in the
+    default browser. Returns True on success, False if the caller should
+    fall back to the in-app help text (e.g. the folder went missing)."""
+    try:
+        panel_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        path = os.path.join(panel_dir, "_Inquiry_Help", html_filename)
+        if not os.path.isfile(path):
+            return False
+        os.startfile(path)
+        return True
+    except Exception:
+        return False
+
+
 def _eid_int(eid):
     """Get integer value from ElementId - compatible with Revit 2024-2026"""
     if eid is None:
@@ -486,6 +501,8 @@ class ImageManagerWindow(WPFWindow):
         self._navigate_and_select([item])
 
     def on_help(self, s, e):
+        if _open_help_page("image_manager.html"):
+            return
         forms.alert(
             "Image Manager\n\n"
             "- Search filters by name, path, creator, workset or view; "

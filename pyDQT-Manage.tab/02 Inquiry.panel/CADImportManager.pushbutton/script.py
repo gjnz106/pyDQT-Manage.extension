@@ -10,6 +10,7 @@ and selected without hunting through every view.
 __title__ = "CAD Import\nManager"
 __author__ = "DQT"
 
+import os
 import clr
 clr.AddReference('RevitAPI')
 clr.AddReference('RevitAPIUI')
@@ -23,6 +24,21 @@ import codecs
 import datetime
 
 get_elementid_value = get_elementid_value_func()
+
+
+def _open_help_page(html_filename):
+    """Open this tool's page from the shared _Inquiry_Help folder in the
+    default browser. Returns True on success, False if the caller should
+    fall back to the in-app help text (e.g. the folder went missing)."""
+    try:
+        panel_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        path = os.path.join(panel_dir, "_Inquiry_Help", html_filename)
+        if not os.path.isfile(path):
+            return False
+        os.startfile(path)
+        return True
+    except Exception:
+        return False
 
 
 def _eid_int(eid):
@@ -261,10 +277,14 @@ MAIN_XAML = """
 
         <!-- Header -->
         <Border Grid.Row="0" Background="#F0CC88" CornerRadius="5" Padding="12,8" Margin="0,0,0,10">
-            <StackPanel>
-                <TextBlock Text="CAD Import Manager" FontSize="17" FontWeight="Bold"/>
-                <TextBlock Text="Imported / linked CAD files in this model - by Dang Quoc Truong (DQT)" FontSize="10" Foreground="#5D4E37" Margin="0,2,0,0"/>
-            </StackPanel>
+            <Grid>
+                <StackPanel>
+                    <TextBlock Text="CAD Import Manager" FontSize="17" FontWeight="Bold"/>
+                    <TextBlock Text="Imported / linked CAD files in this model - by Dang Quoc Truong (DQT)" FontSize="10" Foreground="#5D4E37" Margin="0,2,0,0"/>
+                </StackPanel>
+                <Button x:Name="btnHelp" Content="? Help" Padding="10,4" Background="White"
+                        HorizontalAlignment="Right" VerticalAlignment="Center"/>
+            </Grid>
         </Border>
 
         <!-- Summary cards -->
@@ -382,6 +402,7 @@ class CADImportManagerWindow(WPFWindow):
         self.btnExportCSV.Click += self.export_csv
         self.btnDelete.Click += self.delete_selected
         self.btnClose.Click += self.close_window
+        self.btnHelp.Click += self.on_help
 
         self.load_data()
         self.update_ui()
@@ -653,6 +674,29 @@ class CADImportManagerWindow(WPFWindow):
 
     def close_window(self, s, e):
         self.Close()
+
+    def on_help(self, s, e):
+        if _open_help_page("cad_import_manager.html"):
+            return
+        forms.alert(
+            "CAD Import Manager\n\n"
+            "Lists every CAD file imported or linked into the model, with "
+            "its creator, workset, host level and the view it was placed "
+            "into - so a stray or oversized CAD file can be found without "
+            "hunting through every view.\n\n"
+            "STAT CARDS\n"
+            "  TOTAL     - CAD ImportInstance elements found\n"
+            "  IMPORTS   - imported (not linked) files\n"
+            "  LINKS     - linked files\n"
+            "  SELECTED  - rows currently selected in the grid\n\n"
+            "WORKFLOW\n"
+            "  Search / Type filter narrow the list.\n"
+            "  Double-click ID to copy it; double-click elsewhere on a row "
+            "to select + zoom to that file.\n"
+            "  Select in Model / Zoom To act on the checked rows.\n"
+            "  Export CSV saves the visible list.\n"
+            "  Delete removes the selected CAD elements from the model.",
+            title="CAD Import Manager - Help")
 
 
 # ============================================================================
