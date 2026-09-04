@@ -1082,23 +1082,33 @@ XAML_STR = '''
                     <!-- Multi-select bar -->
                     <Border Grid.Row="2" Background="#FAF6EC" BorderBrush="#E8E0D0"
                             BorderThickness="1" CornerRadius="3" Padding="6,4" Margin="0,0,0,6">
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="Multi-select:" FontSize="11" VerticalAlignment="Center"
-                                       Margin="0,0,6,0" Foreground="#5D4E37" FontWeight="SemiBold"/>
-                            <Button x:Name="btnTickAll" Content="Select All"
-                                    Style="{StaticResource BtnSecondary}" Padding="8,3" FontSize="10" Margin="0,0,3,0"/>
-                            <Button x:Name="btnTickNone" Content="Un-select"
-                                    Style="{StaticResource BtnSecondary}" Padding="8,3" FontSize="10" Margin="0,0,3,0"/>
-                            <Button x:Name="btnTickInvert" Content="Invert"
-                                    Style="{StaticResource BtnSecondary}" Padding="8,3" FontSize="10" Margin="0,0,3,0"/>
-                            <Button x:Name="btnTickFailed" Content="Tick Failed"
-                                    Style="{StaticResource BtnSecondary}" Padding="8,3" FontSize="10" Margin="0,0,10,0"/>
-                            <TextBlock Text="(Shift + click = range)" FontSize="10"
-                                       VerticalAlignment="Center" Foreground="#AAA" Margin="0,0,10,0"/>
-                            <TextBlock x:Name="txtTickCount" Text="0 rows ticked" FontSize="11"
-                                       VerticalAlignment="Center" Foreground="#888" Margin="0,0,10,0"/>
-                            <Button x:Name="btnSelectTicked" Content="&#x25BA; Select Ticked in Revit"
-                                    Style="{StaticResource BtnPrimary}" Padding="10,3" FontSize="10" IsEnabled="False"/>
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="Multi-select:" FontSize="11" VerticalAlignment="Center"
+                                           Margin="0,0,6,0" Foreground="#5D4E37" FontWeight="SemiBold"/>
+                                <Button x:Name="btnTickAll" Content="Select All"
+                                        Style="{StaticResource BtnSecondary}" Padding="8,3" FontSize="10" Margin="0,0,3,0"/>
+                                <Button x:Name="btnTickNone" Content="Un-select"
+                                        Style="{StaticResource BtnSecondary}" Padding="8,3" FontSize="10" Margin="0,0,3,0"/>
+                                <Button x:Name="btnTickInvert" Content="Invert"
+                                        Style="{StaticResource BtnSecondary}" Padding="8,3" FontSize="10" Margin="0,0,3,0"/>
+                                <Button x:Name="btnTickFailed" Content="Tick Failed"
+                                        Style="{StaticResource BtnSecondary}" Padding="8,3" FontSize="10" Margin="0,0,10,0"/>
+                                <TextBlock Text="(Shift + click = range)" FontSize="10"
+                                           VerticalAlignment="Center" Foreground="#AAA" Margin="0,0,10,0"/>
+                                <TextBlock x:Name="txtTickCount" Text="0 rows ticked" FontSize="11"
+                                           VerticalAlignment="Center" Foreground="#888"/>
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,5,0,0">
+                                <Button x:Name="btnSelectTicked" Content="&#x25BA; Select Ticked in Revit"
+                                        Style="{StaticResource BtnPrimary}" Padding="10,3" FontSize="10" IsEnabled="False" Margin="0,0,4,0"/>
+                                <Button x:Name="btnZoomTicked" Content="&#x1F50D; Zoom To Ticked"
+                                        Style="{StaticResource BtnSecondary}" Padding="10,3" FontSize="10" IsEnabled="False" Margin="0,0,4,0"/>
+                                <Button x:Name="btnIsolateTicked" Content="&#x1F441; Isolate Ticked"
+                                        Style="{StaticResource BtnSecondary}" Padding="10,3" FontSize="10" IsEnabled="False" Margin="0,0,4,0"/>
+                                <Button x:Name="btnResetIsolate" Content="Reset Isolate/Hide"
+                                        Style="{StaticResource BtnSecondary}" Padding="10,3" FontSize="10"/>
+                            </StackPanel>
                         </StackPanel>
                     </Border>
 
@@ -1165,6 +1175,13 @@ class IFCSGCheckerWindow:
         # Anchors for shift + click range ticking.
         self._last_cat_index = None
         self._last_row_index = None
+        # Blue outline drawn around a row/category/discipline while it is
+        # ticked - the same visual regardless of whether the tick came from
+        # a direct click, a shift-click range, or a parent cascade.
+        try:
+            self._tick_brush = BrushConverter().ConvertFromString("#2196F3")
+        except:
+            self._tick_brush = None
 
         # Parse XAML
         self.window = XamlReader.Parse(XAML_STR)
@@ -1226,7 +1243,8 @@ class IFCSGCheckerWindow:
             "btnFilterAll", "btnFilterFail", "btnFilterWarn", "btnFilterPass",
             "btnSelectAllFailed", "txtSearch",
             "btnTickAll", "btnTickNone", "btnTickInvert", "btnTickFailed",
-            "txtTickCount", "btnSelectTicked",
+            "txtTickCount", "btnSelectTicked", "btnZoomTicked", "btnIsolateTicked",
+            "btnResetIsolate",
             "txtStatus", "btnRunCheck", "btnExportExcel", "btnClose", "txtFooter",
             "btnHelp"
         ]
@@ -1250,6 +1268,9 @@ class IFCSGCheckerWindow:
         self.btnTickInvert.Click += lambda s, e: self._set_rows_ticked("invert")
         self.btnTickFailed.Click += lambda s, e: self._set_rows_ticked("failed")
         self.btnSelectTicked.Click += self._on_select_ticked
+        self.btnZoomTicked.Click += self._on_zoom_ticked
+        self.btnIsolateTicked.Click += self._on_isolate_ticked
+        self.btnResetIsolate.Click += self._on_reset_isolate
         self.btnFilterAll.Click += lambda s, e: self._apply_filter("all")
         self.btnFilterFail.Click += lambda s, e: self._apply_filter("fail")
         self.btnFilterWarn.Click += lambda s, e: self._apply_filter("warning")
@@ -1280,11 +1301,16 @@ class IFCSGCheckerWindow:
             "WORKFLOW\n"
             "  1. Load a config (Import XML / Excel, or pick a saved one)\n"
             "  2. Tick the disciplines and categories to cover - Tick All / "
-            "None / Invert, and Shift+Click for a range\n"
+            "None / Invert, and Shift+Click for a range - a ticked row, "
+            "category or discipline is outlined in blue\n"
             "  3. Run Check, then filter the results (All / Failed / Partial / "
             "Passed) or search\n"
-            "  4. Tick result rows and press Select Ticked in Revit, or use a "
-            "row's own Select button\n"
+            "  4. Tick result rows (Select All / Un-select / Invert / Tick "
+            "Failed, or Shift+Click for a range), then:\n"
+            "       - Select Ticked in Revit - sets the Revit selection\n"
+            "       - Zoom To Ticked - selects and frames them in the view\n"
+            "       - Isolate Ticked - temporarily isolates them; Reset "
+            "Isolate/Hide brings everything back\n"
             "  5. Export Excel writes Summary / Detailed / Failed sheets\n\n"
             "A category the tool cannot collect is marked \"not supported\" "
             "rather than being reported as simply empty.",
@@ -1443,17 +1469,26 @@ class IFCSGCheckerWindow:
             disc_item = TreeViewItem()
             disc_item.IsExpanded = True
             
+            # Wrapping border lets a ticked discipline light up blue, same as
+            # a ticked category or result row - independent of the TreeView's
+            # own (single-item) selection highlight.
+            disc_row = System.Windows.Controls.Border()
+            disc_row.BorderThickness = System.Windows.Thickness(0)
+            disc_row.CornerRadius = System.Windows.CornerRadius(2)
+            disc_row.Padding = System.Windows.Thickness(2, 1, 2, 1)
+
             disc_sp = StackPanel()
             disc_sp.Orientation = System.Windows.Controls.Orientation.Horizontal
-            
+
             chk_disc = CheckBox()
             chk_disc.IsChecked = System.Nullable[System.Boolean](
                 bool(disc_data.get("enabled", True)))
             chk_disc.Margin = System.Windows.Thickness(0, 0, 6, 0)
-            chk_disc.Tag = disc_name
+            chk_disc.Tag = (disc_name, disc_row)
             chk_disc.Checked += self._on_disc_toggled
             chk_disc.Unchecked += self._on_disc_toggled
             self.disc_checks.append((chk_disc, disc_name))
+            self._apply_checkbox_highlight(chk_disc, disc_row)
 
             lbl_disc = TextBlock()
             lbl_disc.Text = u"{} ({} categories)".format(
@@ -1467,25 +1502,32 @@ class IFCSGCheckerWindow:
             
             disc_sp.Children.Add(chk_disc)
             disc_sp.Children.Add(lbl_disc)
-            disc_item.Header = disc_sp
+            disc_row.Child = disc_sp
+            disc_item.Header = disc_row
             
             # Category nodes
             for cat_name, cat_data in disc_data.get("categories", {}).items():
                 cat_item = TreeViewItem()
                 
+                cat_row = System.Windows.Controls.Border()
+                cat_row.BorderThickness = System.Windows.Thickness(0)
+                cat_row.CornerRadius = System.Windows.CornerRadius(2)
+                cat_row.Padding = System.Windows.Thickness(2, 1, 2, 1)
+
                 cat_sp = StackPanel()
                 cat_sp.Orientation = System.Windows.Controls.Orientation.Horizontal
-                
+
                 chk_cat = CheckBox()
                 chk_cat.IsChecked = System.Nullable[System.Boolean](
                     bool(cat_data.get("enabled", True)))
                 chk_cat.Margin = System.Windows.Thickness(0, 0, 6, 0)
-                chk_cat.Tag = "{}|{}".format(disc_name, cat_name)
+                chk_cat.Tag = (disc_name, cat_name, cat_row)
                 chk_cat.Checked += self._on_cat_toggled
                 chk_cat.Unchecked += self._on_cat_toggled
                 chk_cat.PreviewMouseLeftButtonDown += self._on_cat_preview_click
                 chk_cat.ToolTip = "Shift + click to tick a range of categories"
                 self.cat_checks.append((chk_cat, disc_name, cat_name))
+                self._apply_checkbox_highlight(chk_cat, cat_row)
 
                 param_count = len(cat_data.get("params", []))
                 lbl_cat = TextBlock()
@@ -1502,7 +1544,8 @@ class IFCSGCheckerWindow:
 
                 cat_sp.Children.Add(chk_cat)
                 cat_sp.Children.Add(lbl_cat)
-                cat_item.Header = cat_sp
+                cat_row.Child = cat_sp
+                cat_item.Header = cat_row
                 
                 disc_item.Items.Add(cat_item)
 
@@ -1595,8 +1638,27 @@ class IFCSGCheckerWindow:
         finally:
             self._suspend_cascade = previous
 
+    def _apply_checkbox_highlight(self, checkbox, border):
+        """Outline a row in blue while its checkbox is ticked.
+
+        Called from every tick path - a direct click, a shift-click range,
+        a bulk Select All/Invert/Tick Failed, and a discipline cascading
+        down to its categories - so the tick is always visible at a glance,
+        without hiding the row's own pass/fail colour underneath it."""
+        if border is None:
+            return
+        try:
+            if bool(checkbox.IsChecked):
+                border.BorderBrush = self._tick_brush
+                border.BorderThickness = System.Windows.Thickness(2)
+            else:
+                border.BorderThickness = System.Windows.Thickness(0)
+        except:
+            pass
+
     def _on_disc_toggled(self, sender, args):
-        disc_name = str(sender.Tag)
+        disc_name, disc_row = sender.Tag
+        self._apply_checkbox_highlight(sender, disc_row)
         state = bool(sender.IsChecked)
         if disc_name in self.config.disciplines:
             self.config.disciplines[disc_name]["enabled"] = state
@@ -1615,19 +1677,15 @@ class IFCSGCheckerWindow:
             self._update_selection_status()
 
     def _on_cat_toggled(self, sender, args):
-        tag = str(sender.Tag)
-        parts = tag.split("|")
-        disc = None
-        if len(parts) == 2:
-            disc, cat = parts
-            if disc in self.config.disciplines:
-                cats = self.config.disciplines[disc].get("categories", {})
-                if cat in cats:
-                    cats[cat]["enabled"] = bool(sender.IsChecked)
+        disc, cat, cat_row = sender.Tag
+        self._apply_checkbox_highlight(sender, cat_row)
+        if disc in self.config.disciplines:
+            cats = self.config.disciplines[disc].get("categories", {})
+            if cat in cats:
+                cats[cat]["enabled"] = bool(sender.IsChecked)
 
         if not self._suspend_cascade:
-            if disc:
-                self._sync_discipline(disc)
+            self._sync_discipline(disc)
             self._update_selection_status()
 
     def _sync_discipline(self, disc_name):
@@ -1831,7 +1889,7 @@ class IFCSGCheckerWindow:
             self.txtStatus.Text = "No failed elements to select"
     
     def _select_elements_in_revit(self, element_ids):
-        """Select elements in Revit and zoom to them"""
+        """Select elements in Revit (no zoom - see _on_zoom_ticked for that)."""
         try:
             ids = System.Collections.Generic.List[ElementId]()
             for eid in element_ids:
@@ -2104,6 +2162,9 @@ class IFCSGCheckerWindow:
             row_border.Margin = System.Windows.Thickness(16, 1, 0, 1)
             row_border.Padding = System.Windows.Thickness(8, 3, 8, 3)
             row_border.CornerRadius = System.Windows.CornerRadius(2)
+            # No outline until ticked - the pass/fail background stays the
+            # only colour on an untouched row.
+            row_border.BorderThickness = System.Windows.Thickness(0)
             try:
                 row_border.Background = converter.ConvertFromString(
                     status_bg.get(r.status, "#FAFAFA"))
@@ -2133,6 +2194,7 @@ class IFCSGCheckerWindow:
             row_chk.VerticalAlignment = System.Windows.VerticalAlignment.Center
             row_chk.Cursor = System.Windows.Input.Cursors.Hand
             row_chk.IsEnabled = bool(r.element_ids)
+            row_chk.Tag = row_border    # so the tick handler can outline this row
             row_chk.Checked += self._on_row_tick_changed
             row_chk.Unchecked += self._on_row_tick_changed
             row_chk.PreviewMouseLeftButtonDown += self._on_row_preview_click
@@ -2220,6 +2282,7 @@ class IFCSGCheckerWindow:
     # MULTI-SELECT (row tick boxes)
     # =================================================================
     def _on_row_tick_changed(self, sender, args):
+        self._apply_checkbox_highlight(sender, sender.Tag)
         # Recounting on every box would be quadratic during a bulk tick, and
         # a full run has hundreds of rows - the bulk callers count once.
         if not self._suspend_cascade:
@@ -2251,25 +2314,103 @@ class IFCSGCheckerWindow:
     def _ticked_results(self):
         return [r for chk, r in self.row_checks if bool(chk.IsChecked)]
 
-    def _update_tick_count(self):
-        ticked = self._ticked_results()
-        ids = set()
-        for r in ticked:
-            ids.update(r.element_ids)
-        self.txtTickCount.Text = "{} rows ticked / {} elements".format(
-            len(ticked), len(ids))
-        self.btnSelectTicked.IsEnabled = len(ids) > 0
-
-    def _on_select_ticked(self, sender, args):
-        """Select every element behind the ticked rows, in one go."""
+    def _ticked_element_ids(self):
+        """Element ids behind every ticked row, deduplicated."""
         ids = set()
         for r in self._ticked_results():
             ids.update(r.element_ids)
+        return ids
+
+    def _ticked_ids_as_net_list(self):
+        """Ticked element ids as a .NET List[ElementId] - Zoom and Isolate
+        both call Revit API methods that need a real ICollection<ElementId>,
+        not a Python list/set."""
+        ids = self._ticked_element_ids()
+        if not ids:
+            return None
+        net_ids = System.Collections.Generic.List[ElementId]()
+        for eid in ids:
+            try:
+                net_ids.Add(ElementId(int(eid)))
+            except:
+                pass
+        return net_ids if net_ids.Count > 0 else None
+
+    def _update_tick_count(self):
+        ticked = self._ticked_results()
+        ids = self._ticked_element_ids()
+        self.txtTickCount.Text = "{} rows ticked / {} elements".format(
+            len(ticked), len(ids))
+        has_ids = len(ids) > 0
+        self.btnSelectTicked.IsEnabled = has_ids
+        self.btnZoomTicked.IsEnabled = has_ids
+        self.btnIsolateTicked.IsEnabled = has_ids
+
+    def _on_select_ticked(self, sender, args):
+        """Select every element behind the ticked rows, in one go."""
+        ids = self._ticked_element_ids()
         if not ids:
             self.txtStatus.Text = "Tick at least one row that has elements."
             return
         self._select_elements_in_revit(list(ids))
-    
+
+    def _on_zoom_ticked(self, sender, args):
+        """Select and frame every element behind the ticked rows."""
+        net_ids = self._ticked_ids_as_net_list()
+        if net_ids is None:
+            self.txtStatus.Text = "Tick at least one row that has elements."
+            return
+        try:
+            uidoc.Selection.SetElementIds(net_ids)
+            uidoc.ShowElements(net_ids)
+            self.txtStatus.Text = "Zoomed to {} element(s).".format(net_ids.Count)
+        except Exception as e:
+            self.txtStatus.Text = "Zoom error: {}".format(str(e))
+
+    def _on_isolate_ticked(self, sender, args):
+        """Temporarily isolate every element behind the ticked rows in the
+        active view - Reset Isolate/Hide undoes it."""
+        net_ids = self._ticked_ids_as_net_list()
+        if net_ids is None:
+            self.txtStatus.Text = "Tick at least one row that has elements."
+            return
+        view = doc.ActiveView
+        if view is None:
+            self.txtStatus.Text = "No active view to isolate in."
+            return
+        t = Transaction(doc, "DQT - Isolate Ticked Elements")
+        try:
+            t.Start()
+            view.IsolateElementsTemporary(net_ids)
+            t.Commit()
+            uidoc.Selection.SetElementIds(net_ids)
+            self.txtStatus.Text = "Isolated {} element(s) in the active view.".format(
+                net_ids.Count)
+        except Exception as e:
+            if t.HasStarted() and not t.HasEnded():
+                t.RollBack()
+            self.txtStatus.Text = "Isolate error: {}".format(str(e))
+
+    def _on_reset_isolate(self, sender, args):
+        """Exit temporary hide/isolate on the active view, if it is active."""
+        view = doc.ActiveView
+        if view is None:
+            return
+        t = None
+        try:
+            if not view.IsInTemporaryViewMode(TemporaryViewMode.TemporaryHideIsolate):
+                self.txtStatus.Text = "Nothing to reset - the view is not isolated."
+                return
+            t = Transaction(doc, "DQT - Reset Temporary Isolate/Hide")
+            t.Start()
+            view.DisableTemporaryViewMode(TemporaryViewMode.TemporaryHideIsolate)
+            t.Commit()
+            self.txtStatus.Text = "Temporary isolate/hide reset."
+        except Exception as e:
+            if t is not None and t.HasStarted() and not t.HasEnded():
+                t.RollBack()
+            self.txtStatus.Text = "Reset error: {}".format(str(e))
+
     # =================================================================
     # EXPORT
     # =================================================================
