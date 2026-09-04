@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Check Update - UI Help</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page-header">
+  <div class="inner">
+    <div>
+      <h1>Check Update</h1>
+      <p class="subtitle">by Dang Quoc Truong (DQT)</p>
+    </div>
+    <span class="badge">Version check</span>
+  </div>
+</div>
+
+<div class="wrap">
+  <p class="crumbs"><a href="index.html">UI Toolset</a><span>&rsaquo;</span>Check Update</p>
+
+  <div class="card">
+    <h2>What it does</h2>
+    <p class="lede">
+      Click the button and it immediately tells you whether the installed
+      pyDQT-Manage is up to date, by comparing the local git commit with
+      the latest commit on GitHub - there's no window to open first.
+    </p>
+  </div>
+
+  <div class="card">
+    <h2>What you'll see</h2>
+    <dl class="kv">
+      <dt class="v-green">Up to date</dt><dd>the installed commit matches the latest on GitHub</dd>
+      <dt class="v-gold">Update available</dt><dd>a newer commit exists on GitHub, with the installed vs. latest short SHA and how to update</dd>
+      <dt class="v-red">Not a git install</dt><dd>the extension folder has no <code>.git</code> - it wasn't installed via Git, so there's nothing to compare</dd>
+      <dt class="v-red">Could not reach GitHub</dt><dd>a network problem prevented the check</dd>
+    </dl>
+  </div>
+
+  <div class="card">
+    <h2>How to update</h2>
+    <ol class="steps">
+      <li>pyRevit ribbon &rsaquo; <b>Update</b>, then <b>Reload</b>, or</li>
+      <li>run <code>git pull</code> in the extension folder, then Reload.</li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <h2>Good to know</h2>
+    <div class="box tip">
+      This only works for a Git install. To enable one-click updates on a
+      non-git install, reinstall pyDQT-Manage through pyRevit &rsaquo;
+      Extension Manager using the Git URL:
+      <code>https://github.com/gjnz106/pyDQT-Manage.extension.git</code>
+    </div>
+  </div>
+
+  <div class="pagenav">
+    <a class="prev" href="index.html"><span class="dir">&larr; Back to</span>UI Toolset</a>
+  </div>
+  <footer class="site">UI Toolset &middot; Dang Quoc Truong (DQT) &copy; 2026</footer>
+</div>
+</body>
+</html>
