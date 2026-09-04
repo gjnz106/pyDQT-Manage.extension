@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Cleanup Toolset - Help</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page-header">
+  <div class="inner">
+    <div>
+      <h1>Cleanup Toolset</h1>
+      <p class="subtitle">by Dang Quoc Truong (DQT) &middot; pyDQT-Manage</p>
+    </div>
+    <span class="badge">4 tools</span>
+  </div>
+</div>
+
+<div class="wrap">
+
+  <div class="card">
+    <h2>What this panel is for</h2>
+    <p class="lede">
+      Model housekeeping - removing unused elements, unused family content,
+      and elements you no longer need - with a preview and a scan step
+      before anything is deleted.
+    </p>
+    <p>
+      These tools cover three different scopes: <b>Smart Purge</b> and
+      <b>Advanced Purge</b> clean up unused content <i>inside the current
+      project</i>, <b>Purge Families</b> cleans up a whole <i>folder of
+      .rfa files on disk</i>, and <b>Smart Delete</b> removes specific
+      <i>elements you pick</i> after checking what depends on them.
+    </p>
+  </div>
+
+  <div class="tool-grid">
+
+    <a class="tool-card" href="smart_purge.html">
+      <span class="step-no">PROJECT</span>
+      <h3>Smart Purge</h3>
+      <p>Scan and remove unused elements, types and system content from the
+      current project, grouped by category.</p>
+    </a>
+
+    <a class="tool-card" href="advanced_purge.html">
+      <span class="step-no">POWER USER</span>
+      <h3>Advanced Purge</h3>
+      <p>The same idea with riskier operations added - unreferenced views,
+      workset cleanup, deep model cleanup. Dry Run is on by default.</p>
+    </a>
+
+    <a class="tool-card" href="purge_families.html">
+      <span class="step-no">ON DISK</span>
+      <h3>Purge Families</h3>
+      <p>Batch-purge every .rfa in a folder until Revit reports nothing
+      purgeable left, with an optional bulk rename pass.</p>
+    </a>
+
+    <a class="tool-card" href="smart_delete.html">
+      <span class="step-no">TARGETED</span>
+      <h3>Smart Delete</h3>
+      <p>Pick specific elements and see what depends on them before you
+      delete - flags anything that isn't safe to remove.</p>
+    </a>
+
+  </div>
+
+  <div class="card">
+    <h2>Which tool do I need?</h2>
+    <table class="cmp">
+      <tr><th>I want to&hellip;</th><th>Use</th></tr>
+      <tr><td>Clean up unused types/materials/etc. in the open project</td><td>Smart Purge</td></tr>
+      <tr><td>Also clean up unreferenced views, worksets, or deep model cleanup</td><td>Advanced Purge</td></tr>
+      <tr><td>Purge a whole library folder of family files on disk</td><td>Purge Families</td></tr>
+      <tr><td>Delete a handful of specific elements safely</td><td>Smart Delete</td></tr>
+    </table>
+  </div>
+
+  <footer class="site">Cleanup Toolset &middot; Dang Quoc Truong (DQT) &copy; 2026</footer>
+</div>
+</body>
+</html>
