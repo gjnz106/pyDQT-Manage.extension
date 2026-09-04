@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>List Dimension - Template Help</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page-header">
+  <div class="inner">
+    <div><h1>List Dimension</h1><p class="subtitle">by Dang Quoc Truong (DQT)</p></div>
+    <span class="badge">Dimensions</span>
+  </div>
+</div>
+<div class="wrap">
+  <p class="crumbs"><a href="index.html">Template Toolset</a><span>&rsaquo;</span>List Dimension</p>
+
+  <div class="card">
+    <h2>What it does</h2>
+    <p class="lede">
+      Draws one sample dimension for every Linear Dimension Type in the
+      project, each rendered in its own type with a label, so every
+      dimension style can be compared at a glance.
+    </p>
+  </div>
+
+  <div class="card">
+    <h2>Workflow</h2>
+    <ol class="steps">
+      <li>Pick a <b>Text Style</b> for the labels, and set <b>Row Spacing</b>,
+        <b>Dimension Span</b> and <b>Label Gap</b> (all in mm) in the dialog
+        that opens.</li>
+      <li><b>Pick a point</b> on the active view - the list is built
+        downward from there, one row per type.</li>
+      <li>A summary reports how many types were placed, and lists any
+        that were skipped.</li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <h2>Why some types get skipped</h2>
+    <p>
+      Only <b>Linear-style</b> Dimension Types can be previewed this way -
+      the sample is built from two reference tick-lines plus a straight
+      dimension line, which is exactly what a Linear dimension is. Angular,
+      Radial, Diameter, Spot Elevation, Spot Coordinate and Spot Slope
+      types each need fundamentally different reference geometry.
+    </p>
+    <p>
+      Rather than guess at that geometry, the tool asks Revit itself: it
+      builds the sample, then tries to re-type it to the target style. If
+      Revit refuses, that type is named in the summary as skipped instead
+      of being faked with the wrong geometry.
+    </p>
+  </div>
+
+  <div class="pagenav">
+    <a class="prev" href="index.html"><span class="dir">&larr; Back to</span>Template Toolset</a>
+    <a class="next" href="list_text_styles.html"><span class="dir">Next tool &rarr;</span>List Text Styles</a>
+  </div>
+  <footer class="site">Template Toolset &middot; Dang Quoc Truong (DQT) &copy; 2026</footer>
+</div>
+</body>
+</html>

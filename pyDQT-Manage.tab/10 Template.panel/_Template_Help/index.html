@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Template Toolset - Help</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page-header">
+  <div class="inner">
+    <div>
+      <h1>Template Toolset</h1>
+      <p class="subtitle">by Dang Quoc Truong (DQT) &middot; pyDQT-Manage</p>
+    </div>
+    <span class="badge">7 tools</span>
+  </div>
+</div>
+
+<div class="wrap">
+
+  <div class="card">
+    <h2>What this panel is for</h2>
+    <p class="lede">
+      Builds a visual catalogue of the types already defined in a project -
+      dimension styles, text styles, wall types, symbols, detail items,
+      filled regions, line styles - by placing one labelled sample of each
+      on the active view. Point it at a Legend view (or, for Walls, a
+      Floor Plan) and it does the placing and labelling for you.
+    </p>
+    <p>
+      None of these tools has its own window - each is a quick point-and-run
+      action, so there is no in-app "?" button to open this page from.
+      Bookmark it instead, or come back to
+      <a href="index.html">this index</a> when you need it.
+    </p>
+  </div>
+
+  <div class="tool-grid">
+    <a class="tool-card" href="list_dimension.html">
+      <span class="step-no">DIMENSIONS</span>
+      <h3>List Dimension</h3>
+      <p>One sample dimension per Linear Dimension Type.</p>
+    </a>
+    <a class="tool-card" href="list_text_styles.html">
+      <span class="step-no">TEXT</span>
+      <h3>List Text Styles</h3>
+      <p>One text note per Text Note Type, in its own style.</p>
+    </a>
+    <a class="tool-card" href="list_walls.html">
+      <span class="step-no">WALLS</span>
+      <h3>List Walls</h3>
+      <p>Every Basic Wall type, with an optional layer buildup.</p>
+    </a>
+    <a class="tool-card" href="list_project_symbols.html">
+      <span class="step-no">SYMBOLS</span>
+      <h3>List Project Symbols</h3>
+      <p>Annotation symbols grouped by Category &gt; Family &gt; Type.</p>
+    </a>
+    <a class="tool-card" href="list_detail_items.html">
+      <span class="step-no">DETAILING</span>
+      <h3>List Detail Items</h3>
+      <p>Every Detail Component type, grouped by family.</p>
+    </a>
+    <a class="tool-card" href="list_filled_regions.html">
+      <span class="step-no">DETAILING</span>
+      <h3>List Filled Regions</h3>
+      <p>A labelled rectangle per Filled Region type.</p>
+    </a>
+    <a class="tool-card" href="list_line_styles.html">
+      <span class="step-no">DETAILING</span>
+      <h3>List Line Styles</h3>
+      <p>A labelled sample line per Line Style.</p>
+    </a>
+  </div>
+
+  <div class="card">
+    <h2>Shared behaviour</h2>
+    <dl class="kv">
+      <dt class="v-dark">Pick a point</dt><dd>Every tool asks you to click a start point on the active view, then lays its list out downward from there.</dd>
+      <dt class="v-dark">Nothing found</dt><dd>If a project has no types of the relevant kind, the tool says so and stops instead of placing an empty list.</dd>
+      <dt class="v-dark">Shift+Click</dt><dd>List Walls and List Project Symbols keep their settings in a persistent config - Shift+Click the ribbon button to open it and change them before running.</dd>
+      <dt class="v-dark">A quick dialog first</dt><dd>List Dimension, List Detail Items, List Filled Regions and List Line Styles ask for their settings (text style, spacing, size) in a small dialog every time you run them.</dd>
+    </dl>
+  </div>
+
+  <footer class="site">Template Toolset &middot; Dang Quoc Truong (DQT) &copy; 2026</footer>
+</div>
+</body>
+</html>
