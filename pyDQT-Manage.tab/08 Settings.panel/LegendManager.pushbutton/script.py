@@ -67,6 +67,21 @@ doc = revit.doc
 uidoc = revit.uidoc
 
 
+def _open_help_page(html_filename):
+    """Open this tool's page from the shared _Settings_Help folder in the
+    default browser. Returns True on success, False if the caller should
+    fall back to the in-app help text (e.g. the folder went missing)."""
+    try:
+        panel_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        path = os.path.join(panel_dir, "_Settings_Help", html_filename)
+        if not os.path.isfile(path):
+            return False
+        os.startfile(path)
+        return True
+    except Exception:
+        return False
+
+
 def _eid_int(eid):
     """Get integer value of an ElementId across Revit 2024-2027."""
     try:
@@ -620,6 +635,8 @@ class LegendManagerWindow(WPFWindow):
         self.load_data()
 
     def on_help(self, sender, args):
+        if _open_help_page("legend_manager.html"):
+            return
         forms.alert(
             "Legend Manager\n\n"
             "- Search filters by name; Show narrows to placed/not-placed legends.\n"

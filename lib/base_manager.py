@@ -219,7 +219,16 @@ class BaseManagerWindow(Window):
         return cards_row
 
     def on_help_click(self, sender, e):
-        """Show a short usage tip for this tool. Override via config['help_text']."""
+        """Show a short usage tip for this tool. Override via config['help_text'].
+
+        If config['open_help_page'] is set, it's called first - a callable
+        (taking no arguments) that opens this tool's real usage-guide page
+        and returns True on success. Only if it's absent, or returns a
+        falsy value (e.g. the page went missing), does the text fallback
+        below run."""
+        open_help_page = self.config.get('open_help_page')
+        if open_help_page and open_help_page():
+            return
         default_text = (
             "{}\n\n{}\n\n"
             "- Search filters the list by name.\n"

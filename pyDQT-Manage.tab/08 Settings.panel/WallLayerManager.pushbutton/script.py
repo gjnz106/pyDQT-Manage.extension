@@ -55,6 +55,21 @@ doc = revit.doc
 uidoc = revit.uidoc
 
 
+def _open_help_page(html_filename):
+    """Open this tool's page from the shared _Settings_Help folder in the
+    default browser. Returns True on success, False if the caller should
+    fall back to the in-app help text (e.g. the folder went missing)."""
+    try:
+        panel_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        path = os.path.join(panel_dir, "_Settings_Help", html_filename)
+        if not os.path.isfile(path):
+            return False
+        os.startfile(path)
+        return True
+    except Exception:
+        return False
+
+
 # ============================================================================
 # LAYER FUNCTIONS
 #
@@ -718,6 +733,8 @@ class WallLayerManagerWindow(WPFWindow):
         self.txtStatus.Text = "Reloaded after batch rename."
 
     def on_help(self, sender, args):
+        if _open_help_page("wall_layer_manager.html"):
+            return
         forms.alert(
             "Wall Layer Manager\n\n"
             "- Search filters by wall type name; Function narrows to one layer function.\n"

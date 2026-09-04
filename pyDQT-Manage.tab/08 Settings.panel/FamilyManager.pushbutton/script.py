@@ -27,6 +27,22 @@ import re, datetime, codecs, os, json
 # built, so the two tools cannot drift apart.
 from dqt_name_ops import title_case_name, convert_case, strip_spaces
 
+
+def _open_help_page(html_filename):
+    """Open this tool's page from the shared _Settings_Help folder in the
+    default browser. Returns True on success, False if the caller should
+    fall back to the in-app help text (e.g. the folder went missing)."""
+    try:
+        panel_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        path = os.path.join(panel_dir, "_Settings_Help", html_filename)
+        if not os.path.isfile(path):
+            return False
+        os.startfile(path)
+        return True
+    except Exception:
+        return False
+
+
 # ============================================================================
 # REVIT VERSION COMPATIBILITY
 # ============================================================================
@@ -1912,6 +1928,8 @@ class FamilyManagerWindow(WPFWindow):
         self.update_grid()
     
     def show_help(self, sender, args):
+        if _open_help_page("family_manager.html"):
+            return
         forms.alert(
             "Family Manager v2.0\n\n"
             "Tabs:\n"

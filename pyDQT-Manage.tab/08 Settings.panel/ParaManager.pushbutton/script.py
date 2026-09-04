@@ -51,6 +51,21 @@ doc = revit.doc
 app = doc.Application
 
 
+def _open_help_page(html_filename):
+    """Open this tool's page from the shared _Settings_Help folder in the
+    default browser. Returns True on success, False if the caller should
+    fall back to the in-app help text (e.g. the folder went missing)."""
+    try:
+        panel_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        path = os.path.join(panel_dir, "_Settings_Help", html_filename)
+        if not os.path.isfile(path):
+            return False
+        os.startfile(path)
+        return True
+    except Exception:
+        return False
+
+
 # ============================================================================
 # VERSION DETECTION
 # ============================================================================
@@ -1317,6 +1332,8 @@ class ParameterManagerWindow(Window):
         return border
 
     def _on_help(self, sender, args):
+        if _open_help_page("para_manager.html"):
+            return
         MessageBox.Show(
             "Parameter Manager\n\n"
             "- Pick a category, then a parameter, to see it across every type.\n"
