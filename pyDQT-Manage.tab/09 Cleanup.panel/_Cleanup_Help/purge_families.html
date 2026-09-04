@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Purge Families - Cleanup Help</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page-header">
+  <div class="inner">
+    <div>
+      <h1>Batch Purge Families v1.0</h1>
+      <p class="subtitle">by Dang Quoc Truong (DQT)</p>
+    </div>
+    <span class="badge">On disk</span>
+  </div>
+</div>
+
+<div class="wrap">
+  <p class="crumbs"><a href="index.html">Cleanup Toolset</a><span>&rsaquo;</span>Purge Families</p>
+
+  <div class="card">
+    <h2>What it does</h2>
+    <p class="lede">
+      Opens every <span class="code">.rfa</span> file in a folder, purges
+      unused elements until Revit reports the file is clean, saves it back,
+      and reports what (if anything) is left. Works on a folder of family
+      files on disk - not on the families loaded into the current project.
+    </p>
+  </div>
+
+  <div class="card">
+    <h2>Workflow</h2>
+    <ol class="steps">
+      <li><b>Browse</b> - select the folder containing the .rfa families.</li>
+      <li><b>Scan Folder</b> - finds every .rfa file and previews it with
+        its size.</li>
+      <li><b>Start Purge</b> - each file is opened, purged, saved, and
+        reopened, repeating until nothing purgeable is left.</li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <h2>Why the reopen cycles</h2>
+    <p>
+      Revit only finalises part of its reference bookkeeping when a file is
+      written. Elements still held after an in-memory purge only become
+      purgeable once the file has been saved and read back - purging in a
+      single open session leaves that tier behind, which is why the native
+      Purge Unused dialog can still list items afterwards. Reopen cycles
+      repeat save &rarr; reopen &rarr; purge until a freshly opened file
+      reports zero.
+    </p>
+  </div>
+
+  <div class="card">
+    <h2>The Remaining column</h2>
+    <p>
+      Every file is verified after its last purge pass. Status reads
+      <b>Success</b> only when Revit reports 0 purgeable elements left.
+      <b>Partial</b> means something is protected and cannot be removed -
+      the count tells you how much.
+    </p>
+  </div>
+
+  <div class="card">
+    <h2>Options</h2>
+    <dl class="kv">
+      <dt class="v-dark">Include subfolders</dt><dd>Scan nested folders recursively</dd>
+      <dt class="v-dark">Purge passes</dt><dd>Re-purge within one open document</dd>
+      <dt class="v-dark">Reopen cycles</dt><dd>Save, reopen and purge again</dd>
+      <dt class="v-dark">Delete backup files</dt><dd>Remove *.0001.rfa / *.0001.rvt copies</dd>
+      <dt class="v-dark">Export Excel log</dt><dd>Save the result table in the folder</dd>
+    </dl>
+  </div>
+
+  <div class="card">
+    <h2>Rename files</h2>
+    <p>
+      A loadable family is named by its file, so renaming the .rfa renames
+      the family - nothing has to be opened, which is why this runs
+      instantly even on hundreds of files. Find/Replace, Prefix, Suffix,
+      Case and Remove spaces all combine in one pass. The list previews
+      every old&nbsp;&rarr;&nbsp;new name before you commit, and Rename
+      Files asks again first.
+    </p>
+    <p>
+      Skipped files say why: two files resolving to the same name, a name
+      already taken, or characters Windows won't accept. Renaming is
+      independent of purging - run either, or both. Families already
+      loaded into a project keep their old name until they're reloaded.
+    </p>
+  </div>
+
+  <div class="card">
+    <h2>Good to know</h2>
+    <div class="box warn">
+      Files are overwritten in place - back up the folder first if you
+      need to keep the originals.
+    </div>
+  </div>
+
+  <div class="pagenav">
+    <a class="prev" href="advanced_purge.html"><span class="dir">&larr; Previous tool</span>Advanced Purge</a>
+    <a class="next" href="smart_delete.html"><span class="dir">Next tool &rarr;</span>Smart Delete</a>
+  </div>
+  <footer class="site">Cleanup Toolset &middot; Dang Quoc Truong (DQT) &copy; 2026</footer>
+</div>
+</body>
+</html>

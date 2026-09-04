@@ -98,6 +98,21 @@ FONT_MONO = FontFamily("Consolas")
 FOOTER_TEXT = "Dang Quoc Truong - DQT (c) 2026"
 
 
+def _open_help_page(html_filename):
+    """Open this tool's page from the shared _Cleanup_Help folder in the
+    default browser. Returns True on success, False if the caller should
+    fall back to the in-app help text (e.g. the folder went missing)."""
+    try:
+        panel_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        path = os.path.join(panel_dir, "_Cleanup_Help", html_filename)
+        if not os.path.isfile(path):
+            return False
+        os.startfile(path)
+        return True
+    except Exception:
+        return False
+
+
 # ===========================================================================
 #  Failure preprocessor - dismiss warnings so the batch never blocks
 # ===========================================================================
@@ -1135,6 +1150,8 @@ class PurgeFamiliesWindow(Window):
     #  Events
     # =======================================================================
     def on_help(self, sender, e):
+        if _open_help_page("purge_families.html"):
+            return
         MessageBox.Show(
             "BATCH PURGE FAMILIES - DQT\n"
             "\n"

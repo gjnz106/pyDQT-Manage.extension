@@ -46,8 +46,24 @@ from System.Windows.Media import SolidColorBrush, Color, FontFamily
 from System.Windows.Input import Cursors
 
 import traceback
+import os
 
 output = script.get_output()
+
+
+def _open_help_page(html_filename):
+    """Open this tool's page from the shared _Cleanup_Help folder in the
+    default browser. Returns True on success, False if the caller should
+    fall back to the in-app help text (e.g. the folder went missing)."""
+    try:
+        panel_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        path = os.path.join(panel_dir, "_Cleanup_Help", html_filename)
+        if not os.path.isfile(path):
+            return False
+        os.startfile(path)
+        return True
+    except Exception:
+        return False
 
 
 # ============================================================================
@@ -457,10 +473,21 @@ class SmartDeleteWindow(Window):
         Grid.SetColumn(sp, 0)
         g.Children.Add(sp)
 
+        action_sp = StackPanel()
+        action_sp.Orientation = Orientation.Horizontal
+
+        self.btnHelp = self._btn("?", False)
+        self.btnHelp.Padding = Thickness(10, 8, 10, 8)
+        self.btnHelp.Margin = Thickness(0, 0, 8, 0)
+        self.btnHelp.Click += self._on_help
+        action_sp.Children.Add(self.btnHelp)
+
         self.btnPick = self._btn("+ Pick Elements", True)
         self.btnPick.Click += self._on_pick
-        Grid.SetColumn(self.btnPick, 1)
-        g.Children.Add(self.btnPick)
+        action_sp.Children.Add(self.btnPick)
+
+        Grid.SetColumn(action_sp, 1)
+        g.Children.Add(action_sp)
 
         b.Child = g
         return b
@@ -963,6 +990,27 @@ class SmartDeleteWindow(Window):
         except Exception as ex:
             self.txtDeps.Text = "Error: {}".format(str(ex))
 
+    def _on_help(self, sender, args):
+        if _open_help_page("smart_delete.html"):
+            return
+        forms.alert(
+            "Smart Delete Manager\n\n"
+            "Analyzes what depends on a set of elements before you delete "
+            "them.\n\n"
+            "STAT CARDS\n"
+            "  SELECTED      - elements currently loaded into the list\n"
+            "  DEPENDENCIES  - other elements/views that reference them\n"
+            "  CRITICAL      - dependencies serious enough to reconsider\n"
+            "  HIGH RISK     - dependencies worth reviewing first\n"
+            "  SAFE          - no dependencies found\n\n"
+            "WORKFLOW\n"
+            "  1. + Pick Elements to load them into the list\n"
+            "  2. Filter by Search / Category / Risk\n"
+            "  3. View Details to see what depends on a row\n"
+            "  4. Delete Safe Only, or Delete All Selected deliberately\n\n"
+            "A deletion here is a normal transaction - Ctrl+Z undoes it.",
+            title="Smart Delete - Help")
+
     def _on_pick(self, sender, args):
         try:
             self.Hide()
@@ -1029,9 +1077,8 @@ class SmartDeleteWindow(Window):
             return
         
         try:
-            import os
             import datetime
-            
+
             # Get save path
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
             default_name = "SmartDelete_Report_{}.xlsx".format(timestamp)

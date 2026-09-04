@@ -37,6 +37,24 @@ from purge_scanner import create_scanner
 from purge_executor import PurgeExecutor
 from preview_window import PreviewWindow
 
+import os
+
+
+def _open_help_page(html_filename):
+    """Open this tool's page from the shared _Cleanup_Help folder in the
+    default browser. Returns True on success, False if the caller should
+    fall back to the in-app help text (e.g. the folder went missing)."""
+    try:
+        panel_dir = os.path.dirname(os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__))))
+        path = os.path.join(panel_dir, "_Cleanup_Help", html_filename)
+        if not os.path.isfile(path):
+            return False
+        os.startfile(path)
+        return True
+    except Exception:
+        return False
+
 
 class SmartPurgeWindowV2(Window):
     """Smart Purge Window v2.0 - Simplified"""
@@ -129,15 +147,19 @@ class SmartPurgeWindowV2(Window):
         border.Background = SolidColorBrush(self.parse_color(Colors.HEADER))
         border.Padding = Thickness(15, 12, 15, 12)
         Grid.SetRow(border, row)
-        
+
+        grid = Grid()
+        grid.ColumnDefinitions.Add(self.col_def(1, star=True))
+        grid.ColumnDefinitions.Add(self.col_def(0, auto=True))
+
         stack = StackPanel()
-        
+
         title = TextBlock()
         title.Text = "Smart Purge v2.0"
         title.FontSize = 22  # Larger title
         title.FontWeight = FontWeights.Bold
         stack.Children.Add(title)
-        
+
         subtitle = TextBlock()
         subtitle.Text = u"Copyright \u00A9 2025 Dang Quoc Truong (DQT)"
         subtitle.FontSize = 12  # Larger copyright
@@ -145,8 +167,20 @@ class SmartPurgeWindowV2(Window):
         subtitle.Foreground = SolidColorBrush(self.parse_color("#FF555555"))
         subtitle.Margin = Thickness(0, 4, 0, 0)
         stack.Children.Add(subtitle)
-        
-        border.Child = stack
+
+        Grid.SetColumn(stack, 0)
+        grid.Children.Add(stack)
+
+        btn_help = Button()
+        btn_help.Content = "? Help"
+        btn_help.Padding = Thickness(10, 6, 10, 6)
+        btn_help.VerticalAlignment = VerticalAlignment.Top
+        btn_help.Background = SolidColorBrush(self.parse_color("#FFFFFFFF"))
+        btn_help.Click += self.on_help
+        Grid.SetColumn(btn_help, 1)
+        grid.Children.Add(btn_help)
+
+        border.Child = grid
         return border
     
     def group_panel(self, row):
@@ -593,6 +627,24 @@ class SmartPurgeWindowV2(Window):
     def on_cat_changed(self, sender, e):
         """Category selection changed"""
         self.update_summary()
+
+    def on_help(self, sender, e):
+        """Open the usage guide, or fall back to an in-app summary."""
+        if _open_help_page("smart_purge.html"):
+            return
+        MessageBox.Show(
+            "Smart Purge v2.0\n\n"
+            "Scans the current project for unused content, grouped into "
+            "Element Types, Views & Sheets, Families & Types, and System "
+            "Cleanup - and removes only what you tick after reviewing it.\n\n"
+            "WORKFLOW\n"
+            "  1. Tick the groups to cover\n"
+            "  2. Scan Selected / Scan All\n"
+            "  3. Select Safe / None on the category list\n"
+            "  4. Preview, then Purge\n\n"
+            "Nothing is deleted by scanning - only Purge removes anything.",
+            "Smart Purge - Help",
+            MessageBoxButton.OK, MessageBoxImage.Information)
     
     def on_select_all(self, sender, e):
         """Select all categories"""

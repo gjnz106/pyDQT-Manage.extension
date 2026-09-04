@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Smart Delete - Cleanup Help</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page-header">
+  <div class="inner">
+    <div>
+      <h1>Smart Delete Manager</h1>
+      <p class="subtitle">by Dang Quoc Truong (DQT)</p>
+    </div>
+    <span class="badge">Targeted</span>
+  </div>
+</div>
+
+<div class="wrap">
+  <p class="crumbs"><a href="index.html">Cleanup Toolset</a><span>&rsaquo;</span>Smart Delete</p>
+
+  <div class="card">
+    <h2>What it does</h2>
+    <p class="lede">
+      Analyzes what depends on a set of elements <i>before</i> you delete
+      them, and flags anything that isn't safe to remove - instead of
+      finding out after Revit's own delete-with-dependents warning.
+    </p>
+    <p>
+      Use this for deleting specific elements you've picked, as opposed to
+      the Purge tools, which remove unused content you never explicitly
+      selected.
+    </p>
+  </div>
+
+  <div class="card">
+    <h2>Stat cards</h2>
+    <dl class="kv">
+      <dt class="v-dark">SELECTED</dt><dd>Elements currently loaded into the list</dd>
+      <dt class="v-orange">DEPENDENCIES</dt><dd>Other elements/views that reference them</dd>
+      <dt class="v-red">CRITICAL</dt><dd>Dependencies serious enough to reconsider deleting</dd>
+      <dt class="v-orange">HIGH RISK</dt><dd>Dependencies worth reviewing before deleting</dd>
+      <dt class="v-green">SAFE</dt><dd>No dependencies found - clear to delete</dd>
+    </dl>
+  </div>
+
+  <div class="card">
+    <h2>Workflow</h2>
+    <ol class="steps">
+      <li><b>+ Pick Elements</b> - select elements in the model (or start
+        from your current Revit selection) to load them into the list.</li>
+      <li>Narrow the list with <b>Search</b>, <b>Category</b> and
+        <b>Risk</b> filters.</li>
+      <li><b>View Details</b> on a row to see exactly what depends on it.</li>
+      <li><b>+ Pick More</b> adds to the list; <b>Remove</b> takes a row back
+        out without touching the model.</li>
+      <li><b>Zoom To</b> / <b>Select in Revit</b> to locate an element;
+        <b>Export Excel</b> saves the whole list.</li>
+      <li><b>Delete Safe Only</b> removes just the SAFE-risk elements;
+        <b>Delete All Selected</b> removes everything currently in the
+        list regardless of risk - use it deliberately, not by habit.</li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <h2>Good to know</h2>
+    <div class="box tip">
+      A deletion here is a normal Revit transaction - <b>Ctrl+Z</b> undoes
+      it like any other change, same as the confirmation message says
+      after a delete finishes.
+    </div>
+    <div class="box warn">
+      Delete All Selected does not re-check risk at the moment of deletion -
+      review the Critical/High Risk rows first, or use Delete Safe Only.
+    </div>
+  </div>
+
+  <div class="pagenav">
+    <a class="prev" href="purge_families.html"><span class="dir">&larr; Previous tool</span>Purge Families</a>
+    <a class="next" href="index.html"><span class="dir">Back to</span>Cleanup Toolset</a>
+  </div>
+  <footer class="site">Cleanup Toolset &middot; Dang Quoc Truong (DQT) &copy; 2026</footer>
+</div>
+</body>
+</html>

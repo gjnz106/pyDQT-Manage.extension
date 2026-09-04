@@ -45,6 +45,22 @@ from model_deep_scanner import ModelDeepScanner
 from dangerous_ops_scanner import DangerousOpsScanner
 
 
+def _open_help_page(html_filename):
+    """Open this tool's page from the shared _Cleanup_Help folder in the
+    default browser. Returns True on success, False if the caller should
+    fall back to the in-app help text (e.g. the folder went missing)."""
+    try:
+        panel_dir = os.path.dirname(os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__))))
+        path = os.path.join(panel_dir, "_Cleanup_Help", html_filename)
+        if not os.path.isfile(path):
+            return False
+        os.startfile(path)
+        return True
+    except Exception:
+        return False
+
+
 class AdvancedPurgeWindow(Window):
     """Advanced Purge main window"""
     
@@ -162,23 +178,27 @@ class AdvancedPurgeWindow(Window):
         border.Background = SolidColorBrush(self.parse_color(Colors.HEADER))
         border.Padding = Thickness(15, 15, 15, 15)
         Grid.SetRow(border, row)
-        
+
+        grid = Grid()
+        grid.ColumnDefinitions.Add(self.col_def(1, star=True))
+        grid.ColumnDefinitions.Add(self.col_def(0, auto=True))
+
         stack = StackPanel()
-        
+
         # Title with warning icon
         title = TextBlock()
         title.Text = u"{} Advanced Purge - Power User Tool".format(Icons.WARNING)
         title.FontSize = Fonts.TITLE
         title.FontWeight = FontWeights.Bold
         title.Foreground = SolidColorBrush(self.parse_color(Colors.WARNING))
-        
+
         # Copyright
         copyright = TextBlock()
         copyright.Text = u"Copyright \u00A9 2025 Dang Quoc Truong (DQT)"
         copyright.FontSize = Fonts.SMALL
         copyright.Foreground = SolidColorBrush(self.parse_color(Colors.TEXT_SECONDARY))
         copyright.Margin = Thickness(0, 5, 0, 0)
-        
+
         # Warning message
         warning = TextBlock()
         warning.Text = u"{} DANGEROUS OPERATIONS - USE WITH EXTREME CAUTION!".format(Icons.DANGER)
@@ -186,12 +206,24 @@ class AdvancedPurgeWindow(Window):
         warning.FontWeight = FontWeights.Bold
         warning.Foreground = SolidColorBrush(self.parse_color(Colors.ERROR))
         warning.Margin = Thickness(0, 8, 0, 0)
-        
+
         stack.Children.Add(title)
         stack.Children.Add(copyright)
         stack.Children.Add(warning)
-        
-        border.Child = stack
+
+        Grid.SetColumn(stack, 0)
+        grid.Children.Add(stack)
+
+        btn_help = Button()
+        btn_help.Content = u"? Help"
+        btn_help.Padding = Thickness(10, 6, 10, 6)
+        btn_help.VerticalAlignment = VerticalAlignment.Top
+        btn_help.Background = SolidColorBrush(self.parse_color(Colors.White))
+        btn_help.Click += self.on_help
+        Grid.SetColumn(btn_help, 1)
+        grid.Children.Add(btn_help)
+
+        border.Child = grid
         return border
     
     def group_panel(self, row):
@@ -499,7 +531,27 @@ class AdvancedPurgeWindow(Window):
     # ========================================================================
     # EVENT HANDLERS
     # ========================================================================
-    
+
+    def on_help(self, sender, e):
+        """Open the usage guide, or fall back to an in-app summary."""
+        if _open_help_page("advanced_purge.html"):
+            return
+        MessageBox.Show(
+            "Advanced Purge - Power User Tool\n\n"
+            "Everything Smart Purge does, plus riskier categories: "
+            "Advanced Views, Workset Cleanup, Model Deep Cleanup and "
+            "Dangerous Operations (off by default).\n\n"
+            "WORKFLOW\n"
+            "  1. Tick the groups to scan\n"
+            "  2. Scan Selected / Scan All, then tick categories\n"
+            "  3. Leave Dry Run ON to preview only - it is on by default\n"
+            "  4. Preview, then Execute (with Dry Run off) to purge\n\n"
+            "Dry Run being on by default is deliberate - these categories "
+            "are here rather than in Smart Purge because they need that "
+            "extra look before anything is removed.",
+            "Advanced Purge - Help",
+            MessageBoxButton.OK, MessageBoxImage.Information)
+
     def on_group_checked(self, sender, e):
         """Group checkbox checked"""
         pass  # Auto-populate categories when scanned
