@@ -31,10 +31,26 @@ from System.Windows.Data import Binding
 from System.Windows.Controls import DataGridLength
 
 import re
+import os
 
 from pyrevit import revit, DB, forms
 
 doc = revit.doc
+
+
+def _open_help_page(html_filename):
+    """Open this tool's page from the shared _Settings_Help folder in the
+    default browser. Returns True on success, False if the caller should
+    fall back to the in-app help text (e.g. the folder went missing)."""
+    try:
+        panel_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        path = os.path.join(panel_dir, "_Settings_Help", html_filename)
+        if not os.path.isfile(path):
+            return False
+        os.startfile(path)
+        return True
+    except Exception:
+        return False
 
 
 # ============================================================================
@@ -1422,6 +1438,8 @@ class TextNoteTypeManagerWindow(Window):
         return border
 
     def _on_help(self, sender, args):
+        if _open_help_page("text_note_type_manager.html"):
+            return
         MessageBox.Show(
             "Text Note Type Manager\n\n"
             "- Search filters types by name; tick rows (or Select All) to act on them.\n"

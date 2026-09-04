@@ -48,6 +48,21 @@ except ImportError as e:
 doc = revit.doc
 
 
+def _open_help_page(html_filename):
+    """Open this tool's page from the shared _Settings_Help folder in the
+    default browser. Returns True on success, False if the caller should
+    fall back to the in-app help text (e.g. the folder went missing)."""
+    try:
+        panel_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        path = os.path.join(panel_dir, "_Settings_Help", html_filename)
+        if not os.path.isfile(path):
+            return False
+        os.startfile(path)
+        return True
+    except Exception:
+        return False
+
+
 # ============================================================================
 # REVIT API VERSION COMPATIBILITY
 # ============================================================================
@@ -411,6 +426,7 @@ class LineStyleManager(BaseManagerWindow):
         config = {
             'title': 'Line Style Manager',
             'subtitle': 'Manage Line Styles (Categories) - Copyright by Dang Quoc Truong - DQT © 2025',
+            'open_help_page': lambda: _open_help_page("line_style_edit.html"),
             'element_type': None,  # Line styles are Categories, not Elements
             'instance_type': None,
             'item_class': LineStyleItem,

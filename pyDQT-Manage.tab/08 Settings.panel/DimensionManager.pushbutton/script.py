@@ -34,6 +34,7 @@ from Autodesk.Revit.DB import *
 from System.Collections.Generic import List
 import codecs
 import datetime
+import os
 
 # Shared batch rename dialog (extension lib/). Imported softly: it powers one
 # button, so a broken install should not stop the whole manager from opening -
@@ -51,6 +52,21 @@ def _eid_int(eid):
     if eid is None:
         return -1
     return get_elementid_value(eid)
+
+
+def _open_help_page(html_filename):
+    """Open this tool's page from the shared _Settings_Help folder in the
+    default browser. Returns True on success, False if the caller should
+    fall back to the in-app help text (e.g. the folder went missing)."""
+    try:
+        panel_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        path = os.path.join(panel_dir, "_Settings_Help", html_filename)
+        if not os.path.isfile(path):
+            return False
+        os.startfile(path)
+        return True
+    except Exception:
+        return False
 
 
 # ============================================================================
@@ -1007,6 +1023,8 @@ class DimensionManagerWindow(WPFWindow):
         self.update_ui()
 
     def show_help(self, sender, args):
+        if _open_help_page("dimension_manager.html"):
+            return
         from System.Windows import MessageBox, MessageBoxButton, MessageBoxImage
         MessageBox.Show(
             "Dimension Manager\n\n"

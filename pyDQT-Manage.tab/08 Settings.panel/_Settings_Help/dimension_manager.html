@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Dimension Manager - Settings Help</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page-header">
+  <div class="inner">
+    <div>
+      <h1>Dimension Manager</h1>
+      <p class="subtitle">by Dang Quoc Truong (DQT)</p>
+    </div>
+    <span class="badge">Dimension types</span>
+  </div>
+</div>
+
+<div class="wrap">
+  <p class="crumbs"><a href="index.html">Settings Toolset</a><span>&rsaquo;</span>Dimension Manager</p>
+
+  <div class="card">
+    <h2>What it does</h2>
+    <p class="lede">
+      Lists every Dimension Type with how many instances are placed, so an
+      unused type (a purge candidate) or a heavily-used one is visible at a
+      glance.
+    </p>
+    <p>
+      Every Dimension is view-specific (unlike Model Groups), so selecting a
+      type and clicking Detail always shows exactly which view each of its
+      instances lives in, instantly.
+    </p>
+  </div>
+
+  <div class="card">
+    <h2>Stat cards</h2>
+    <dl class="kv">
+      <dt class="v-dark">Total</dt><dd>dimension types found</dd>
+      <dt class="v-red">Unused</dt><dd>types with zero placed instances - purge candidates</dd>
+    </dl>
+  </div>
+
+  <div class="card">
+    <h2>Workflow</h2>
+    <ol class="steps">
+      <li>Search filters by name, style, font, creator or workset.</li>
+      <li>Double-click <b>Text Size</b> / <b>Text Font</b> / <b>Width
+        Factor</b> to edit in place; Enter commits it.</li>
+      <li><b>Detail</b> shows every instance of the selected type and which
+        view it's in.</li>
+      <li><b>Select in Model</b> / <b>Zoom To</b> act on the ticked rows;
+        <b>Rename</b> / <b>Batch Rename</b> / <b>Delete Type</b> edit the
+        type itself.</li>
+      <li><b>Batch Edit Font/Width...</b> sets Text Font and/or Width Factor
+        on every selected type at once, instead of one cell at a time.</li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <h2>Good to know</h2>
+    <div class="box tip">
+      Editing a cell in the grid changes that dimension TYPE, so every
+      dimension using it updates too - the same as Batch Edit Font/Width.
+    </div>
+  </div>
+
+  <div class="pagenav">
+    <a class="prev" href="index.html"><span class="dir">&larr; Back to</span>Settings Toolset</a>
+    <a class="next" href="family_font.html"><span class="dir">Next tool &rarr;</span>Family Font Manager</a>
+  </div>
+  <footer class="site">Settings Toolset &middot; Dang Quoc Truong (DQT) &copy; 2026</footer>
+</div>
+</body>
+</html>

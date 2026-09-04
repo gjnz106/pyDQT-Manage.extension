@@ -64,6 +64,21 @@ except ImportError as e:
 doc = revit.doc
 
 
+def _open_help_page(html_filename):
+    """Open this tool's page from the shared _Settings_Help folder in the
+    default browser. Returns True on success, False if the caller should
+    fall back to the in-app help text (e.g. the folder went missing)."""
+    try:
+        panel_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        path = os.path.join(panel_dir, "_Settings_Help", html_filename)
+        if not os.path.isfile(path):
+            return False
+        os.startfile(path)
+        return True
+    except Exception:
+        return False
+
+
 # ============================================================================
 # HELPER FUNCTION FOR REVIT 2024/2025+ COMPATIBILITY
 # ============================================================================
@@ -279,6 +294,7 @@ class FillPatternManager(BaseManagerWindow):
         config = {
             'title': 'FILL PATTERN MANAGER',
             'subtitle': 'Manage and rename Fill Patterns (Hatching)',
+            'open_help_page': lambda: _open_help_page("hatching.html"),
             'element_type': FillPatternElement,
             'instance_type': None,  # No usage calculation
             'item_class': FillPatternItem,

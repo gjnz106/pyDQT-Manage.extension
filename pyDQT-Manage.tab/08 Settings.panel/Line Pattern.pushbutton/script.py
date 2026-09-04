@@ -34,12 +34,28 @@ from System.Collections.ObjectModel import ObservableCollection
 from System.ComponentModel import INotifyPropertyChanged, PropertyChangedEventArgs
 
 import re
+import os
 
 from pyrevit import revit, forms
 from Autodesk.Revit.DB import (FilteredElementCollector, LinePatternElement,
                                 Transaction, ElementId)
 
 doc = revit.doc
+
+
+def _open_help_page(html_filename):
+    """Open this tool's page from the shared _Settings_Help folder in the
+    default browser. Returns True on success, False if the caller should
+    fall back to the in-app help text (e.g. the folder went missing)."""
+    try:
+        panel_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        path = os.path.join(panel_dir, "_Settings_Help", html_filename)
+        if not os.path.isfile(path):
+            return False
+        os.startfile(path)
+        return True
+    except Exception:
+        return False
 
 
 # ============================================================================
@@ -1368,6 +1384,8 @@ class LinePatternManagerWindow(Window):
         MessageBox.Show("Data refreshed!", "Info", MessageBoxButton.OK, MessageBoxImage.Information)
 
     def _on_help(self, sender, args):
+        if _open_help_page("line_pattern.html"):
+            return
         MessageBox.Show(
             "Line Pattern Manager\n\n"
             "- Search filters by name; Category narrows to System/Custom.\n"
