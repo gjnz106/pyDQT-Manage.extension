@@ -32,10 +32,26 @@ from Autodesk.Revit.DB import (
     Transaction, ElementId
 )
 from pyrevit import script
+import os
 
 doc = __revit__.ActiveUIDocument.Document
 uidoc = __revit__.ActiveUIDocument
 output = script.get_output()
+
+
+def _open_help_page(html_filename):
+    """Open this tool's page from the shared _IFCSG_Help folder in the
+    default browser. Returns True on success, False if the caller should
+    fall back to the in-app help text (e.g. the folder went missing)."""
+    try:
+        panel_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        path = os.path.join(panel_dir, "_IFCSG_Help", html_filename)
+        if not os.path.isfile(path):
+            return False
+        os.startfile(path)
+        return True
+    except Exception:
+        return False
 
 # ==============================================================================
 # DQT Color Scheme - Synced with Contains Manager
@@ -1365,7 +1381,10 @@ class IFCSGSubtypeWindow(object):
         self._all_comp_names_list = []
 
     def _on_help(self, sender, args):
-        """Help text for the ? button in the header (Family Manager pattern)."""
+        """? button in the header: open the tool's help page, or fall back
+        to the in-app summary if the help folder is not there."""
+        if _open_help_page("subtype_definer.html"):
+            return
         WPFMessageBox.Show(
             "IFC-SG Subtype Definer\n\n"
             "Reads the official IFC+SG Industry Mapping and assigns the IFC "

@@ -143,6 +143,21 @@ for d in [CONFIG_DIR, REPORTS_DIR]:
     if not os.path.exists(d):
         os.makedirs(d)
 
+
+def _open_help_page(html_filename):
+    """Open this tool's page from the shared _IFCSG_Help folder in the
+    default browser. Returns True on success, False if the caller should
+    fall back to the in-app help text (e.g. the folder went missing)."""
+    try:
+        panel_dir = os.path.dirname(os.path.abspath(SCRIPT_DIR))
+        path = os.path.join(panel_dir, "_IFCSG_Help", html_filename)
+        if not os.path.isfile(path):
+            return False
+        os.startfile(path)
+        return True
+    except Exception:
+        return False
+
 # =====================================================================
 # UI SCALE
 # One layout transform on the root grid scales text, icons, buttons and
@@ -1286,7 +1301,10 @@ class IFCSGCheckerWindow:
     # CONFIG MANAGEMENT
     # =================================================================
     def _on_help(self, sender, args):
-        """Help text for the ? button in the header (Family Manager pattern)."""
+        """? button in the header: open the tool's help page, or fall back
+        to the in-app summary if the help folder is not there."""
+        if _open_help_page("ifcsg_checker.html"):
+            return
         System.Windows.MessageBox.Show(
             "IFC-SG Parameter Checker\n\n"
             "Checks that the parameters CORENET X requires actually exist and "

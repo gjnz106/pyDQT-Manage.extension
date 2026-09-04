@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Auto Assign - IFC-SG Help</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page-header">
+  <div class="inner">
+    <div>
+      <h1>IFC-SG Auto Assign v3.0</h1>
+      <p class="subtitle">by Dang Quoc Truong (DQT)</p>
+    </div>
+    <span class="badge">Step 2 of 5</span>
+  </div>
+</div>
+
+<div class="wrap">
+  <p class="crumbs"><a href="index.html">IFC-SG Toolset</a><span>&rsaquo;</span>Auto Assign</p>
+
+  <div class="card">
+    <h2>What it does</h2>
+    <p class="lede">
+      Assigns the IFC export class to every <b>Family Type</b> in the model
+      in one pass, by matching each type's name against the IFC+SG Industry
+      Mapping (an LTA-style Excel file, or the tool's built-in table).
+    </p>
+    <p>
+      This is the bulk pass - it covers most of the model at once. What it
+      cannot match with confidence is left for <a href="subtype_definer.html">Subtype
+      Definer</a> or <a href="manual_assign.html">Manual Assign</a> to finish by hand.
+    </p>
+  </div>
+
+  <div class="card">
+    <h2>Stat cards</h2>
+    <dl class="kv">
+      <dt class="v-dark">CATEGORIES</dt><dd>Revit categories found in the mapping</dd>
+      <dt class="v-gold">ELEMENTS</dt><dd>Elements those categories hold in this model</dd>
+      <dt class="v-red">UNMATCHED</dt><dd>Types no mapping entry could be found for</dd>
+      <dt class="v-green">SOURCE</dt><dd>Where the mapping came from - Excel file or the built-in table</dd>
+    </dl>
+  </div>
+
+  <div class="card">
+    <h2>Workflow</h2>
+    <ol class="steps">
+      <li>Pick the mapping <b>source</b>: an Industry Mapping Excel file, or
+        the built-in table.</li>
+      <li>Review the <b>preview grid</b> - filter by search, category or
+        source (Matched / Unmatched / built-in).</li>
+      <li>Select rows (Ctrl/Shift+Click for several) and use <b>Change
+        IFC</b> to fix anything unmatched.</li>
+      <li>Choose <b>Overwrite</b> (replace every value) or <b>Empty
+        only</b> (only fill in blanks, leave existing values alone).</li>
+      <li><b>Apply Assignment</b> writes the result to every Family Type's
+        <span class="code">Export to IFC As</span> parameter.</li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <h2>Predefined vs USERDEFINED</h2>
+    <p>The Industry Mapping marks a subtype with a leading <span class="code">*</span>
+      when it needs the generic IFC entity plus a custom object type, instead
+      of a named predefined type:</p>
+    <table class="cmp">
+      <tr><th>Mapping entry</th><th>Export to IFC As</th><th>IfcObjectType</th></tr>
+      <tr><td><span class="code">IfcDoor.DOOR</span> (no *)</td>
+          <td><span class="code">IfcDoor.DOOR</span></td><td>(empty)</td></tr>
+      <tr><td><span class="code">IfcDoor.*BLASTDOOR</span> (with *)</td>
+          <td><span class="code">IfcDoor</span></td><td><span class="code">BLASTDOOR</span></td></tr>
+    </table>
+    <p>This rule is applied automatically - you never need to work out
+      which case you are in.</p>
+  </div>
+
+  <div class="card">
+    <h2>Good to know</h2>
+    <div class="box tip">
+      A category the tool has no mapping entries for at all is not treated
+      as an error - it just will not appear in the preview.
+    </div>
+    <div class="box tip">
+      Run this <b>after</b> Parameter Loader so the
+      <span class="code">Export to IFC As</span> / <span class="code">IfcObjectType</span>
+      parameters already exist to write into.
+    </div>
+  </div>
+
+  <div class="pagenav">
+    <a class="prev" href="param_loader.html"><span class="dir">&larr; Previous tool</span>Parameter Loader</a>
+    <a class="next" href="subtype_definer.html"><span class="dir">Next tool &rarr;</span>Subtype Definer</a>
+  </div>
+  <footer class="site">IFC-SG Toolset &middot; Dang Quoc Truong (DQT) &copy; 2026</footer>
+</div>
+</body>
+</html>

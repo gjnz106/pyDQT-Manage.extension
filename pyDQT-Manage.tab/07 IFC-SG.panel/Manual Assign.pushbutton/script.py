@@ -34,6 +34,7 @@ from System.Windows.Markup import XamlReader
 from System.Windows.Forms import SaveFileDialog, DialogResult as WFDialogResult
 
 from pyrevit import DB, forms, script
+import os
 
 # ---------------------------------------------------------------------------
 # The window is WPF and uses the shared DQT gold palette (#FEF8E7 body,
@@ -47,6 +48,21 @@ DQT_FOOTER_TEXT = "Dang Quoc Truong - DQT (c) 2026"
 def _load_xaml(xaml_str):
     """Parse a XAML string into a live WPF object tree."""
     return XamlReader.Load(MemoryStream(Encoding.UTF8.GetBytes(xaml_str)))
+
+
+def _open_help_page(html_filename):
+    """Open this tool's page from the shared _IFCSG_Help folder in the
+    default browser. Returns True on success, False if the caller should
+    fall back to the in-app help text (e.g. the folder went missing)."""
+    try:
+        panel_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        path = os.path.join(panel_dir, "_IFCSG_Help", html_filename)
+        if not os.path.isfile(path):
+            return False
+        os.startfile(path)
+        return True
+    except Exception:
+        return False
 
 
 def _strip_desc(text):
@@ -964,6 +980,8 @@ class ManualAssignWindow(object):
                                MessageBoxImage.Error)
 
     def _on_help(self, sender, args):
+        if _open_help_page("manual_assign.html"):
+            return
         WPFMessageBox.Show(HELP_TEXT, "Manual Assign - Help",
                            MessageBoxButton.OK, MessageBoxImage.Information)
 
