@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Manual Assign - IFC-SG Help</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page-header">
+  <div class="inner">
+    <div>
+      <h1>IFC-SG Manual Assign v2.0</h1>
+      <p class="subtitle">by Dang Quoc Truong (DQT)</p>
+    </div>
+    <span class="badge">Step 4 of 5</span>
+  </div>
+</div>
+
+<div class="wrap">
+  <p class="crumbs"><a href="index.html">IFC-SG Toolset</a><span>&rsaquo;</span>Manual Assign</p>
+
+  <div class="card">
+    <h2>What it does</h2>
+    <p class="lede">
+      Assigns the IFC export class <b>element by element</b>, for the
+      elements in the active view. Use it to fix the handful of elements
+      Auto Assign or Subtype Definer could not map, or to override a value
+      on a specific element rather than its whole type.
+    </p>
+    <p>
+      This is the finishing tool - run it last, after the bulk tools, on
+      whatever the <a href="ifcsg_checker.html">IFC-SG Checker</a> flags as
+      still missing.
+    </p>
+  </div>
+
+  <div class="card">
+    <h2>Stat cards</h2>
+    <dl class="kv">
+      <dt class="v-blue">ELEMENTS SHOWN</dt><dd>Elements passing the current filters</dd>
+      <dt class="v-green">ASSIGNED</dt><dd>Of those, how many already carry an IFC class</dd>
+      <dt class="v-red">NOT ASSIGNED</dt><dd>Of those, how many are still empty</dd>
+      <dt class="v-purple">TICKED FOR CHANGE</dt><dd>Rows the Apply / bulk buttons will act on</dd>
+    </dl>
+  </div>
+
+  <div class="card">
+    <h2>Workflow</h2>
+    <ol class="steps">
+      <li>Narrow the list with <b>Search</b> (name or Element ID),
+        <b>Category</b> and <b>Current IFC</b>.</li>
+      <li><b>Tick</b> the rows you want to change - Tick All / Untick All
+        help when most of a filtered list needs the same treatment.</li>
+      <li>Set the class per row in <b>New IFC Export As</b>, or pick one
+        class in the bulk dropdown and press <b>Apply to Ticked</b> to set
+        it on every ticked row at once.</li>
+      <li><b>Apply Changes to Revit</b> writes the
+        <span class="code">Export to IFC As</span> parameter.</li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <h2>Dropdown values</h2>
+    <dl class="kv">
+      <dt class="v-dark">(Keep Current)</dt><dd>Leave this element untouched - the default for every row.</dd>
+      <dt class="v-dark">(Clear)</dt><dd>Blank the parameter.</dd>
+      <dt class="v-dark">Everything else</dt><dd>Comes from the IFC-SG mapping for that element's category.</dd>
+    </dl>
+  </div>
+
+  <div class="card">
+    <h2>Good to know</h2>
+    <div class="box tip">
+      Filtering never loses your ticks or your dropdown choices - they are
+      kept per element until you close the window.
+    </div>
+    <div class="box tip">
+      <b>Reload from Revit</b> re-reads the current values and resets every
+      pending choice back to (Keep Current).
+    </div>
+    <div class="box tip">
+      <b>Export Report</b> writes the currently visible rows to a CSV file -
+      handy for a before/after record.
+    </div>
+  </div>
+
+  <div class="pagenav">
+    <a class="prev" href="subtype_definer.html"><span class="dir">&larr; Previous tool</span>Subtype Definer</a>
+    <a class="next" href="ifcsg_checker.html"><span class="dir">Next tool &rarr;</span>IFC-SG Checker</a>
+  </div>
+  <footer class="site">IFC-SG Toolset &middot; Dang Quoc Truong (DQT) &copy; 2026</footer>
+</div>
+</body>
+</html>

@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Subtype Definer - IFC-SG Help</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page-header">
+  <div class="inner">
+    <div>
+      <h1>IFC-SG Subtype Definer v1.3</h1>
+      <p class="subtitle">by Dang Quoc Truong (DQT)</p>
+    </div>
+    <span class="badge">Step 3 of 5</span>
+  </div>
+</div>
+
+<div class="wrap">
+  <p class="crumbs"><a href="index.html">IFC-SG Toolset</a><span>&rsaquo;</span>Subtype Definer</p>
+
+  <div class="card">
+    <h2>What it does</h2>
+    <p class="lede">
+      Reads the official IFC+SG Industry Mapping and lets you assign the
+      exact IFC Entity and Predefined Type to each matching Revit type,
+      component by component - this is where you pick <i>which</i> subtype
+      (e.g. Blast Door vs a standard Door) rather than letting name-matching
+      decide for you.
+    </p>
+    <p>
+      Use it after <a href="auto_assign.html">Auto Assign</a> for the types
+      that need a deliberate subtype choice, or whenever you want to browse
+      one IFC-SG component and see every Family Type under it at a glance.
+    </p>
+  </div>
+
+  <div class="card">
+    <h2>Stat cards</h2>
+    <dl class="kv">
+      <dt class="v-blue">COMPONENTS</dt><dd>IFC-SG components loaded from the mapping Excel</dd>
+      <dt class="v-gold">ELEMENTS</dt><dd>Elements those components' categories hold in this model</dd>
+      <dt class="v-red">UNRECOGNISED CATEGORIES</dt><dd>Category names from the Excel this tool could not resolve to a Revit category</dd>
+      <dt class="v-green">SOURCE</dt><dd>The mapping Excel file that is currently loaded</dd>
+    </dl>
+  </div>
+
+  <div class="card">
+    <h2>Workflow</h2>
+    <ol class="steps">
+      <li><b>Load Mapping Excel</b> - a column-mapping dialog appears if the
+        sheet's own headers do not match what the tool expects, so you can
+        point it at the right columns once.</li>
+      <li>Pick a <b>component</b> on the left; the grid on the right shows
+        its Family/Type rows, how many instances each has, and a status:
+        <span class="code">OK</span> (entity + subtype set),
+        <span class="code">No Sub</span> (entity only) or
+        <span class="code">Not Set</span> (neither).</li>
+      <li>Choose a subtype from the dropdown, then <b>Apply to Selected</b>
+        (Ctrl+Click to select several rows first) or <b>Apply to ALL</b>.</li>
+      <li><b>Auto-Assign</b> fills in everything still missing in one pass,
+        with a preview first - it never overwrites a value that is already
+        set.</li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <h2>Options</h2>
+    <dl class="kv">
+      <dt class="v-dark">Apply to Type</dt><dd>Write on the Family Type rather than each instance.</dd>
+      <dt class="v-dark">Also set IFC Entity</dt><dd>Write <span class="code">Export to IFC As</span> as well as the subtype.</dd>
+      <dt class="v-dark">Set ObjectType for USERDEFINED</dt><dd>A <span class="code">*</span> subtype writes <span class="code">USERDEFINED</span> plus the name into <span class="code">IfcObjectType</span>.</dd>
+    </dl>
+  </div>
+
+  <div class="card">
+    <h2>Good to know</h2>
+    <div class="box fixed">
+      The <span class="code">.xlsx</span> is read directly - Microsoft
+      Excel does not need to be installed on the machine, and the mapping
+      file may stay <b>open in Excel</b> while you load it (an earlier
+      version required closing it first).
+    </div>
+    <div class="box tip">
+      Toposolid (Revit 2024+) and Topography (older Revit) are both handled
+      automatically - you do not need to know which one your Revit version uses.
+    </div>
+  </div>
+
+  <div class="pagenav">
+    <a class="prev" href="auto_assign.html"><span class="dir">&larr; Previous tool</span>Auto Assign</a>
+    <a class="next" href="manual_assign.html"><span class="dir">Next tool &rarr;</span>Manual Assign</a>
+  </div>
+  <footer class="site">IFC-SG Toolset &middot; Dang Quoc Truong (DQT) &copy; 2026</footer>
+</div>
+</body>
+</html>

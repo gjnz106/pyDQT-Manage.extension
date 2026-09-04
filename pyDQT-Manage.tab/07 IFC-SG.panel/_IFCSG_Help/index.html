@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>IFC-SG Toolset - Help</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page-header">
+  <div class="inner">
+    <div>
+      <h1>IFC-SG Toolset</h1>
+      <p class="subtitle">by Dang Quoc Truong (DQT) &middot; pyDQT-Manage</p>
+    </div>
+    <span class="badge">5 tools</span>
+  </div>
+</div>
+
+<div class="wrap">
+
+  <div class="card">
+    <h2>What this panel is for</h2>
+    <p class="lede">
+      The IFC-SG panel gets a Revit model ready for Singapore's IFC+SG
+      (CORENET X) submission: create the parameters the requirements ask
+      for, assign the correct IFC export class to every element, and check
+      the result before the IFC file goes out.
+    </p>
+    <p>
+      The five tools are meant to be used roughly in this order - click any
+      card below to open that tool's guide.
+    </p>
+  </div>
+
+  <div class="tool-grid">
+
+    <a class="tool-card" href="param_loader.html">
+      <span class="step-no">STEP 1</span>
+      <h3>Parameter Loader</h3>
+      <p>Create the required project parameters and bind them to the right
+      categories, before anything else needs them.</p>
+    </a>
+
+    <a class="tool-card" href="auto_assign.html">
+      <span class="step-no">STEP 2</span>
+      <h3>Auto Assign</h3>
+      <p>Assign the IFC export class to every Family Type in one pass, by
+      matching names against the Industry Mapping.</p>
+    </a>
+
+    <a class="tool-card" href="subtype_definer.html">
+      <span class="step-no">STEP 3</span>
+      <h3>Subtype Definer</h3>
+      <p>Pick the exact subtype per Family Type from the Industry Mapping,
+      for the cases Auto Assign could not resolve on its own.</p>
+    </a>
+
+    <a class="tool-card" href="manual_assign.html">
+      <span class="step-no">STEP 4</span>
+      <h3>Manual Assign</h3>
+      <p>Fix individual elements by hand - the handful Auto Assign and
+      Subtype Definer could not map, or a value you want to override.</p>
+    </a>
+
+    <a class="tool-card" href="ifcsg_checker.html">
+      <span class="step-no">STEP 5</span>
+      <h3>IFC-SG Checker</h3>
+      <p>Verify every required parameter actually exists and carries a
+      value before the model goes out for submission.</p>
+    </a>
+
+  </div>
+
+  <div class="card">
+    <h2>Which tool do I need?</h2>
+    <table class="cmp">
+      <tr><th>I want to&hellip;</th><th>Use</th></tr>
+      <tr><td>Add the IFC+SG parameters to a fresh model</td><td>Parameter Loader</td></tr>
+      <tr><td>Assign IFC classes to hundreds of types at once</td><td>Auto Assign</td></tr>
+      <tr><td>Set a specific subtype (e.g. Blast Door vs standard Door)</td><td>Subtype Definer</td></tr>
+      <tr><td>Fix a handful of elements, or override one value</td><td>Manual Assign</td></tr>
+      <tr><td>Confirm the model is ready before submission</td><td>IFC-SG Checker</td></tr>
+    </table>
+  </div>
+
+  <footer class="site">IFC-SG Toolset &middot; Dang Quoc Truong (DQT) &copy; 2026</footer>
+</div>
+</body>
+</html>
