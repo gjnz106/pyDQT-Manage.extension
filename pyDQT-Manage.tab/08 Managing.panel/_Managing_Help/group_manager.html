@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Group Manager - Managing Help</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page-header">
+  <div class="inner">
+    <div>
+      <h1>Group Manager</h1>
+      <p class="subtitle">by Dang Quoc Truong (DQT)</p>
+    </div>
+    <span class="badge">Groups</span>
+  </div>
+</div>
+
+<div class="wrap">
+  <p class="crumbs"><a href="index.html">Managing Toolset</a><span>&rsaquo;</span>Group Manager</p>
+
+  <div class="card">
+    <h2>What it does</h2>
+    <p class="lede">
+      Lists every Model and Detail group type in the model with its instance
+      count, creator and workset, and lets you drill into a type to see
+      exactly which view(s) its instances live in.
+    </p>
+  </div>
+
+  <div class="card">
+    <h2>Stat cards</h2>
+    <dl class="kv">
+      <dt class="v-dark">Total Types</dt><dd>group types found (Model + Detail)</dd>
+      <dt class="v-green">Model</dt><dd>Model group types</dd>
+      <dt class="v-gold">Detail</dt><dd>Detail group types</dd>
+      <dt class="v-dark">Selected</dt><dd>rows currently ticked in the grid</dd>
+    </dl>
+  </div>
+
+  <div class="card">
+    <h2>Filters</h2>
+    <dl class="kv">
+      <dt class="v-dark">Search</dt><dd>matches name, creator or workset</dd>
+      <dt class="v-dark">Category</dt><dd>All / Model only / Detail only</dd>
+    </dl>
+  </div>
+
+  <div class="card">
+    <h2>Workflow</h2>
+    <ol class="steps">
+      <li>Search / filter by Category to find the group type(s) you care
+        about.</li>
+      <li><b>Select in Model</b> or <b>Zoom To</b> the ticked type's
+        instances.</li>
+      <li><b>Detail</b> opens a breakdown of the selected type - which
+        view(s) its instances are placed in, with its own Select in Model /
+        Zoom To.</li>
+      <li><b>Export CSV</b> saves the current (filtered) list; <b>Refresh</b>
+        reloads it; <b>Close</b> exits the tool.</li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <h2>Good to know</h2>
+    <div class="box tip">
+      A type with an Instances count of 0 is loaded but unplaced - a purge
+      candidate if it's not needed.
+    </div>
+  </div>
+
+  <div class="pagenav">
+    <a class="prev" href="image_manager.html"><span class="dir">&larr; Previous</span>Image Manager</a>
+    <a class="next" href="family_manager.html"><span class="dir">Next tool &rarr;</span>Family Manager</a>
+  </div>
+  <footer class="site">Managing Toolset &middot; Dang Quoc Truong (DQT) &copy; 2026</footer>
+</div>
+</body>
+</html>

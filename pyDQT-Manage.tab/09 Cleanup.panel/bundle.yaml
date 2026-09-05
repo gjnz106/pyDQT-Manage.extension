@@ -1,6 +1,0 @@
-title: Cleanup
-layout:
-  - SmartPurge
-  - AdvancedPurge
-  - PurgeFamilies
-  - SmartDelete

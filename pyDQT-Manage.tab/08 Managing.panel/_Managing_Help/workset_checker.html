@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Workset Checker - Managing Help</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page-header">
+  <div class="inner">
+    <div>
+      <h1>Workset Checker</h1>
+      <p class="subtitle">by Dang Quoc Truong (DQT)</p>
+    </div>
+    <span class="badge">Views / QC</span>
+  </div>
+</div>
+
+<div class="wrap">
+  <p class="crumbs"><a href="index.html">Managing Toolset</a><span>&rsaquo;</span>Workset Checker</p>
+
+  <div class="card">
+    <h2>What it does</h2>
+    <p class="lede">
+      Auto-generates one 3D QC view per workset - each generated view turns
+      ON exactly one workset and turns OFF every other workset, so you can
+      quickly review a discipline's content in isolation.
+    </p>
+  </div>
+
+  <div class="card">
+    <h2>Stat cards</h2>
+    <dl class="kv">
+      <dt class="v-dark">Total Worksets</dt><dd>user-created worksets found in the model</dd>
+      <dt class="v-gold">Selected</dt><dd>rows ticked in the grid, about to get a view generated</dd>
+      <dt class="v-green">Existing Views</dt><dd>worksets that already have a matching QC view</dd>
+    </dl>
+  </div>
+
+  <div class="card">
+    <h2>Options</h2>
+    <dl class="kv">
+      <dt class="v-dark">View name prefix</dt><dd>text prepended to each generated view's name (default <code>QC-WS - </code>)</dd>
+      <dt class="v-dark">Detail: Fine + Shaded w/ Edges</dt><dd>sets the generated view's detail level and visual style</dd>
+      <dt class="v-dark">Reuse view if name matches</dt><dd>if a view with the target name already exists, reuse it instead of creating a duplicate</dd>
+      <dt class="v-dark">Open first view when done</dt><dd>opens the first generated view once Generate Views finishes</dd>
+    </dl>
+  </div>
+
+  <div class="card">
+    <h2>Workflow</h2>
+    <ol class="steps">
+      <li>Review the grid - Workset, Elements, and whether a matching view
+        already <b>Exists</b>.</li>
+      <li><b>Select All</b> / <b>Clear</b> to choose which worksets get a
+        view; <b>Refresh</b> reloads the list.</li>
+      <li>Set the <b>view name prefix</b> and options on the left.</li>
+      <li><b>Generate Views</b> creates (or reuses) a 3D view per selected
+        workset; <b>Close</b> exits without generating.</li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <h2>Good to know</h2>
+    <div class="box tip">
+      Nothing is generated until you press Generate Views - selecting rows
+      and changing options is safe to explore first.
+    </div>
+    <div class="box tip">
+      With Reuse view if name matches on, running the tool again on the same
+      worksets updates the existing views instead of piling up duplicates.
+    </div>
+  </div>
+
+  <div class="pagenav">
+    <a class="prev" href="material_manager.html"><span class="dir">&larr; Previous</span>Material Manager</a>
+    <a class="next" href="cad_import_manager.html"><span class="dir">Next tool &rarr;</span>CAD Import Manager</a>
+  </div>
+  <footer class="site">Managing Toolset &middot; Dang Quoc Truong (DQT) &copy; 2026</footer>
+</div>
+</body>
+</html>
