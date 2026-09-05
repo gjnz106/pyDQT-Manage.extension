@@ -1271,7 +1271,8 @@ MAIN_XAML = """
           <TextBlock Text="IFC-SG Auto Assign v3.0" FontSize="18" FontWeight="Bold" Foreground="#333"/>
           <TextBlock Text="Assign IFC Export + ObjectType per Family Type" FontSize="11" Foreground="#666"/>
         </StackPanel>
-        <TextBlock Grid.Column="1" Text="DQT" FontSize="11" Foreground="#666" VerticalAlignment="Center" FontStyle="Italic"/>
+        <Button x:Name="btnHelp" Grid.Column="1" Content="? Help" Padding="10,4"
+                Background="White" VerticalAlignment="Center" Cursor="Hand"/>
       </Grid>
     </Border>
     <StackPanel Grid.Row="1">
@@ -1300,6 +1301,9 @@ class MainWindow(object):
         self.st = self.win.FindName("txtStatus")
         self.win.FindName("btnExcel").MouseLeftButtonUp += self.on_excel
         self.win.FindName("btnBuiltin").MouseLeftButtonUp += self.on_builtin
+        # Same help as the preview window - this is the first screen the user
+        # sees, so it needs the ? just as much.
+        self.win.FindName("btnHelp").Click += lambda s_, a_: show_help()
 
     def on_excel(self, s, a):
         dlg = OpenFileDialog()
