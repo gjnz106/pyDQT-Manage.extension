@@ -163,7 +163,7 @@ def _open_help_page(html_filename):
 # One layout transform on the root grid scales text, icons, buttons and
 # spacing together, so nothing can be missed and the ratio stays tunable.
 # =====================================================================
-UI_SCALE = 1.3
+UI_SCALE = 1.04     # 1.3 x 0.8 - the 1.3 pass read too large in use
 BASE_WIDTH = 1150
 BASE_HEIGHT = 820
 
@@ -1053,7 +1053,8 @@ XAML_STR = '''
                             <Button x:Name="btnTreeInvert" Content="Invert"
                                     Style="{StaticResource BtnSecondary}" Padding="6,3" FontSize="10"/>
                         </StackPanel>
-                        <TextBlock Text="Shift + click to tick a range" FontSize="9"
+                        <TextBlock Text="Click a row to select - Shift + click for a range"
+                                   FontSize="9" TextWrapping="Wrap"
                                    Foreground="#AAA" Margin="0,3,0,0"/>
                     </StackPanel>
 
@@ -1190,19 +1191,25 @@ class IFCSGCheckerWindow:
         # Anchors for shift + click range ticking.
         self._last_cat_index = None
         self._last_row_index = None
-        # Blue outline drawn around a row/category/discipline while it is
-        # ticked - the same visual regardless of whether the tick came from
-        # a direct click, a shift-click range, or a parent cascade.
+        # Blue fill painted across a ticked row/category/discipline - the
+        # same visual regardless of whether the tick came from a direct
+        # click, a shift-click range, or a parent cascade. Light enough that
+        # the row's own text colours stay readable on top of it.
         try:
-            self._tick_brush = BrushConverter().ConvertFromString("#2196F3")
+            self._tick_brush = BrushConverter().ConvertFromString("#BBDEFB")
         except:
             self._tick_brush = None
+        # A row's background before it was ever selected, so unticking puts
+        # back what was there (a result row's pass/fail colour, a tree row's
+        # transparent) instead of clearing it.
+        self._base_bg = {}
 
         # Parse XAML
         self.window = XamlReader.Parse(XAML_STR)
 
         self._get_controls()
         self._apply_ui_scale()
+        self._mute_tree_selection()
         self._bind_events()
         self._load_saved_configs()
 
@@ -1234,6 +1241,34 @@ class IFCSGCheckerWindow:
             self.window.MinHeight = min(600 * UI_SCALE, max_h)
         except:
             pass
+
+    def _mute_tree_selection(self):
+        """Blank out the TreeView's own selection highlight.
+
+        Rows paint their own blue fill when they are ticked. WPF's built-in
+        highlight marks a different thing - the one focused item - so leaving
+        it on puts a second, contradictory colour under ours. Best effort per
+        key: an older WPF without the inactive pair still gets the active one
+        muted, and a total failure only means the stock highlight shows too."""
+        try:
+            resources = self.tvCategories.Resources
+        except:
+            return
+        clear = System.Windows.Media.Brushes.Transparent
+        try:
+            text = BrushConverter().ConvertFromString("#333333")
+        except:
+            text = None
+        for key_name, brush in (("HighlightBrushKey", clear),
+                                ("HighlightTextBrushKey", text),
+                                ("InactiveSelectionHighlightBrushKey", clear),
+                                ("InactiveSelectionHighlightTextBrushKey", text)):
+            try:
+                key = getattr(System.Windows.SystemColors, key_name, None)
+                if key is not None and brush is not None:
+                    resources[key] = brush
+            except:
+                pass
 
     def _pump_ui(self):
         """Let WPF repaint mid-operation.
@@ -1318,9 +1353,9 @@ class IFCSGCheckerWindow:
             "  NO ELEM  - nothing of that category in this model\n\n"
             "WORKFLOW\n"
             "  1. Load a config (Import XML / Excel, or pick a saved one)\n"
-            "  2. Tick the disciplines and categories to cover - Tick All / "
-            "None / Invert, and Shift+Click for a range - a ticked row, "
-            "category or discipline is outlined in blue\n"
+            "  2. Pick the disciplines and categories to cover - click "
+            "anywhere on a row to select it, Shift+Click for a range, or use "
+            "Tick All / None / Invert. Selected rows are filled blue\n"
             "  3. Run Check, then filter the results (All / Failed / Partial / "
             "Passed) or search\n"
             "  4. Tick result rows (Select All / Un-select / Invert / Tick "
@@ -1477,6 +1512,7 @@ class IFCSGCheckerWindow:
         self.disc_checks = []   # [(CheckBox, discipline name)]
         self.cat_checks = []    # [(CheckBox, discipline name, category name)]
         self._last_cat_index = None
+        self._base_bg = {}      # rows are gone; their remembered fills go too
         if not self.config:
             return
 
@@ -1486,14 +1522,24 @@ class IFCSGCheckerWindow:
             # Discipline node
             disc_item = TreeViewItem()
             disc_item.IsExpanded = True
+            # Let the header fill the row so its selection fill does too.
+            disc_item.HorizontalContentAlignment = \
+                System.Windows.HorizontalAlignment.Stretch
             
-            # Wrapping border lets a ticked discipline light up blue, same as
-            # a ticked category or result row - independent of the TreeView's
-            # own (single-item) selection highlight.
+            # Wrapping border lets a ticked discipline fill blue, same as a
+            # ticked category or result row - independent of the TreeView's
+            # own (single-item) selection highlight. It stretches the full
+            # width so the fill covers the whole row, and carries a
+            # Transparent background because a Border with no brush at all
+            # is invisible to the mouse over its empty space.
             disc_row = System.Windows.Controls.Border()
             disc_row.BorderThickness = System.Windows.Thickness(0)
             disc_row.CornerRadius = System.Windows.CornerRadius(2)
             disc_row.Padding = System.Windows.Thickness(2, 1, 2, 1)
+            disc_row.HorizontalAlignment = System.Windows.HorizontalAlignment.Stretch
+            disc_row.Background = System.Windows.Media.Brushes.Transparent
+            disc_row.Cursor = System.Windows.Input.Cursors.Hand
+            disc_row.PreviewMouseLeftButtonDown += self._on_disc_row_click
 
             disc_sp = StackPanel()
             disc_sp.Orientation = System.Windows.Controls.Orientation.Horizontal
@@ -1506,6 +1552,7 @@ class IFCSGCheckerWindow:
             chk_disc.Checked += self._on_disc_toggled
             chk_disc.Unchecked += self._on_disc_toggled
             self.disc_checks.append((chk_disc, disc_name))
+            disc_row.Tag = chk_disc     # the row click drives this box
             self._apply_checkbox_highlight(chk_disc, disc_row)
 
             lbl_disc = TextBlock()
@@ -1526,11 +1573,17 @@ class IFCSGCheckerWindow:
             # Category nodes
             for cat_name, cat_data in disc_data.get("categories", {}).items():
                 cat_item = TreeViewItem()
-                
+                cat_item.HorizontalContentAlignment = \
+                    System.Windows.HorizontalAlignment.Stretch
+
                 cat_row = System.Windows.Controls.Border()
                 cat_row.BorderThickness = System.Windows.Thickness(0)
                 cat_row.CornerRadius = System.Windows.CornerRadius(2)
                 cat_row.Padding = System.Windows.Thickness(2, 1, 2, 1)
+                cat_row.HorizontalAlignment = System.Windows.HorizontalAlignment.Stretch
+                cat_row.Background = System.Windows.Media.Brushes.Transparent
+                cat_row.Cursor = System.Windows.Input.Cursors.Hand
+                cat_row.PreviewMouseLeftButtonDown += self._on_cat_row_click
 
                 cat_sp = StackPanel()
                 cat_sp.Orientation = System.Windows.Controls.Orientation.Horizontal
@@ -1542,9 +1595,11 @@ class IFCSGCheckerWindow:
                 chk_cat.Tag = (disc_name, cat_name, cat_row)
                 chk_cat.Checked += self._on_cat_toggled
                 chk_cat.Unchecked += self._on_cat_toggled
-                chk_cat.PreviewMouseLeftButtonDown += self._on_cat_preview_click
-                chk_cat.ToolTip = "Shift + click to tick a range of categories"
                 self.cat_checks.append((chk_cat, disc_name, cat_name))
+                # The row, not the box, owns the click - see _on_cat_row_click.
+                cat_row.Tag = chk_cat
+                cat_row.ToolTip = ("Click anywhere on the row to select it, "
+                                   "Shift + click to select a range")
                 self._apply_checkbox_highlight(chk_cat, cat_row)
 
                 param_count = len(cat_data.get("params", []))
@@ -1620,17 +1675,47 @@ class IFCSGCheckerWindow:
         on_done()
         return anchor
 
-    def _on_cat_preview_click(self, sender, args):
-        if self._shift_held():
-            def done():
-                self._sync_all_disciplines()
-                self._update_selection_status()
+    def _on_cat_row_click(self, sender, args):
+        """Select a category by clicking anywhere on its row.
 
-            if self._range_tick(self.cat_checks, sender,
+        The checkbox used to be the only hit target, so clicking a category
+        name did nothing and picking several meant hitting a run of tiny
+        boxes - which is what "cannot multi-select" meant in practice. The
+        whole row is handled here, the box included, so WPF must not toggle
+        it a second time on the way back up: hence Handled."""
+        checkbox = sender.Tag
+        if checkbox is None:
+            return
+        args.Handled = True
+        index = self._index_of(self.cat_checks, checkbox)
+        if index is None:
+            return
+
+        def done():
+            self._sync_all_disciplines()
+            self._update_selection_status()
+
+        if self._shift_held():
+            if self._range_tick(self.cat_checks, checkbox,
                                 self._last_cat_index, done) is not None:
-                args.Handled = True     # the range set it; do not toggle again
-                return
-        self._last_cat_index = self._index_of(self.cat_checks, sender)
+                return      # anchor stays put, ready for the next range
+        # The Checked/Unchecked handler does the cascade and the counters.
+        checkbox.IsChecked = System.Nullable[System.Boolean](
+            not bool(checkbox.IsChecked))
+        self._last_cat_index = index
+
+    def _on_disc_row_click(self, sender, args):
+        """Select a whole discipline by clicking anywhere on its row.
+
+        No shift-range here on purpose: ticking a discipline cascades down to
+        its categories, and a range tick deliberately suspends that cascade,
+        so a discipline range would leave parents and children disagreeing."""
+        checkbox = sender.Tag
+        if checkbox is None:
+            return
+        args.Handled = True
+        checkbox.IsChecked = System.Nullable[System.Boolean](
+            not bool(checkbox.IsChecked))
 
     def _on_row_preview_click(self, sender, args):
         if self._shift_held():
@@ -1657,20 +1742,25 @@ class IFCSGCheckerWindow:
             self._suspend_cascade = previous
 
     def _apply_checkbox_highlight(self, checkbox, border):
-        """Outline a row in blue while its checkbox is ticked.
+        """Fill a row with the selection blue while its checkbox is ticked.
 
-        Called from every tick path - a direct click, a shift-click range,
-        a bulk Select All/Invert/Tick Failed, and a discipline cascading
-        down to its categories - so the tick is always visible at a glance,
-        without hiding the row's own pass/fail colour underneath it."""
+        Called from every tick path - a direct click anywhere on the row, a
+        shift-click range, a bulk Select All/Invert/Tick Failed, and a
+        discipline cascading down to its categories - so a tick always reads
+        as an ordinary filled selection across the whole row.
+
+        The row's background before it was first selected is remembered so
+        unticking restores it: a result row goes back to its pass/fail
+        colour rather than being left blank."""
         if border is None:
             return
         try:
+            if border not in self._base_bg:
+                self._base_bg[border] = border.Background
             if bool(checkbox.IsChecked):
-                border.BorderBrush = self._tick_brush
-                border.BorderThickness = System.Windows.Thickness(2)
+                border.Background = self._tick_brush
             else:
-                border.BorderThickness = System.Windows.Thickness(0)
+                border.Background = self._base_bg[border]
         except:
             pass
 
@@ -1940,6 +2030,14 @@ class IFCSGCheckerWindow:
         return stats
     
     def _render_results(self, results):
+        # Forget the remembered fills of the rows about to be thrown away.
+        # The tree's entries have to survive a re-run, so this drops just
+        # these borders rather than resetting the whole map.
+        for old_chk, _old_row in self.row_checks:
+            try:
+                self._base_bg.pop(old_chk.Tag, None)
+            except:
+                pass
         self.spResults.Children.Clear()
         self.row_checks = []
         self._last_row_index = None
