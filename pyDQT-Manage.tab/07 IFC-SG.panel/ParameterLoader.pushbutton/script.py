@@ -36,6 +36,15 @@ import codecs
 import traceback
 import datetime
 
+# Shared spreadsheet reader (extension lib/). Reads .xlsx and .csv without
+# any Office component; Excel COM Interop is only touched for legacy .xls.
+_script_dir = os.path.dirname(__file__)
+_extension_dir = os.path.dirname(os.path.dirname(os.path.dirname(_script_dir)))
+_lib_path = os.path.join(_extension_dir, 'lib')
+if _lib_path not in sys.path:
+    sys.path.insert(0, _lib_path)
+import xlsx_reader
+
 # =====================================================================
 # REVIT API COMPATIBILITY (2024/2025/2026+)
 # =====================================================================
@@ -296,122 +305,102 @@ class RequirementParser:
     
     @staticmethod
     def read_excel_headers(filepath):
-        """Read sheet names and headers from Excel for mapping dialog"""
+        """Sheet names, column headers and a short preview, for the mapping
+        dialog.
+
+        Reads .xlsx/.csv directly - the tool used to drive Excel over COM
+        here, which failed outright ("Could not add reference to assembly
+        Microsoft.Office.Interop.Excel") on machines where the Click-to-Run
+        Microsoft 365 installer never registered the Interop assembly, even
+        though Excel itself worked fine."""
         try:
-            clr.AddReference('Microsoft.Office.Interop.Excel')
-            from Microsoft.Office.Interop import Excel as ExcelInterop
-            
-            excel_app = ExcelInterop.ApplicationClass()
-            excel_app.Visible = False
-            excel_app.DisplayAlerts = False
-            wb = excel_app.Workbooks.Open(filepath)
-            
-            sheets_data = {}
-            for si in range(1, wb.Sheets.Count + 1):
-                ws = wb.Sheets[si]
-                sheet_name = ws.Name
-                
-                # Read headers from row 1
-                headers = []
-                cols = ws.UsedRange.Columns.Count
-                total_rows = ws.UsedRange.Rows.Count
-                for ci in range(1, min(cols + 1, 30)):
-                    val = ws.Cells[1, ci].Value2
-                    headers.append(str(val) if val else "Column {}".format(ci))
-                
-                # Read preview rows (2-6)
-                preview = []
-                for ri in range(2, min(total_rows + 1, 7)):
-                    row_data = []
-                    for ci in range(1, min(cols + 1, 30)):
-                        val = ws.Cells[ri, ci].Value2
-                        row_data.append(str(val) if val else "")
-                    preview.append(row_data)
-                
-                sheets_data[sheet_name] = {
-                    "headers": headers,
-                    "preview": preview,
-                    "total_rows": total_rows,
-                    "total_cols": cols
-                }
-            
-            wb.Close(False)
-            excel_app.Quit()
-            System.Runtime.InteropServices.Marshal.ReleaseComObject(excel_app)
-            return sheets_data
-            
+            book = xlsx_reader.read_workbook(filepath)
+        except xlsx_reader.XlsxReadError as e:
+            raise Exception(str(e))          # already phrased for the user
         except Exception as e:
-            raise Exception("Error reading Excel: {}".format(str(e)))
+            raise Exception("Error reading Excel: {}".format(e))
+
+        sheets_data = {}
+        for name in book["sheets"]:
+            rows = book["rows"].get(name, {})
+            total_rows = max(rows.keys()) if rows else 0
+            used_cols = set()
+            for cells in rows.values():
+                used_cols.update(cells.keys())
+            total_cols = max(used_cols) if used_cols else 0
+            n_cols = min(total_cols, 29)
+
+            header_row = rows.get(1, {})
+            headers = []
+            for ci in range(1, n_cols + 1):
+                val = header_row.get(ci)
+                headers.append(str(val) if val else "Column {}".format(ci))
+
+            preview = []
+            for ri in range(2, min(total_rows, 6) + 1):
+                cells = rows.get(ri, {})
+                preview.append([
+                    str(cells.get(ci)) if cells.get(ci) is not None else ""
+                    for ci in range(1, n_cols + 1)])
+
+            sheets_data[name] = {
+                "headers": headers,
+                "preview": preview,
+                "total_rows": total_rows,
+                "total_cols": total_cols
+            }
+        return sheets_data
     
     @staticmethod
-    def from_excel(filepath, sheet_name=None, col_param=1, col_category=2, 
+    def from_excel(filepath, sheet_name=None, col_param=1, col_category=2,
                    col_discipline=None, header_row=1):
-        """Parse Excel with user-specified column mapping"""
+        """Parse a workbook with the user's column mapping."""
         try:
-            clr.AddReference('Microsoft.Office.Interop.Excel')
-            from Microsoft.Office.Interop import Excel as ExcelInterop
-            
-            excel_app = ExcelInterop.ApplicationClass()
-            excel_app.Visible = False
-            excel_app.DisplayAlerts = False
-            wb = excel_app.Workbooks.Open(filepath)
-            
-            if sheet_name:
-                ws = wb.Sheets[sheet_name]
-            else:
-                ws = wb.Sheets[1]
-            
-            rows = ws.UsedRange.Rows.Count
-            
-            param_map = {}
-            data_start = header_row + 1
-            
-            for r in range(data_start, rows + 1):
-                raw_param = ws.Cells[r, col_param].Value2
-                if raw_param is None:
-                    continue
-                # Fix: convert float numbers to int strings (1.0 -> "1")
-                if isinstance(raw_param, float) and raw_param == int(raw_param):
-                    param = str(int(raw_param))
-                else:
-                    param = str(raw_param).strip()
-                
-                cat = ""
-                if col_category:
-                    raw_cat = ws.Cells[r, col_category].Value2
-                    if raw_cat is not None:
-                        cat = str(raw_cat).strip()
-                
-                disc = ""
-                if col_discipline:
-                    raw_disc = ws.Cells[r, col_discipline].Value2
-                    if raw_disc is not None:
-                        disc = str(raw_disc).strip()
-                
-                if not param:
-                    continue
-                
-                if param not in param_map:
-                    param_map[param] = {"cats": set(), "discs": set()}
-                if cat:
-                    param_map[param]["cats"].add(cat)
-                if disc:
-                    param_map[param]["discs"].add(disc)
-            
-            wb.Close(False)
-            excel_app.Quit()
-            System.Runtime.InteropServices.Marshal.ReleaseComObject(excel_app)
-            
-            reqs = []
-            for name, data in sorted(param_map.items()):
-                req = ParamRequirement(name)
-                req.categories = sorted(data["cats"])
-                req.disciplines = data["discs"]
-                reqs.append(req)
-            return reqs
-            
+            book = xlsx_reader.read_workbook(filepath)
+        except xlsx_reader.XlsxReadError as e:
+            raise Exception(str(e))
         except Exception as e:
-            raise Exception("Excel parse error: {}".format(str(e)))
+            raise Exception("Excel parse error: {}".format(e))
+
+        if sheet_name and sheet_name in book["rows"]:
+            rows = book["rows"][sheet_name]
+        elif book["sheets"]:
+            rows = book["rows"][book["sheets"][0]]
+        else:
+            raise Exception("Excel parse error: no readable sheets in the file")
+
+        def _cell(cells, col):
+            """Trimmed text of one mapped column, '' when unmapped or empty.
+            Numbers already arrive as '1' rather than '1.0' from the reader."""
+            if not col:
+                return ""
+            val = cells.get(col)
+            return str(val).strip() if val is not None else ""
+
+        param_map = {}
+        for ri in sorted(rows.keys()):
+            if ri <= header_row:
+                continue
+            cells = rows[ri]
+            param = _cell(cells, col_param)
+            if not param:
+                continue
+            cat = _cell(cells, col_category)
+            disc = _cell(cells, col_discipline)
+            if param not in param_map:
+                param_map[param] = {"cats": set(), "discs": set()}
+            if cat:
+                param_map[param]["cats"].add(cat)
+            if disc:
+                param_map[param]["discs"].add(disc)
+
+        reqs = []
+        for name, data in sorted(param_map.items()):
+            req = ParamRequirement(name)
+            req.categories = sorted(data["cats"])
+            req.disciplines = data["discs"]
+            reqs.append(req)
+        return reqs
 
 
 # =====================================================================
@@ -1441,7 +1430,10 @@ class ParamLoaderWindow:
     def _on_import_excel(self, sender, args):
         from System.Windows.Forms import OpenFileDialog, DialogResult
         dlg = OpenFileDialog()
-        dlg.Filter = "Excel Files (*.xlsx;*.xls)|*.xlsx;*.xls|CSV Files (*.csv)|*.csv"
+        dlg.Filter = ("Spreadsheets (*.xlsx;*.xlsm;*.csv;*.xls)|*.xlsx;*.xlsm;*.csv;*.xls|"
+                      "Excel (*.xlsx;*.xlsm)|*.xlsx;*.xlsm|"
+                      "CSV (*.csv)|*.csv|"
+                      "Legacy Excel, needs Excel installed (*.xls)|*.xls")
         dlg.Title = "Import Excel Parameter Mapping"
         if dlg.ShowDialog() == DialogResult.OK:
             try:

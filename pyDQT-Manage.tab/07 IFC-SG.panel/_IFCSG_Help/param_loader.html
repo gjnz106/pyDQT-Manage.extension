@@ -69,6 +69,15 @@
       <b>Shift+Click</b> works in the parameter list to tick a whole range
       at once, same as the other IFC-SG tools.
     </div>
+    <div class="box fixed">
+      <b>No Excel needed.</b> <code>.xlsx</code>, <code>.xlsm</code> and
+      <code>.csv</code> are read directly by the tool, so the import works
+      on a machine with no Office install at all - and on a Microsoft 365
+      Click-to-Run install, which often does not register the Excel Interop
+      assembly the old importer depended on. Only the legacy binary
+      <code>.xls</code> still needs Excel; re-save such a file as
+      <code>.xlsx</code> and it imports without it.
+    </div>
   </div>
 
   <div class="pagenav">
