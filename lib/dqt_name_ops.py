@@ -2,9 +2,9 @@
 """
 Shared name transformations for the DQT rename tools.
 
-Family Manager renames families inside the open project; Purge Families
-renames .rfa files in a folder. Both build the new name from the same
-options, so the rules live here rather than being copied into each tool.
+Family Manager renames families inside the open project. The rules for
+building a new name from the rename options live here rather than being
+copied into each tool, so any rename tool in the suite stays consistent.
 
 Copyright (c) 2026 Dang Quoc Truong (DQT)
 All rights reserved.

@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Managing Toolset - Help</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page-header">
+  <div class="inner">
+    <div>
+      <h1>Managing Toolset</h1>
+      <p class="subtitle">by Dang Quoc Truong (DQT) &middot; pyDQT-Manage</p>
+    </div>
+    <span class="badge">17 tools</span>
+  </div>
+</div>
+
+<div class="wrap">
+
+  <div class="card">
+    <h2>What this panel is for</h2>
+    <p class="lede">
+      Managing what the model already contains - the elements placed in it
+      and the named types and styles behind them. Each tool lists what's
+      there with usage counts, lets you filter and select in bulk, and acts
+      on the selection.
+    </p>
+    <p>
+      Most of these share the same shape: a stat-card row (Total / In Use /
+      Unused / Selected), Search + Filter, a grid, and Rename / Batch Rename
+      / Duplicate / Delete acting on the ticked rows. The first six work on
+      <b>placed content</b>; the rest work on <b>types and styles</b>.
+    </p>
+  </div>
+
+  <h2 class="section">Placed content</h2>
+  <div class="tool-grid">
+
+    <a class="tool-card" href="warning_manager.html">
+      <span class="step-no">WARNINGS</span>
+      <h3>Warning Manager</h3>
+      <p>Browse, filter and resolve Revit warnings, with impact analysis
+      before deleting anything.</p>
+    </a>
+
+    <a class="tool-card" href="material_manager.html">
+      <span class="step-no">MATERIALS</span>
+      <h3>Material Manager</h3>
+      <p>List every material with its usage count, batch-rename them, and
+      find unused ones worth purging.</p>
+    </a>
+
+    <a class="tool-card" href="workset_checker.html">
+      <span class="step-no">VIEWS</span>
+      <h3>Workset Checker</h3>
+      <p>Auto-generate one 3D QC view per workset, isolating exactly that
+      workset in each view.</p>
+    </a>
+
+    <a class="tool-card" href="cad_import_manager.html">
+      <span class="step-no">CAD</span>
+      <h3>CAD Import Manager</h3>
+      <p>List every imported/linked CAD file with creator, workset and view,
+      then select, zoom to, export or delete them.</p>
+    </a>
+
+    <a class="tool-card" href="image_manager.html">
+      <span class="step-no">RASTER</span>
+      <h3>Image Manager</h3>
+      <p>List every raster image placed in the model and flag any whose
+      source file can no longer be found on disk.</p>
+    </a>
+
+    <a class="tool-card" href="group_manager.html">
+      <span class="step-no">GROUPS</span>
+      <h3>Group Manager</h3>
+      <p>List every Model/Detail group type with instance counts, and drill
+      into which views a type's instances live in.</p>
+    </a>
+
+  </div>
+
+  <h2 class="section">Types and styles</h2>
+  <div class="tool-grid">
+
+    <a class="tool-card" href="family_manager.html">
+      <span class="step-no">FAMILIES</span>
+      <h3>Family Manager</h3>
+      <p>Tabbed manager for Families, Type Manager, Parameters and Health
+      Check across loadable families, system families and groups.</p>
+    </a>
+
+    <a class="tool-card" href="para_manager.html">
+      <span class="step-no">PARAMETERS</span>
+      <h3>Parameter Manager</h3>
+      <p>See one parameter's value across every type in a category, edit in
+      bulk, and CSV round-trip the values.</p>
+    </a>
+
+    <a class="tool-card" href="line_style_edit.html">
+      <span class="step-no">STYLES</span>
+      <h3>Line Style Manager</h3>
+      <p>List every Line Style (Lines subcategory) with weight, color and
+      pattern, batch-rename or delete.</p>
+    </a>
+
+    <a class="tool-card" href="line_pattern.html">
+      <span class="step-no">PATTERNS</span>
+      <h3>Line Pattern Manager</h3>
+      <p>List every Line Pattern (System/Custom), rename or batch-rename,
+      delete custom ones.</p>
+    </a>
+
+    <a class="tool-card" href="text_note_type_manager.html">
+      <span class="step-no">TYPES</span>
+      <h3>Text Note Type Manager</h3>
+      <p>List every Text Note Type with In Use/Unused counts, rename,
+      batch-rename, duplicate or delete.</p>
+    </a>
+
+    <a class="tool-card" href="dimension_manager.html">
+      <span class="step-no">TYPES</span>
+      <h3>Dimension Manager</h3>
+      <p>List every Dimension Type with instance counts and per-view detail,
+      with inline edit for Text Size/Font/Width Factor.</p>
+    </a>
+
+    <a class="tool-card" href="wall_layer_manager.html">
+      <span class="step-no">WALLS</span>
+      <h3>Wall Layer Manager</h3>
+      <p>List every layer of every Basic wall type and batch-change layer
+      Function, or batch-rename the wall types.</p>
+    </a>
+
+    <a class="tool-card" href="hatching.html">
+      <span class="step-no">PATTERNS</span>
+      <h3>Fill Pattern Manager</h3>
+      <p>List every Fill Pattern with its type and settings, rename,
+      duplicate or delete them.</p>
+    </a>
+
+    <a class="tool-card" href="family_font.html">
+      <span class="step-no">BATCH</span>
+      <h3>Family Font Manager</h3>
+      <p>Batch-change the Text Font (and Width Factor) of every font-bearing
+      type across many families at once.</p>
+    </a>
+
+    <a class="tool-card" href="view_template_manager.html">
+      <span class="step-no">TEMPLATES</span>
+      <h3>View Template Manager</h3>
+      <p>List every View Template with how many views use it, rename,
+      batch-rename, duplicate or delete.</p>
+    </a>
+
+    <a class="tool-card" href="legend_manager.html">
+      <span class="step-no">VIEWS</span>
+      <h3>Legend Manager</h3>
+      <p>List every Legend view with which sheet(s) it's placed on, and
+      manage sheet placement in bulk.</p>
+    </a>
+
+  </div>
+
+  <div class="card">
+    <h2>Which tool do I need?</h2>
+    <table class="cmp">
+      <tr><th>I want to&hellip;</th><th>Use</th></tr>
+      <tr><td>Triage and resolve Revit warnings</td><td>Warning Manager</td></tr>
+      <tr><td>Clean up or batch-rename materials</td><td>Material Manager</td></tr>
+      <tr><td>Make a 3D view per workset for QC review</td><td>Workset Checker</td></tr>
+      <tr><td>Find/clean up CAD imports and links</td><td>CAD Import Manager</td></tr>
+      <tr><td>Find raster images with missing source files</td><td>Image Manager</td></tr>
+      <tr><td>Audit Model/Detail group types and usage</td><td>Group Manager</td></tr>
+      <tr><td>Manage families, their types, parameters, or health</td><td>Family Manager</td></tr>
+      <tr><td>Bulk-edit one parameter across many types</td><td>Parameter Manager</td></tr>
+      <tr><td>Rename or clean up Line Styles (subcategories)</td><td>Line Style Manager</td></tr>
+      <tr><td>Rename or clean up Line Patterns</td><td>Line Pattern Manager</td></tr>
+      <tr><td>Audit/rename Text Note Types</td><td>Text Note Type Manager</td></tr>
+      <tr><td>Audit/rename Dimension Types</td><td>Dimension Manager</td></tr>
+      <tr><td>Batch-change wall layer functions or rename wall types</td><td>Wall Layer Manager</td></tr>
+      <tr><td>Rename or clean up Fill Patterns</td><td>Fill Pattern Manager</td></tr>
+      <tr><td>Change a font across many families at once</td><td>Family Font Manager</td></tr>
+      <tr><td>Audit/rename View Templates</td><td>View Template Manager</td></tr>
+      <tr><td>Manage Legend views and their sheet placements</td><td>Legend Manager</td></tr>
+    </table>
+  </div>
+
+  <footer class="site">Managing Toolset &middot; Dang Quoc Truong (DQT) &copy; 2026</footer>
+</div>
+</body>
+</html>

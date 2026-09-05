@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Image Manager - Managing Help</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page-header">
+  <div class="inner">
+    <div>
+      <h1>Image Manager</h1>
+      <p class="subtitle">by Dang Quoc Truong (DQT)</p>
+    </div>
+    <span class="badge">Raster images</span>
+  </div>
+</div>
+
+<div class="wrap">
+  <p class="crumbs"><a href="index.html">Managing Toolset</a><span>&rsaquo;</span>Image Manager</p>
+
+  <div class="card">
+    <h2>What it does</h2>
+    <p class="lede">
+      Lists every raster image instance placed in the model and checks its
+      source file against disk right now, flagging any that can no longer
+      be found.
+    </p>
+  </div>
+
+  <div class="card">
+    <h2>Status meaning</h2>
+    <dl class="kv">
+      <dt class="v-green">Found (OK)</dt><dd>the source file exists at its recorded path</dd>
+      <dt class="v-red">Missing File</dt><dd>Revit has a path but the file isn't there (moved, renamed, or on an unreachable drive)</dd>
+      <dt class="v-red">No Path</dt><dd>Revit couldn't report a source path at all</dd>
+    </dl>
+  </div>
+
+  <div class="card">
+    <h2>Filters</h2>
+    <dl class="kv">
+      <dt class="v-dark">Search</dt><dd>matches name, path, creator, workset or view</dd>
+      <dt class="v-dark">Status</dt><dd>narrows to Found or Missing</dd>
+    </dl>
+  </div>
+
+  <div class="card">
+    <h2>Workflow</h2>
+    <ol class="steps">
+      <li>Search / filter by Status to find the images you care about.</li>
+      <li><b>Select in Model</b> or <b>Zoom To</b> the ticked row(s) - a
+        missing image still shows a placeholder in its view, so both still
+        work.</li>
+      <li><b>Delete</b> removes the ticked image instance(s); Undo restores
+        them right after if needed.</li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <h2>Good to know</h2>
+    <div class="box tip">
+      To fix a Missing image rather than delete it, use Revit's own
+      <b>Manage tab &rsaquo; Manage Images</b> to browse to the file's new
+      location.
+    </div>
+  </div>
+
+  <div class="pagenav">
+    <a class="prev" href="cad_import_manager.html"><span class="dir">&larr; Previous</span>CAD Import Manager</a>
+    <a class="next" href="group_manager.html"><span class="dir">Next tool &rarr;</span>Group Manager</a>
+  </div>
+  <footer class="site">Managing Toolset &middot; Dang Quoc Truong (DQT) &copy; 2026</footer>
+</div>
+</body>
+</html>

@@ -1,0 +1,19 @@
+title: Managing
+layout:
+  - Warning
+  - Material List
+  - WorksetChecker
+  - CADImportManager
+  - ImageManager
+  - GroupManager
+  - FamilyManager
+  - ParaManager
+  - Line Style Edit
+  - Line Pattern
+  - Text
+  - DimensionManager
+  - WallLayerManager
+  - Hatching
+  - FamilyFont
+  - ViewTemplate
+  - LegendManager

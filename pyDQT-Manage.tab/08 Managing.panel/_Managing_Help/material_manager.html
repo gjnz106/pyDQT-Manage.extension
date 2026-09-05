@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Material Manager - Managing Help</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page-header">
+  <div class="inner">
+    <div>
+      <h1>Material Manager</h1>
+      <p class="subtitle">by Dang Quoc Truong (DQT)</p>
+    </div>
+    <span class="badge">Materials</span>
+  </div>
+</div>
+
+<div class="wrap">
+  <p class="crumbs"><a href="index.html">Managing Toolset</a><span>&rsaquo;</span>Material Manager</p>
+
+  <div class="card">
+    <h2>What it does</h2>
+    <p class="lede">
+      Lists every Material in the model with how many elements use it, so
+      unused materials can be found and cleaned up, and batch-renames
+      materials in bulk.
+    </p>
+  </div>
+
+  <div class="card">
+    <h2>Stat cards</h2>
+    <dl class="kv">
+      <dt class="v-dark">Total</dt><dd>materials in the model</dd>
+      <dt class="v-dark">Visible</dt><dd>materials left after Search/Filter/Category</dd>
+      <dt class="v-dark">Selected</dt><dd>rows currently ticked</dd>
+      <dt class="v-green">In Use</dt><dd>materials with at least one element using them</dd>
+      <dt class="v-red">Unused</dt><dd>materials with none - purge candidates</dd>
+    </dl>
+  </div>
+
+  <div class="card">
+    <h2>Workflow</h2>
+    <ol class="steps">
+      <li>Search / Filter by Usage / Filter by Category narrow the list.</li>
+      <li><b>Rename</b> renames one selected material.</li>
+      <li><b>Batch Rename</b> applies a Prefix/Suffix, Find/Replace, Remove,
+        or Case change to every ticked row at once.</li>
+      <li><b>Duplicate</b> copies a material; <b>Delete</b> removes the
+        ticked ones.</li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <h2>Good to know</h2>
+    <div class="box tip">
+      Sort or filter by the Unused stat first if the goal is cleanup - it
+      surfaces exactly the materials safe to remove without checking each
+      one manually.
+    </div>
+  </div>
+
+  <div class="pagenav">
+    <a class="prev" href="warning_manager.html"><span class="dir">&larr; Previous</span>Warning Manager</a>
+    <a class="next" href="workset_checker.html"><span class="dir">Next tool &rarr;</span>Workset Checker</a>
+  </div>
+  <footer class="site">Managing Toolset &middot; Dang Quoc Truong (DQT) &copy; 2026</footer>
+</div>
+</body>
+</html>

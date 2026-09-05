@@ -219,6 +219,17 @@ table.cmp th { background: var(--header); color: var(--text-dark); }
 table.cmp tr:nth-child(even) td { background: #FFFDF6; }
 
 /* ---------------- Tool index grid (index.html) ---------------- */
+/* Group heading between tool grids on a large index page. */
+h2.section {
+  margin: 26px 0 4px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .10em;
+  text-transform: uppercase;
+  color: var(--text-dark);
+  opacity: .75;
+}
+
 .tool-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
