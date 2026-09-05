@@ -30,6 +30,7 @@ from System.Windows.Media import *
 from System.Windows.Markup import XamlReader
 from System.IO import StringReader
 import os
+import re
 import sys
 import json
 import codecs
@@ -92,24 +93,146 @@ def _get_group_type_id(pg_key):
     
     return None
 
-def _create_ext_def_options(param_name):
-    """Create ExternalDefinitionCreationOptions - compatible with Revit 2024-2026+"""
-    # Try SpecTypeId first (Revit 2022+)
+# =====================================================================
+# PARAMETER TYPE MAPPING
+#
+# The source (Excel "Property Type" column, or a future XML with one) says
+# what kind of value a parameter holds - Length, Boolean, Number, plain
+# Text - and this used to be discarded entirely: every parameter this tool
+# ever created came out as Text, even one explicitly typed as a length or
+# a yes/no in the mapping file. TYPE_KEY_ALIASES normalizes whatever label
+# the source uses to one of the keys below; an unrecognized or missing
+# label still maps to TEXT, so behaviour for a source with no type column
+# (the Model Checker XML import) is unchanged.
+# =====================================================================
+TYPE_KEY_ALIASES = {
+    "text": "TEXT", "string": "TEXT", "label": "TEXT", "identifier": "TEXT",
+    "single line text": "TEXT", "character": "TEXT", "varchar": "TEXT",
+    "multiline text": "MULTILINE_TEXT", "multi line text": "MULTILINE_TEXT",
+    "memo": "MULTILINE_TEXT", "note": "MULTILINE_TEXT", "notes": "MULTILINE_TEXT",
+    "url": "URL", "hyperlink": "URL", "link": "URL",
+    "boolean": "YESNO", "bool": "YESNO", "yesno": "YESNO", "yes/no": "YESNO",
+    "yes no": "YESNO", "flag": "YESNO", "checkbox": "YESNO",
+    "integer": "INTEGER", "int": "INTEGER", "whole number": "INTEGER", "count": "INTEGER",
+    "number": "NUMBER", "real": "NUMBER", "double": "NUMBER", "decimal": "NUMBER",
+    "float": "NUMBER",
+    "length": "LENGTH", "distance": "LENGTH",
+    "area": "AREA",
+    "volume": "VOLUME",
+    "angle": "ANGLE",
+    "currency": "CURRENCY", "cost": "CURRENCY", "money": "CURRENCY",
+    "mass": "MASS", "weight": "MASS",
+    "slope": "SLOPE",
+}
+
+# key -> (SpecTypeId accessor for Revit 2022+, ParameterType name for the
+# legacy 2021-and-below fallback). Both sides are resolved defensively -
+# see _spec_type_for_key / _parameter_type_for_key - so a key naming a spec
+# this Revit version doesn't have just falls through to Text, the same as
+# an unrecognized label from the source would.
+def _spec_type_for_key(key):
+    """Best-effort SpecTypeId for one of our canonical type keys (Revit
+    2022+ API). None if this Revit version doesn't have that spec."""
+    try:
+        return {
+            "TEXT": lambda: SpecTypeId.String.Text,
+            "MULTILINE_TEXT": lambda: SpecTypeId.String.MultilineText,
+            "URL": lambda: SpecTypeId.String.Url,
+            "YESNO": lambda: SpecTypeId.Boolean.YesNo,
+            "INTEGER": lambda: SpecTypeId.Int.Integer,
+            "NUMBER": lambda: SpecTypeId.Number,
+            "LENGTH": lambda: SpecTypeId.Length,
+            "AREA": lambda: SpecTypeId.Area,
+            "VOLUME": lambda: SpecTypeId.Volume,
+            "ANGLE": lambda: SpecTypeId.Angle,
+            "CURRENCY": lambda: SpecTypeId.Currency,
+            "MASS": lambda: getattr(SpecTypeId, "Mass", None),
+            "SLOPE": lambda: getattr(SpecTypeId, "Slope", None),
+        }[key]()
+    except:
+        return None
+
+
+def _parameter_type_for_key(key):
+    """Best-effort legacy ParameterType for one of our canonical type keys
+    (Revit 2021 and earlier - the enum was removed in 2026). None if this
+    Revit version doesn't have that member."""
+    attr = {
+        "TEXT": "Text", "MULTILINE_TEXT": "MultilineText", "URL": "URL",
+        "YESNO": "YesNo", "INTEGER": "Integer", "NUMBER": "Number",
+        "LENGTH": "Length", "AREA": "Area", "VOLUME": "Volume",
+        "ANGLE": "Angle", "CURRENCY": "Currency", "MASS": "Mass",
+        "SLOPE": "Slope",
+    }.get(key)
+    if not attr:
+        return None
+    try:
+        return getattr(ParameterType, attr, None)
+    except:
+        return None
+
+
+TYPE_KEY_LABELS = {
+    "TEXT": "Text", "MULTILINE_TEXT": "Multiline Text", "URL": "URL",
+    "YESNO": "Yes/No", "INTEGER": "Integer", "NUMBER": "Number",
+    "LENGTH": "Length", "AREA": "Area", "VOLUME": "Volume", "ANGLE": "Angle",
+    "CURRENCY": "Currency", "MASS": "Mass", "SLOPE": "Slope",
+}
+
+
+def normalize_type_key(raw_type):
+    """Free-text type label ('Length', 'Yes/No', 'Property Type' cell
+    contents, ...) -> one of the canonical keys above. Blank or anything
+    not recognized becomes TEXT, matching the tool's behaviour before type
+    mapping existed."""
+    if not raw_type:
+        return "TEXT"
+    cleaned = re.sub(r"[_\-]+", " ", str(raw_type).strip().lower())
+    cleaned = " ".join(cleaned.split())
+    return TYPE_KEY_ALIASES.get(cleaned, "TEXT")
+
+
+def _create_ext_def_options(param_name, type_key="TEXT"):
+    """Create ExternalDefinitionCreationOptions with the requested data
+    type - compatible with Revit 2024-2026+, with a legacy ParameterType
+    fallback for 2021 and below, and a final fallback to Text if neither
+    this Revit version nor our lookup tables have the requested spec (the
+    parameter still gets created, just not with the exact type asked
+    for - better than failing the whole import over one odd column
+    value)."""
+    spec = _spec_type_for_key(type_key)
+    if spec is not None:
+        try:
+            opt = ExternalDefinitionCreationOptions(param_name, spec)
+            opt.Visible = True
+            return opt
+        except:
+            pass
+
+    ptype = _parameter_type_for_key(type_key)
+    if ptype is not None:
+        try:
+            opt = ExternalDefinitionCreationOptions(param_name, ptype)
+            opt.Visible = True
+            return opt
+        except:
+            pass
+
+    # Last resort: Text, so a param is still created even when this Revit
+    # version doesn't expose the requested spec at all.
     try:
         opt = ExternalDefinitionCreationOptions(param_name, SpecTypeId.String.Text)
         opt.Visible = True
         return opt
     except:
         pass
-    
-    # Fallback to ParameterType (Revit 2021 and below - removed in 2026)
     try:
         opt = ExternalDefinitionCreationOptions(param_name, ParameterType.Text)
         opt.Visible = True
         return opt
     except:
         pass
-    
+
     return None
 
 def _bind_param_insert(document, defn, binding, pg_key="PG_IFC"):
@@ -248,6 +371,8 @@ class ParamRequirement:
         self.status = ""
         self.group_under = ""  # Display name: "IFC Parameters", "Dimensions", etc.
         self.group_pg = ""     # BuiltInParameterGroup key: "PG_IFC", "PG_GEOMETRY", etc.
+        self.param_type_raw = ""    # original text from the source ("Length", "Boolean", ...)
+        self.param_type_key = "TEXT"  # normalize_type_key(param_type_raw)
         self._auto_map_group()
     
     def _auto_map_group(self):
@@ -353,8 +478,13 @@ class RequirementParser:
     
     @staticmethod
     def from_excel(filepath, sheet_name=None, col_param=1, col_category=2,
-                   col_discipline=None, header_row=1):
-        """Parse a workbook with the user's column mapping."""
+                   col_discipline=None, col_type=None, header_row=1):
+        """Parse a workbook with the user's column mapping.
+
+        col_type is optional, like col_category/col_discipline - a source
+        with no type column (or one left unmapped) yields param_type_key
+        "TEXT" for every parameter, the tool's behaviour before type
+        mapping existed."""
         try:
             book = xlsx_reader.read_workbook(filepath)
         except xlsx_reader.XlsxReadError as e:
@@ -388,17 +518,26 @@ class RequirementParser:
             cat = _cell(cells, col_category)
             disc = _cell(cells, col_discipline)
             if param not in param_map:
-                param_map[param] = {"cats": set(), "discs": set()}
+                param_map[param] = {"cats": set(), "discs": set(), "type_raw": ""}
             if cat:
                 param_map[param]["cats"].add(cat)
             if disc:
                 param_map[param]["discs"].add(disc)
+            if not param_map[param]["type_raw"]:
+                # One parameter should carry one type across all its rows;
+                # if the source disagrees row to row, the first non-empty
+                # value wins rather than the last, so it's deterministic.
+                type_raw = _cell(cells, col_type)
+                if type_raw:
+                    param_map[param]["type_raw"] = type_raw
 
         reqs = []
         for name, data in sorted(param_map.items()):
             req = ParamRequirement(name)
             req.categories = sorted(data["cats"])
             req.disciplines = data["discs"]
+            req.param_type_raw = data["type_raw"]
+            req.param_type_key = normalize_type_key(data["type_raw"])
             reqs.append(req)
         return reqs
 
@@ -410,7 +549,7 @@ MAPPER_XAML = '''
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Excel Column Mapping - DQT"
-        Height="520" Width="650"
+        Height="552" Width="650"
         WindowStartupLocation="CenterScreen"
         Background="#FEF8E7"
         ResizeMode="NoResize">
@@ -453,6 +592,7 @@ MAPPER_XAML = '''
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="140"/>
@@ -476,8 +616,16 @@ MAPPER_XAML = '''
                 <TextBlock Grid.Row="2" Text="Discipline" FontSize="11" FontWeight="SemiBold" 
                            VerticalAlignment="Center" Foreground="#5D4E37" Margin="0,4,0,0"/>
                 <ComboBox x:Name="cmbColDiscipline" Grid.Row="2" Grid.Column="1" Padding="6,4" 
-                          FontSize="11" Margin="0,4,0,0"/>
+                          FontSize="11" Margin="0,4,4,0"/>
                 <TextBlock Grid.Row="2" Grid.Column="2" Text="Optional" FontSize="9" Foreground="#888" 
+                           VerticalAlignment="Center" HorizontalAlignment="Center"/>
+
+                <TextBlock Grid.Row="3" Text="Parameter Type" FontSize="11" FontWeight="SemiBold" 
+                           VerticalAlignment="Center" Foreground="#5D4E37" Margin="0,4,0,0"/>
+                <ComboBox x:Name="cmbColType" Grid.Row="3" Grid.Column="1" Padding="6,4" 
+                          FontSize="11" Margin="0,4,0,0" 
+                          ToolTip="Column with the parameter's data type (Text, Length, Boolean, Number, ...). Unmapped or unrecognized values default to Text."/>
+                <TextBlock Grid.Row="3" Grid.Column="2" Text="Optional" FontSize="9" Foreground="#888" 
                            VerticalAlignment="Center" HorizontalAlignment="Center"/>
             </Grid>
         </Border>
@@ -532,6 +680,7 @@ class ExcelColumnMapper:
         self.cmbColParam = self.window.FindName("cmbColParam")
         self.cmbColCategory = self.window.FindName("cmbColCategory")
         self.cmbColDiscipline = self.window.FindName("cmbColDiscipline")
+        self.cmbColType = self.window.FindName("cmbColType")
         self.txtPreview = self.window.FindName("txtPreview")
         self.txtMapInfo = self.window.FindName("txtMapInfo")
         self.btnMapOK = self.window.FindName("btnMapOK")
@@ -560,22 +709,28 @@ class ExcelColumnMapper:
         # Populate column dropdowns
         none_option = "(None)"
         
-        for cmb in [self.cmbColParam, self.cmbColCategory, self.cmbColDiscipline]:
+        for cmb in [self.cmbColParam, self.cmbColCategory, self.cmbColDiscipline,
+                   self.cmbColType]:
             cmb.Items.Clear()
         
         self.cmbColDiscipline.Items.Add(none_option)
         self.cmbColCategory.Items.Add(none_option)
+        self.cmbColType.Items.Add(none_option)
         
         for i, h in enumerate(headers):
             display = "Col {} - {}".format(i + 1, h)
             self.cmbColParam.Items.Add(display)
             self.cmbColCategory.Items.Add(display)
             self.cmbColDiscipline.Items.Add(display)
+            self.cmbColType.Items.Add(display)
         
-        # Auto-detect columns by header keywords
+        # Auto-detect columns by header keywords. Type is matched narrowly
+        # ("property type", "data type", "param type", or a bare "type")
+        # so it never grabs an unrelated column just for containing "type".
         param_idx = 0
         cat_idx = 0  # (None)
         disc_idx = 0  # (None)
+        type_idx = 0  # (None)
         
         for i, h in enumerate(headers):
             hl = h.lower()
@@ -585,6 +740,9 @@ class ExcelColumnMapper:
                 cat_idx = i + 1  # +1 because "(None)" is at index 0
             if any(k in hl for k in ["discipline", "disc", "group", "heading"]):
                 disc_idx = i + 1
+            if any(k in hl for k in ["property type", "data type", "param type",
+                                    "parameter type"]) or hl.strip() == "type":
+                type_idx = i + 1
         
         if self.cmbColParam.Items.Count > param_idx:
             self.cmbColParam.SelectedIndex = param_idx
@@ -592,6 +750,8 @@ class ExcelColumnMapper:
             self.cmbColCategory.SelectedIndex = cat_idx
         if self.cmbColDiscipline.Items.Count > disc_idx:
             self.cmbColDiscipline.SelectedIndex = disc_idx
+        if self.cmbColType.Items.Count > type_idx:
+            self.cmbColType.SelectedIndex = type_idx
         
         # Preview
         lines = []
@@ -628,6 +788,10 @@ class ExcelColumnMapper:
         if self.cmbColDiscipline.SelectedIndex > 0:
             col_discipline = self.cmbColDiscipline.SelectedIndex
         
+        col_type = None
+        if self.cmbColType.SelectedIndex > 0:
+            col_type = self.cmbColType.SelectedIndex
+        
         try:
             header_row = int(self.txtHeaderRow.Text.strip())
         except:
@@ -638,6 +802,7 @@ class ExcelColumnMapper:
             "col_param": col_param,
             "col_category": col_category,
             "col_discipline": col_discipline,
+            "col_type": col_type,
             "header_row": header_row
         }
         self.window.DialogResult = System.Nullable[System.Boolean](True)
@@ -882,8 +1047,13 @@ class ParameterAdder:
                     return defn
         return None
     
-    def _create_definition(self, sp_file, group_name, param_name):
-        """Create shared parameter definition with Revit version compatibility"""
+    def _create_definition(self, sp_file, group_name, param_name, type_key="TEXT"):
+        """Create shared parameter definition with Revit version compatibility.
+
+        type_key is one of the canonical keys normalize_type_key() returns
+        (TEXT, LENGTH, YESNO, ...) - see _create_ext_def_options, which
+        already falls back to Text on its own if this Revit version or our
+        lookup tables don't have the requested spec."""
         # Get or create group
         group = None
         for g in sp_file.Groups:
@@ -898,16 +1068,8 @@ class ParameterAdder:
             if d.Name == param_name:
                 return d
         
-        # Try Revit 2024+ API first (ForgeTypeId / SpecTypeId)
         try:
-            opt = _create_ext_def_options(param_name)
-            if opt:
-                return group.Definitions.Create(opt)
-        except:
-            pass
-        
-        try:
-            opt = _create_ext_def_options(param_name)
+            opt = _create_ext_def_options(param_name, type_key)
             if opt:
                 return group.Definitions.Create(opt)
         except:
@@ -961,7 +1123,9 @@ class ParameterAdder:
                 
                 if not defn:
                     # Create new definition
-                    defn = self._create_definition(sp_file, group_name, req.name)
+                    defn = self._create_definition(
+                        sp_file, group_name, req.name,
+                        getattr(req, "param_type_key", "TEXT"))
                 
                 if not defn:
                     req.status = "failed"
@@ -1450,6 +1614,7 @@ class ParamLoaderWindow:
                     col_param=mapping.get("col_param", 1),
                     col_category=mapping.get("col_category"),
                     col_discipline=mapping.get("col_discipline"),
+                    col_type=mapping.get("col_type"),
                     header_row=mapping.get("header_row", 1)
                 )
                 self._post_import(os.path.basename(dlg.FileName))
@@ -1756,6 +1921,8 @@ class ParamLoaderWindow:
             name_txt.FontSize = 11
             name_txt.FontWeight = System.Windows.FontWeights.SemiBold
             name_txt.VerticalAlignment = System.Windows.VerticalAlignment.Center
+            type_key = getattr(req, "param_type_key", "TEXT")
+            name_txt.ToolTip = "Type: {}".format(TYPE_KEY_LABELS.get(type_key, "Text"))
             Grid.SetColumn(name_txt, 2)
             row_grid.Children.Add(name_txt)
             

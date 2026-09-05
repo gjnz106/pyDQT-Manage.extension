@@ -46,7 +46,9 @@
     <h2>Workflow</h2>
     <ol class="steps">
       <li><b>Import</b> the requirement list - from an Autodesk Model
-        Checker XML export, or from an Excel mapping file.</li>
+        Checker XML export, or from an Excel mapping file. Excel also lets
+        you map a <b>Parameter Type</b> column, so each parameter is
+        created with the right data type instead of always Text.</li>
       <li><b>Filter / sort</b> the list (All / New / Existing, sortable by
         name, group, category or status) and <b>tick</b> the parameters you
         want. <span class="code">Select New</span> ticks everything not
@@ -64,6 +66,16 @@
       <b>Missing category?</b> A parameter with no category listed in the
       source file prompts you to pick which categories to bind it to,
       rather than silently being skipped.
+    </div>
+    <div class="box fixed">
+      <b>Parameter Type.</b> The Excel Column Mapping dialog has an optional
+      Parameter Type column (auto-detected from a header like "Property
+      Type" or "Data Type"). Recognized values - Text, Boolean/Yes-No,
+      Integer, Number, Length, Area, Volume, Angle, URL, Multiline Text,
+      Currency - create the parameter with that real Revit data type;
+      anything left unmapped or not recognized still creates a Text
+      parameter, same as before this was added. Hover a parameter's name in
+      the list to see the type it will be created with.
     </div>
     <div class="box tip">
       <b>Shift+Click</b> works in the parameter list to tick a whole range
