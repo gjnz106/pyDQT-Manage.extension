@@ -39,6 +39,15 @@ import codecs
 import traceback
 import datetime
 
+# Shared spreadsheet reader (extension lib/). Reads .xlsx and .csv without
+# any Office component; Excel COM Interop is only touched for legacy .xls.
+_script_dir = os.path.dirname(__file__)
+_extension_dir = os.path.dirname(os.path.dirname(os.path.dirname(_script_dir)))
+_lib_path = os.path.join(_extension_dir, 'lib')
+if _lib_path not in sys.path:
+    sys.path.insert(0, _lib_path)
+import xlsx_reader
+
 # =====================================================================
 # REVIT API COMPATIBILITY (2024/2025/2026+)
 # =====================================================================
@@ -344,69 +353,57 @@ class ParamCheckConfig:
         Column B: Revit Category
         Column C: Parameter Name
         Column D: Required (Yes/No) [optional]
+
+        Read directly from the file - this used to drive Excel over COM,
+        which failed outright ("Could not add reference to assembly
+        Microsoft.Office.Interop.Excel") on machines where the Click-to-Run
+        Microsoft 365 installer never registered the Interop assembly, even
+        though Excel itself worked fine.
         """
         config = ParamCheckConfig()
         config.source = "Excel"
         config.name = os.path.splitext(os.path.basename(filepath))[0]
-        
-        excel_app = None
-        wb = None
+
         try:
-            clr.AddReference('Microsoft.Office.Interop.Excel')
-            from Microsoft.Office.Interop import Excel as ExcelInterop
-
-            excel_app = ExcelInterop.ApplicationClass()
-            excel_app.Visible = False
-            excel_app.DisplayAlerts = False
-
-            wb = excel_app.Workbooks.Open(filepath)
-            ws = wb.Sheets[1]
-            
-            # Find data range
-            used = ws.UsedRange
-            rows = used.Rows.Count
-            
-            for r in range(2, rows + 1):  # Skip header
-                disc = str(ws.Cells[r, 1].Value2 or "").strip()
-                cat = str(ws.Cells[r, 2].Value2 or "").strip()
-                param = str(ws.Cells[r, 3].Value2 or "").strip()
-                required = str(ws.Cells[r, 4].Value2 or "Yes").strip().lower()
-                
-                if not disc or not cat or not param:
-                    continue
-                if required in ("no", "false", "0"):
-                    continue
-                
-                if disc not in config.disciplines:
-                    config.disciplines[disc] = {"enabled": True, "categories": {}}
-                if cat not in config.disciplines[disc]["categories"]:
-                    config.disciplines[disc]["categories"][cat] = {"enabled": True, "params": []}
-                
-                if param not in config.disciplines[disc]["categories"][cat]["params"]:
-                    config.disciplines[disc]["categories"][cat]["params"].append(param)
-            
-            wb.Close(False)
-            wb = None
-            excel_app.Quit()
-            System.Runtime.InteropServices.Marshal.ReleaseComObject(excel_app)
-            excel_app = None
-
+            book = xlsx_reader.read_workbook(filepath)
+        except xlsx_reader.XlsxReadError as e:
+            raise Exception(str(e))          # already phrased for the user
         except Exception as e:
-            raise Exception("Excel parse error: {}".format(str(e)))
-        finally:
-            # Without this an EXCEL.EXE stays running invisibly whenever the
-            # read throws part-way through.
-            try:
-                if wb is not None:
-                    wb.Close(False)
-            except:
-                pass
-            try:
-                if excel_app is not None:
-                    excel_app.Quit()
-                    System.Runtime.InteropServices.Marshal.ReleaseComObject(excel_app)
-            except:
-                pass
+            raise Exception("Excel parse error: {}".format(e))
+
+        if not book["sheets"]:
+            raise Exception("Excel parse error: no readable sheets in the file")
+        rows = book["rows"][book["sheets"][0]]
+
+        def _cell(cells, col, default=""):
+            val = cells.get(col)
+            if val is None:
+                return default
+            text = str(val).strip()
+            return text if text else default
+
+        for r in sorted(rows.keys()):
+            if r < 2:                        # row 1 is the header
+                continue
+            cells = rows[r]
+            disc = _cell(cells, 1)
+            cat = _cell(cells, 2)
+            param = _cell(cells, 3)
+            required = _cell(cells, 4, "Yes").lower()
+
+            if not disc or not cat or not param:
+                continue
+            if required in ("no", "false", "0"):
+                continue
+
+            if disc not in config.disciplines:
+                config.disciplines[disc] = {"enabled": True, "categories": {}}
+            if cat not in config.disciplines[disc]["categories"]:
+                config.disciplines[disc]["categories"][cat] = {
+                    "enabled": True, "params": []}
+
+            if param not in config.disciplines[disc]["categories"][cat]["params"]:
+                config.disciplines[disc]["categories"][cat]["params"].append(param)
 
         return config
     
@@ -1445,7 +1442,8 @@ class IFCSGCheckerWindow:
     def _on_import_excel(self, sender, args):
         from System.Windows.Forms import OpenFileDialog, DialogResult
         dlg = OpenFileDialog()
-        dlg.Filter = "Excel Files (*.xlsx;*.xls)|*.xlsx;*.xls|All Files (*.*)|*.*"
+        dlg.Filter = ("Spreadsheets (*.xlsx;*.xlsm;*.csv;*.xls)|*.xlsx;*.xlsm;*.csv;*.xls|"
+                      "All Files (*.*)|*.*")
         dlg.Title = "Import Excel Parameter Mapping"
         
         if dlg.ShowDialog() == DialogResult.OK:
