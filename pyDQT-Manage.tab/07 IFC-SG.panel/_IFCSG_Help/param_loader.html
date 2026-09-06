@@ -78,7 +78,9 @@
       Currency - create the parameter with that real Revit data type;
       anything left unmapped or not recognized still creates a Text
       parameter, same as before this was added. Hover a parameter's name in
-      the list to see the type it will be created with.
+      the list to see the type it will be created with. Matching ignores
+      case, underscores/hyphens, extra spaces, and spacing around a slash -
+      "Yes/No", "yes / no" and "YES-NO" all resolve the same way.
     </div>
     <div class="box fixed">
       <b>Stale types in the shared parameter file are corrected
