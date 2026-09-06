@@ -2094,12 +2094,31 @@ class IFCSGCheckerWindow:
         else:
             self.txtStatus.Text = "No failed elements to select"
     
-    def _zoom_to_elements(self, element_ids):
+    def _minimize_to_show_revit(self, *extra_windows):
+        """Get this window (and any child dialog) out of the way after a
+        Zoom/Isolate/Reset.
+
+        The window has no Owner and is centered at 1150x820 - on most
+        screens that squarely covers the middle of the Revit canvas, which
+        is exactly where a freshly-framed selection lands. Without this,
+        Zoom/Isolate run correctly but their only visible effect is hidden
+        behind the tool, which reads as "nothing happened"."""
+        for w in (self.window,) + extra_windows:
+            try:
+                w.WindowState = System.Windows.WindowState.Minimized
+            except:
+                pass
+
+    def _zoom_to_elements(self, element_ids, minimize=False, extra_windows=()):
         """Select and frame the given ids in the active view.
 
         Same pair of calls _on_zoom_ticked makes, taking a plain list of ids
         so the detail dialog can zoom to one element or to all of them
-        without going through the row tick boxes."""
+        without going through the row tick boxes. minimize is off by
+        default - the detail dialog's row-by-row browsing calls this once
+        per click, and minimizing the window on every click would fight
+        that workflow instead of helping it; the "Zoom To All" button opts
+        in explicitly since it is a single, deliberate action."""
         try:
             net_ids = System.Collections.Generic.List[ElementId]()
             for eid in element_ids:
@@ -2112,8 +2131,13 @@ class IFCSGCheckerWindow:
             uidoc.Selection.SetElementIds(net_ids)
             uidoc.ShowElements(net_ids)
             self.txtStatus.Text = "Zoomed to {} element(s).".format(net_ids.Count)
+            if minimize:
+                self._minimize_to_show_revit(*extra_windows)
         except Exception as e:
-            self.txtStatus.Text = "Zoom error: {}".format(str(e))
+            msg = "Zoom error: {}".format(str(e))
+            self.txtStatus.Text = msg
+            System.Windows.MessageBox.Show(msg, "Zoom To Elements",
+                MessageBoxButton.OK, MessageBoxImage.Error)
 
     def _select_elements_in_revit(self, element_ids):
         """Select elements in Revit (no zoom - see _zoom_to_elements)."""
@@ -2128,7 +2152,10 @@ class IFCSGCheckerWindow:
                 uidoc.Selection.SetElementIds(ids)
                 self.txtStatus.Text = "Selected {} elements in Revit".format(ids.Count)
         except Exception as e:
-            self.txtStatus.Text = "Select error: {}".format(str(e))
+            msg = "Select error: {}".format(str(e))
+            self.txtStatus.Text = msg
+            System.Windows.MessageBox.Show(msg, "Select Elements",
+                MessageBoxButton.OK, MessageBoxImage.Error)
     
     def _compute_category_stats(self, results):
         """Compute % completion per discipline > category"""
@@ -2757,7 +2784,7 @@ class IFCSGCheckerWindow:
         win.FindName("btnDetailSelectAll").Click += \
             lambda s_, a_: self._select_elements_in_revit(ids)
         win.FindName("btnDetailZoomAll").Click += \
-            lambda s_, a_: self._zoom_to_elements(ids)
+            lambda s_, a_: self._zoom_to_elements(ids, minimize=True, extra_windows=(win,))
         win.FindName("btnDetailClose").Click += lambda s_, a_: win.Close()
 
         render()
@@ -2880,8 +2907,12 @@ class IFCSGCheckerWindow:
             uidoc.Selection.SetElementIds(net_ids)
             uidoc.ShowElements(net_ids)
             self.txtStatus.Text = "Zoomed to {} element(s).".format(net_ids.Count)
+            self._minimize_to_show_revit()
         except Exception as e:
-            self.txtStatus.Text = "Zoom error: {}".format(str(e))
+            msg = "Zoom error: {}".format(str(e))
+            self.txtStatus.Text = msg
+            System.Windows.MessageBox.Show(msg, "Zoom To Ticked",
+                MessageBoxButton.OK, MessageBoxImage.Error)
 
     def _on_isolate_ticked(self, sender, args):
         """Temporarily isolate every element behind the ticked rows in the
@@ -2902,10 +2933,14 @@ class IFCSGCheckerWindow:
             uidoc.Selection.SetElementIds(net_ids)
             self.txtStatus.Text = "Isolated {} element(s) in the active view.".format(
                 net_ids.Count)
+            self._minimize_to_show_revit()
         except Exception as e:
             if t.HasStarted() and not t.HasEnded():
                 t.RollBack()
-            self.txtStatus.Text = "Isolate error: {}".format(str(e))
+            msg = "Isolate error: {}".format(str(e))
+            self.txtStatus.Text = msg
+            System.Windows.MessageBox.Show(msg, "Isolate Ticked",
+                MessageBoxButton.OK, MessageBoxImage.Error)
 
     def _on_reset_isolate(self, sender, args):
         """Exit temporary hide/isolate on the active view, if it is active."""
@@ -2922,10 +2957,14 @@ class IFCSGCheckerWindow:
             view.DisableTemporaryViewMode(TemporaryViewMode.TemporaryHideIsolate)
             t.Commit()
             self.txtStatus.Text = "Temporary isolate/hide reset."
+            self._minimize_to_show_revit()
         except Exception as e:
             if t is not None and t.HasStarted() and not t.HasEnded():
                 t.RollBack()
-            self.txtStatus.Text = "Reset error: {}".format(str(e))
+            msg = "Reset error: {}".format(str(e))
+            self.txtStatus.Text = msg
+            System.Windows.MessageBox.Show(msg, "Reset Isolate/Hide",
+                MessageBoxButton.OK, MessageBoxImage.Error)
 
     # =================================================================
     # EXPORT

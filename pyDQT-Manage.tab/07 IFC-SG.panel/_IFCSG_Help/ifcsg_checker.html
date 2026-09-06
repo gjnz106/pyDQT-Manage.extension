@@ -76,6 +76,11 @@
           <li><b>Isolate Ticked</b> - temporarily isolates them; <b>Reset
             Isolate/Hide</b> brings everything back</li>
         </ul>
+        Zoom, Isolate and Reset all minimise this window right after they
+        run, since the tool sits centred over the middle of the screen -
+        exactly where a freshly-framed view lands - so without that you
+        would not actually see the change. Restore it from the taskbar to
+        keep going.
       </li>
       <li><b>Export Excel</b> writes Summary / Detailed / Failed sheets -
         the record to attach to a submission.</li>
@@ -109,6 +114,11 @@
       the element ids the check stored - the first 1000 per parameter. If a
       parameter is missing on more than that, the list says so rather than
       pretending it is complete.
+    </div>
+    <div class="box fixed">
+      If Zoom/Isolate/Select ever fails - a view that cannot be isolated, a
+      locked document - a popup names the error instead of only updating
+      the small status line at the bottom, which was easy to miss.
     </div>
   </div>
 
