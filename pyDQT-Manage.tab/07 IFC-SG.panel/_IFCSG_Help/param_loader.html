@@ -77,6 +77,22 @@
       parameter, same as before this was added. Hover a parameter's name in
       the list to see the type it will be created with.
     </div>
+    <div class="box warn">
+      <b>A parameter that already exists keeps its old type.</b> Revit has
+      no way to change an existing shared parameter's data type in place -
+      only to delete it and recreate it from scratch, which loses every
+      value already entered under it. So if a parameter of this name was
+      already added in an earlier run (before Parameter Type mapping
+      existed, or simply with a different Property Type value in an older
+      version of the mapping file), Add Parameters reuses that existing
+      definition exactly as it is rather than silently pretending to
+      change its type. When this happens the parameter's name turns red in
+      the list, its tooltip says so, and the Activity Log gets a WARNING
+      line naming the existing type, the type Excel asked for, and where to
+      delete it (Manage tab &rsaquo; Shared Parameters, and unbind it from
+      Project Parameters) before re-running to recreate it with the right
+      type.
+    </div>
     <div class="box tip">
       <b>Shift+Click</b> works in the parameter list to tick a whole range
       at once, same as the other IFC-SG tools.
