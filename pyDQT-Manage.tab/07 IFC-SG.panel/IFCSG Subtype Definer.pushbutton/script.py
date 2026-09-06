@@ -39,6 +39,21 @@ uidoc = __revit__.ActiveUIDocument
 output = script.get_output()
 
 
+def _eid_int(eid):
+    """Integer value of an ElementId - compatible with Revit 2024-2026+.
+
+    Revit 2026 renamed ElementId.IntegerValue to .Value; calling the old
+    name there raises AttributeError. This was only used to build a debug
+    log line, but since that line ran inside the same transaction's try
+    block, the AttributeError rolled back every assignment already made
+    in that Apply pass - so on Revit 2026 nothing ever got applied at all,
+    even though the actual set-parameter calls above it had succeeded."""
+    try:
+        return eid.Value  # Revit 2026+
+    except:
+        return eid.IntegerValue  # Revit 2024/2025
+
+
 def _open_help_page(html_filename):
     """Open this tool's page from the shared _IFCSG_Help folder in the
     default browser. Returns True on success, False if the caller should
@@ -1910,14 +1925,24 @@ class IFCSGSubtypeWindow(object):
 
                     if entity_ok and pdt_ok and obj_ok:
                         type_ok = True
-                        debug_lines.append("[OK] {} '{}' -> {} on {} (id:{})".format(
-                            target_label, row.Family + ":" + row.TypeName,
-                            pdt_value, target_label, target.Id.IntegerValue))
+                        # Logging is not allowed to cost a successful
+                        # assignment - a formatting slip here used to
+                        # raise inside this same try block and roll back
+                        # every change already made in this Apply pass.
+                        try:
+                            debug_lines.append("[OK] {} '{}' -> {} on {} (id:{})".format(
+                                target_label, row.Family + ":" + row.TypeName,
+                                pdt_value, target_label, _eid_int(target.Id)))
+                        except:
+                            pass
                         break  # Success on this target, skip next
                     else:
-                        debug_lines.append("[FAIL] {} '{}' entity={} pdt={} obj={} on {} (id:{})".format(
-                            target_label, row.Family + ":" + row.TypeName,
-                            entity_ok, pdt_ok, obj_ok, target_label, target.Id.IntegerValue))
+                        try:
+                            debug_lines.append("[FAIL] {} '{}' entity={} pdt={} obj={} on {} (id:{})".format(
+                                target_label, row.Family + ":" + row.TypeName,
+                                entity_ok, pdt_ok, obj_ok, target_label, _eid_int(target.Id)))
+                        except:
+                            pass
 
                 if type_ok:
                     ok += 1

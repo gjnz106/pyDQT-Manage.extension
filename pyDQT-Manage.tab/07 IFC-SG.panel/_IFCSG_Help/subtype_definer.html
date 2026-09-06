@@ -92,6 +92,14 @@
       used to grow taller than the screen with no way to see the rest or
       even close it.
     </div>
+    <div class="box fixed">
+      <b>Apply to Selected</b> / <b>Apply to ALL</b> work correctly on every
+      supported Revit version, including 2026 - an earlier version could
+      report <span class="code">Failed: 'ElementId' object has no attribute
+      'IntegerValue'</span> and silently undo the whole batch on Revit 2026
+      because of an API rename in a debug-logging line, not because the
+      assignment itself failed.
+    </div>
   </div>
 
   <div class="pagenav">
