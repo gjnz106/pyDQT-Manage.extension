@@ -60,7 +60,8 @@
         (Ctrl+Click to select several rows first) or <b>Apply to ALL</b>.</li>
       <li><b>Auto-Assign</b> fills in everything still missing in one pass,
         with a preview first - it never overwrites a value that is already
-        set.</li>
+        set. The preview window resizes and scrolls, so a large mapping's
+        full list stays readable instead of running off the screen.</li>
     </ol>
   </div>
 
@@ -84,6 +85,12 @@
     <div class="box tip">
       Toposolid (Revit 2024+) and Topography (older Revit) are both handled
       automatically - you do not need to know which one your Revit version uses.
+    </div>
+    <div class="box fixed">
+      The Auto-Assign preview is its own resizable window with a scrollbar,
+      not a plain message box - on a mapping with 50+ components the list
+      used to grow taller than the screen with no way to see the rest or
+      even close it.
     </div>
   </div>
 
