@@ -854,6 +854,89 @@ class ExcelReporter:
 # =====================================================================
 # WPF UI
 # =====================================================================
+# =====================================================================
+# MISSING-ELEMENT DETAIL DIALOG
+# Opened from a failed/partial row: which elements actually lack the
+# parameter, rather than just how many.
+# =====================================================================
+DETAIL_XAML = '''
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Missing Elements - DQT"
+        Height="620" Width="880"
+        WindowStartupLocation="CenterScreen"
+        Background="#FEF8E7">
+    <Grid Margin="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <Border Grid.Row="0" Background="#F0CC88" CornerRadius="5" Padding="12,8" Margin="0,0,0,10">
+            <StackPanel>
+                <TextBlock x:Name="txtDetailTitle" FontSize="15" FontWeight="Bold" Foreground="#333"/>
+                <TextBlock x:Name="txtDetailSub" FontSize="10" Foreground="#5D4E37" Margin="0,2,0,0"/>
+            </StackPanel>
+        </Border>
+
+        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,8">
+            <TextBlock Text="Search:" FontSize="11" VerticalAlignment="Center"
+                       Margin="0,0,6,0" Foreground="#888"/>
+            <TextBox x:Name="txtDetailSearch" Width="220" Padding="4,3" FontSize="11"
+                     ToolTip="Filter by id, category, type or name"/>
+            <TextBlock x:Name="txtDetailCount" FontSize="10" Foreground="#888"
+                       VerticalAlignment="Center" Margin="10,0,0,0"/>
+        </StackPanel>
+
+        <Border Grid.Row="2" Background="#F5F0E0" Padding="6,3" CornerRadius="2" Margin="0,0,0,2">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="90"/>
+                    <ColumnDefinition Width="150"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Text="Element ID" FontSize="10" FontWeight="SemiBold" Foreground="#888"/>
+                <TextBlock Grid.Column="1" Text="Category" FontSize="10" FontWeight="SemiBold" Foreground="#888"/>
+                <TextBlock Grid.Column="2" Text="Type" FontSize="10" FontWeight="SemiBold" Foreground="#888"/>
+                <TextBlock Grid.Column="3" Text="Name" FontSize="10" FontWeight="SemiBold" Foreground="#888"/>
+            </Grid>
+        </Border>
+
+        <Border Grid.Row="3" Background="White" BorderBrush="#E0E0E0" BorderThickness="1" CornerRadius="3">
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <StackPanel x:Name="spDetail" Margin="2"/>
+            </ScrollViewer>
+        </Border>
+
+        <Border Grid.Row="4" Background="White" BorderBrush="#D4B87A" BorderThickness="1"
+                CornerRadius="4" Padding="8" Margin="0,10,0,0">
+            <Grid>
+                <TextBlock x:Name="txtDetailHint" FontSize="9" Foreground="#888"
+                           VerticalAlignment="Center" HorizontalAlignment="Left"
+                           Text="Click a row to select and zoom to that element in Revit."/>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                    <Button x:Name="btnDetailSelectAll" Content="Select All in Revit"
+                            Padding="10,5" Margin="2" Background="#F0CC88" FontSize="11"/>
+                    <Button x:Name="btnDetailZoomAll" Content="Zoom To All"
+                            Padding="10,5" Margin="2" Background="White" FontSize="11"/>
+                    <Button x:Name="btnDetailClose" Content="Close"
+                            Padding="10,5" Margin="2" Background="White" FontSize="11"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <TextBlock Grid.Row="5" Text="Dang Quoc Truong - DQT (c) 2026" FontSize="9"
+                   Foreground="#999" HorizontalAlignment="Center" Margin="0,6,0,0"/>
+    </Grid>
+</Window>
+'''
+
+
 XAML_STR = '''
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -1088,6 +1171,12 @@ XAML_STR = '''
                         <Button x:Name="btnSelectAllFailed" Content="&#x25BA; Select All Failed" 
                                 Style="{StaticResource BtnDanger}" Padding="8,3" FontSize="10" 
                                 Margin="0,0,8,0" IsEnabled="False"/>
+                        <Button x:Name="btnExpandResults" Content="Expand All"
+                                Style="{StaticResource BtnSecondary}" Padding="8,3" FontSize="10"
+                                Margin="0,0,3,0" ToolTip="Open every discipline and category"/>
+                        <Button x:Name="btnCollapseResults" Content="Collapse All"
+                                Style="{StaticResource BtnSecondary}" Padding="8,3" FontSize="10"
+                                Margin="0,0,8,0" ToolTip="Fold every category down to one line"/>
                         <TextBlock Text="Search:" FontSize="11" VerticalAlignment="Center" Margin="0,0,6,0" Foreground="#888"/>
                         <TextBox x:Name="txtSearch" Width="150" Padding="4,3" FontSize="11"/>
                     </StackPanel>
@@ -1185,6 +1274,14 @@ class IFCSGCheckerWindow:
         self.cat_checks = []
         # Guards the discipline -> categories cascade during bulk ticking.
         self._suspend_cascade = False
+        # Which result sections are folded away. Kept outside the render so
+        # a collapsed category stays collapsed when the filter re-renders.
+        self._collapsed_discs = set()
+        self._collapsed_cats = set()
+        # Rebuilt by every _render_results pass.
+        self._disc_sections = {}
+        self._cat_sections = {}
+        self._section_rows = []
         # Anchors for shift + click range ticking.
         self._last_cat_index = None
         self._last_row_index = None
@@ -1289,6 +1386,7 @@ class IFCSGCheckerWindow:
             "txtResultHeader", "spResults",
             "btnFilterAll", "btnFilterFail", "btnFilterWarn", "btnFilterPass",
             "btnSelectAllFailed", "txtSearch",
+            "btnExpandResults", "btnCollapseResults",
             "btnTickAll", "btnTickNone", "btnTickInvert", "btnTickFailed",
             "txtTickCount", "btnSelectTicked", "btnZoomTicked", "btnIsolateTicked",
             "btnResetIsolate",
@@ -1324,6 +1422,8 @@ class IFCSGCheckerWindow:
         self.btnFilterPass.Click += lambda s, e: self._apply_filter("pass")
         self.txtSearch.TextChanged += lambda s, e: self._apply_filter(self._current_filter)
         self.btnSelectAllFailed.Click += self._on_select_all_failed
+        self.btnExpandResults.Click += self._on_expand_all_results
+        self.btnCollapseResults.Click += self._on_collapse_all_results
         self.btnRunCheck.Click += self._on_run_check
         self.btnExportExcel.Click += self._on_export_excel
         self.btnClose.Click += lambda s, e: self.window.Close()
@@ -1994,8 +2094,29 @@ class IFCSGCheckerWindow:
         else:
             self.txtStatus.Text = "No failed elements to select"
     
+    def _zoom_to_elements(self, element_ids):
+        """Select and frame the given ids in the active view.
+
+        Same pair of calls _on_zoom_ticked makes, taking a plain list of ids
+        so the detail dialog can zoom to one element or to all of them
+        without going through the row tick boxes."""
+        try:
+            net_ids = System.Collections.Generic.List[ElementId]()
+            for eid in element_ids:
+                try:
+                    net_ids.Add(ElementId(int(eid)))
+                except:
+                    pass
+            if net_ids.Count == 0:
+                return
+            uidoc.Selection.SetElementIds(net_ids)
+            uidoc.ShowElements(net_ids)
+            self.txtStatus.Text = "Zoomed to {} element(s).".format(net_ids.Count)
+        except Exception as e:
+            self.txtStatus.Text = "Zoom error: {}".format(str(e))
+
     def _select_elements_in_revit(self, element_ids):
-        """Select elements in Revit (no zoom - see _on_zoom_ticked for that)."""
+        """Select elements in Revit (no zoom - see _zoom_to_elements)."""
         try:
             ids = System.Collections.Generic.List[ElementId]()
             for eid in element_ids:
@@ -2039,6 +2160,12 @@ class IFCSGCheckerWindow:
         self.spResults.Children.Clear()
         self.row_checks = []
         self._last_row_index = None
+        # Section registries are rebuilt every render; which sections are
+        # collapsed is not, so folding a category away survives switching
+        # the All/Failed/Partial/Passed filter.
+        self._disc_sections = {}
+        self._cat_sections = {}
+        self._section_rows = []
         converter = BrushConverter()
         
         status_bg = {
@@ -2076,7 +2203,6 @@ class IFCSGCheckerWindow:
                 disc_border.CornerRadius = System.Windows.CornerRadius(3)
                 
                 disc_txt = TextBlock()
-                disc_txt.Text = r.discipline
                 disc_txt.FontWeight = System.Windows.FontWeights.Bold
                 disc_txt.FontSize = 13
                 try:
@@ -2084,6 +2210,17 @@ class IFCSGCheckerWindow:
                 except:
                     pass
                 disc_border.Child = disc_txt
+
+                # Whole header band is the hit target. A Button inside a
+                # header marks the click handled before it bubbles this far,
+                # so the per-category Select button still works.
+                disc_border.Cursor = System.Windows.Input.Cursors.Hand
+                disc_border.Tag = r.discipline
+                disc_border.ToolTip = "Click to collapse or expand this discipline"
+                disc_border.MouseLeftButtonDown += self._on_disc_header_click
+                self._disc_sections[r.discipline] = {
+                    "header": disc_border, "label": disc_txt,
+                    "name": r.discipline}
                 self.spResults.Children.Add(disc_border)
             
             # Category header with progress bar
@@ -2123,7 +2260,6 @@ class IFCSGCheckerWindow:
                 # Category name + counts
                 cat_info = StackPanel()
                 cat_name_txt = TextBlock()
-                cat_name_txt.Text = u"\u25B8 {}".format(r.category)
                 cat_name_txt.FontWeight = System.Windows.FontWeights.SemiBold
                 cat_name_txt.FontSize = 11
                 try:
@@ -2269,6 +2405,14 @@ class IFCSGCheckerWindow:
                 cat_grid.Children.Add(pct_sp)
                 
                 cat_border.Child = cat_grid
+                cat_border.Cursor = System.Windows.Input.Cursors.Hand
+                cat_key = "{}|{}".format(r.discipline, r.category)
+                cat_border.Tag = cat_key
+                cat_border.ToolTip = "Click to collapse or expand this category"
+                cat_border.MouseLeftButtonDown += self._on_cat_header_click
+                self._cat_sections[cat_key] = {
+                    "header": cat_border, "label": cat_name_txt,
+                    "name": r.category, "disc": r.discipline}
                 self.spResults.Children.Add(cat_border)
             
             # Parameter row
@@ -2295,7 +2439,7 @@ class IFCSGCheckerWindow:
             c3 = ColumnDefinition()
             c3.Width = System.Windows.GridLength(120)
             c4 = ColumnDefinition()
-            c4.Width = System.Windows.GridLength(55)
+            c4.Width = System.Windows.GridLength(112)
             row_grid.ColumnDefinitions.Add(c0)
             row_grid.ColumnDefinitions.Add(c1)
             row_grid.ColumnDefinitions.Add(c2)
@@ -2360,13 +2504,35 @@ class IFCSGCheckerWindow:
             Grid.SetColumn(count_txt, 3)
             row_grid.Children.Add(count_txt)
             
-            # Select button for failed/warning params
+            # Detail + Select buttons for failed/warning params
             if r.status in ("fail", "warning") and r.element_ids:
+                act_sp = StackPanel()
+                act_sp.Orientation = System.Windows.Controls.Orientation.Horizontal
+                act_sp.HorizontalAlignment = System.Windows.HorizontalAlignment.Right
+                act_sp.VerticalAlignment = System.Windows.VerticalAlignment.Center
+
+                det_btn = Button()
+                det_btn.Content = u"\u2261 Detail"
+                det_btn.FontSize = 9
+                det_btn.Padding = System.Windows.Thickness(3, 1, 3, 1)
+                det_btn.Margin = System.Windows.Thickness(0, 0, 3, 0)
+                det_btn.Cursor = System.Windows.Input.Cursors.Hand
+                det_btn.ToolTip = "List the elements that are missing this parameter"
+                try:
+                    det_btn.Background = converter.ConvertFromString("#E3F2FD")
+                    det_btn.Foreground = converter.ConvertFromString("#1565C0")
+                    det_btn.BorderBrush = converter.ConvertFromString("#90CAF9")
+                except:
+                    pass
+                det_btn.BorderThickness = System.Windows.Thickness(1)
+                det_btn.Tag = r
+                det_btn.Click += self._on_detail_btn_click
+                act_sp.Children.Add(det_btn)
+
                 sel_btn = Button()
                 sel_btn.Content = u"\u25BA Select"
                 sel_btn.FontSize = 9
                 sel_btn.Padding = System.Windows.Thickness(3, 1, 3, 1)
-                sel_btn.VerticalAlignment = System.Windows.VerticalAlignment.Center
                 sel_btn.Cursor = System.Windows.Input.Cursors.Hand
                 try:
                     sel_btn.Background = converter.ConvertFromString("#FFF3E0")
@@ -2377,14 +2543,236 @@ class IFCSGCheckerWindow:
                 sel_btn.BorderThickness = System.Windows.Thickness(1)
                 sel_btn.Tag = list(r.element_ids)[:MAX_STORED_IDS]
                 sel_btn.Click += self._on_select_btn_click
-                Grid.SetColumn(sel_btn, 4)
-                row_grid.Children.Add(sel_btn)
+                act_sp.Children.Add(sel_btn)
+
+                Grid.SetColumn(act_sp, 4)
+                row_grid.Children.Add(act_sp)
             
             row_border.Child = row_grid
+            self._section_rows.append(
+                (row_border, r.discipline,
+                 "{}|{}".format(r.discipline, r.category)))
             self.spResults.Children.Add(row_border)
+
+        # Apply whatever was collapsed before this render, and set the
+        # chevrons to match.
+        self._apply_section_visibility()
 
         # Rebuilding the list drops every tick box, so reset the counter.
         self._update_tick_count()
+
+    # =================================================================
+    # COLLAPSIBLE RESULT SECTIONS
+    # =================================================================
+    def _on_disc_header_click(self, sender, args):
+        """Fold a whole discipline away, categories and rows together."""
+        name = sender.Tag
+        if name is None:
+            return
+        if name in self._collapsed_discs:
+            self._collapsed_discs.discard(name)
+        else:
+            self._collapsed_discs.add(name)
+        self._apply_section_visibility()
+
+    def _on_cat_header_click(self, sender, args):
+        """Fold one category's rows away, leaving its header and totals."""
+        key = sender.Tag
+        if key is None:
+            return
+        if key in self._collapsed_cats:
+            self._collapsed_cats.discard(key)
+        else:
+            self._collapsed_cats.add(key)
+        self._apply_section_visibility()
+
+    def _apply_section_visibility(self):
+        """Push the collapsed sets onto the rendered rows and chevrons.
+
+        Everything in the results panel is a flat run of sibling Borders -
+        headers and rows alike - so folding is a visibility pass over the
+        registries built during the render rather than a tree operation. A
+        row is visible only when both its category and its discipline are
+        open; a category header hides with its discipline."""
+        collapsed_glyph = u"\u25B8"     # right-pointing triangle
+        expanded_glyph = u"\u25BE"      # down-pointing triangle
+        visible = System.Windows.Visibility.Visible
+        hidden = System.Windows.Visibility.Collapsed
+
+        for name, section in self._disc_sections.items():
+            is_collapsed = name in self._collapsed_discs
+            try:
+                section["label"].Text = u"{} {}".format(
+                    collapsed_glyph if is_collapsed else expanded_glyph, name)
+            except:
+                pass
+
+        for key, section in self._cat_sections.items():
+            disc_collapsed = section["disc"] in self._collapsed_discs
+            is_collapsed = key in self._collapsed_cats
+            try:
+                section["header"].Visibility = hidden if disc_collapsed else visible
+                section["label"].Text = u"{} {}".format(
+                    collapsed_glyph if is_collapsed else expanded_glyph,
+                    section["name"])
+            except:
+                pass
+
+        for row_border, disc, cat_key in self._section_rows:
+            try:
+                row_border.Visibility = hidden if (
+                    disc in self._collapsed_discs
+                    or cat_key in self._collapsed_cats) else visible
+            except:
+                pass
+
+    def _on_expand_all_results(self, sender, args):
+        self._collapsed_discs = set()
+        self._collapsed_cats = set()
+        self._apply_section_visibility()
+
+    def _on_collapse_all_results(self, sender, args):
+        """Collapse to one line per category, disciplines left open."""
+        self._collapsed_discs = set()
+        self._collapsed_cats = set(self._cat_sections.keys())
+        self._apply_section_visibility()
+
+    # =================================================================
+    # MISSING-ELEMENT DETAIL
+    # =================================================================
+    def _describe_element(self, eid):
+        """(id, category, type name, name) for one element id.
+
+        Every lookup is guarded on its own: an element that was deleted
+        since the check ran, or one whose .Name throws (some system
+        families do), still gets a row showing what could be read rather
+        than taking the whole dialog down."""
+        info = {"id": str(eid), "cat": "", "type": "", "name": ""}
+        try:
+            el = doc.GetElement(ElementId(int(eid)))
+        except:
+            el = None
+        if el is None:
+            info["cat"] = "(not found)"
+            return info
+        try:
+            if el.Category is not None:
+                info["cat"] = el.Category.Name
+        except:
+            pass
+        try:
+            type_id = el.GetTypeId()
+            if type_id is not None and type_id != ElementId.InvalidElementId:
+                el_type = doc.GetElement(type_id)
+                if el_type is not None:
+                    info["type"] = el_type.Name
+        except:
+            pass
+        try:
+            info["name"] = el.Name
+        except:
+            pass
+        return info
+
+    def _show_missing_detail(self, result):
+        """List the elements that are actually missing this parameter."""
+        try:
+            win = XamlReader.Parse(DETAIL_XAML)
+        except Exception as ex:
+            self.txtStatus.Text = "Could not open detail view: {}".format(ex)
+            return
+
+        ids = list(result.element_ids)[:MAX_STORED_IDS]
+        rows = [self._describe_element(eid) for eid in ids]
+
+        sp = win.FindName("spDetail")
+        txt_search = win.FindName("txtDetailSearch")
+        txt_count = win.FindName("txtDetailCount")
+        converter = BrushConverter()
+
+        win.FindName("txtDetailTitle").Text = u"{} - missing on {} of {} elements".format(
+            result.param_name, result.missing_count, result.total_elements)
+        win.FindName("txtDetailSub").Text = u"{} \u203A {}".format(
+            result.discipline, result.category)
+
+        def render(_sender=None, _args=None):
+            term = (txt_search.Text or "").strip().lower()
+            sp.Children.Clear()
+            shown = 0
+            for info in rows:
+                if term and term not in u"{} {} {} {}".format(
+                        info["id"], info["cat"], info["type"],
+                        info["name"]).lower():
+                    continue
+                shown += 1
+                row = System.Windows.Controls.Border()
+                row.Padding = System.Windows.Thickness(6, 3, 6, 3)
+                row.Margin = System.Windows.Thickness(0, 0, 0, 1)
+                row.Cursor = System.Windows.Input.Cursors.Hand
+                row.Tag = info["id"]
+                row.ToolTip = "Click to select and zoom to this element"
+                try:
+                    row.Background = converter.ConvertFromString(
+                        "#FFFFFF" if shown % 2 else "#FAF7EF")
+                except:
+                    pass
+
+                grid = Grid()
+                for width in (90, 150, -1, -1):
+                    col = ColumnDefinition()
+                    if width > 0:
+                        col.Width = System.Windows.GridLength(width)
+                    else:
+                        col.Width = System.Windows.GridLength(
+                            1, System.Windows.GridUnitType.Star)
+                    grid.ColumnDefinitions.Add(col)
+
+                for index, key in enumerate(("id", "cat", "type", "name")):
+                    cell = TextBlock()
+                    cell.Text = info[key]
+                    cell.FontSize = 10
+                    cell.VerticalAlignment = System.Windows.VerticalAlignment.Center
+                    cell.TextTrimming = System.Windows.TextTrimming.CharacterEllipsis
+                    if index == 0:
+                        cell.FontFamily = System.Windows.Media.FontFamily("Consolas")
+                    Grid.SetColumn(cell, index)
+                    grid.Children.Add(cell)
+
+                row.Child = grid
+                row.MouseLeftButtonDown += on_row_click
+                sp.Children.Add(row)
+
+            if shown == len(rows):
+                txt_count.Text = "{} element(s)".format(shown)
+            else:
+                txt_count.Text = "{} of {} element(s)".format(shown, len(rows))
+            if len(ids) < result.missing_count:
+                txt_count.Text += "  (first {} kept by the check)".format(len(ids))
+
+        def on_row_click(sender, args):
+            self._select_elements_in_revit([sender.Tag])
+            self._zoom_to_elements([sender.Tag])
+
+        txt_search.TextChanged += render
+        win.FindName("btnDetailSelectAll").Click += \
+            lambda s_, a_: self._select_elements_in_revit(ids)
+        win.FindName("btnDetailZoomAll").Click += \
+            lambda s_, a_: self._zoom_to_elements(ids)
+        win.FindName("btnDetailClose").Click += lambda s_, a_: win.Close()
+
+        render()
+        # Owned by the checker window so it stays in front of it rather
+        # than getting lost behind Revit.
+        try:
+            win.Owner = self.window
+        except:
+            pass
+        win.ShowDialog()
+
+    def _on_detail_btn_click(self, sender, args):
+        result = sender.Tag
+        if result is not None:
+            self._show_missing_detail(result)
 
     def _on_select_btn_click(self, sender, args):
         """Handle select button click - select elements in Revit"""
@@ -2402,15 +2790,29 @@ class IFCSGCheckerWindow:
         if not self._suspend_cascade:
             self._update_tick_count()
 
+    def _row_is_visible(self, checkbox):
+        """True unless the row this checkbox sits on is folded away.
+
+        checkbox.Tag is the row Border, which _apply_section_visibility
+        collapses when its category or discipline is closed."""
+        try:
+            return checkbox.Tag.Visibility != System.Windows.Visibility.Collapsed
+        except:
+            return True
+
     def _set_rows_ticked(self, mode):
         """Bulk tick the visible result rows: all / none / invert / failed.
 
         Only rows that actually carry element ids can be ticked - ticking a
-        passing row would contribute nothing to the Revit selection."""
+        passing row would contribute nothing to the Revit selection, and a
+        row folded away inside a collapsed section is skipped too, so
+        "Select All" never ticks something the user cannot see."""
         self._suspend_cascade = True
         try:
             for chk, result in self.row_checks:
                 if not chk.IsEnabled:
+                    continue
+                if mode != "none" and not self._row_is_visible(chk):
                     continue
                 if mode == "all":
                     state = True

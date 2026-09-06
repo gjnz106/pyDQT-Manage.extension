@@ -54,6 +54,20 @@
         whole row.</li>
       <li><b>Run Check</b>, then filter the results (All / Failed / Partial
         / Passed) or search by name.</li>
+      <li><b>Fold the results down to what you're working on</b> - click a
+        discipline band (ARC, STR&hellip;) or a category band (Doors,
+        Curtain Systems&hellip;) to collapse or expand it. The chevron on
+        the band shows which way it is:
+        <span class="code">&#9662;</span> open,
+        <span class="code">&#9656;</span> folded.
+        <b>Collapse All</b> folds every category down to its one-line
+        header and progress bar; <b>Expand All</b> opens everything back
+        up.</li>
+      <li><b>Detail</b> on a failed or partial row opens the list of the
+        elements that are actually missing that parameter - Element ID,
+        Category, Type and Name. Search the list, click a row to select
+        and zoom to that one element, or use <b>Select All</b> /
+        <b>Zoom All</b> for the whole list.</li>
       <li>Tick result rows (Select All / Un-select / Invert / Tick Failed,
         or Shift+Click for a range), then:
         <ul>
@@ -82,6 +96,19 @@
     <div class="box fixed">
       Toposolid (Revit 2024+) and Topography (older Revit) are both
       recognised automatically.
+    </div>
+    <div class="box tip">
+      What you fold stays folded - switching the All / Failed / Partial /
+      Passed filter or re-running the check redraws the list but keeps the
+      same sections collapsed. <b>Select All</b> only ticks rows you can
+      actually see, so a folded-away category is never swept into the
+      selection by accident.
+    </div>
+    <div class="box tip">
+      The per-parameter Detail list, like the Select buttons, works from
+      the element ids the check stored - the first 1000 per parameter. If a
+      parameter is missing on more than that, the list says so rather than
+      pretending it is complete.
     </div>
   </div>
 
