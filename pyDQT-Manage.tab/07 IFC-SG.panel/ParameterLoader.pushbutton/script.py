@@ -192,6 +192,103 @@ def normalize_type_key(raw_type):
     return TYPE_KEY_ALIASES.get(cleaned, "TEXT")
 
 
+# Shared parameter FILE data-type tokens (the DATATYPE column of the
+# tab-delimited .txt), as opposed to the in-memory SpecTypeId/ParameterType
+# used when creating a definition. Only the tokens we are certain of are
+# listed: a key that is missing here is simply never purged below, so an
+# exotic type can never cost someone a definition on a guess.
+SP_FILE_TYPE_TOKENS = {
+    "TEXT": "TEXT",
+    "MULTILINE_TEXT": "MULTILINETEXT",
+    "URL": "URL",
+    "YESNO": "YESNO",
+    "INTEGER": "INTEGER",
+    "NUMBER": "NUMBER",
+    "LENGTH": "LENGTH",
+    "AREA": "AREA",
+    "VOLUME": "VOLUME",
+    "ANGLE": "ANGLE",
+}
+
+
+_KNOWN_SP_FILE_TOKENS = frozenset(SP_FILE_TYPE_TOKENS.values())
+
+
+def _read_sp_file(path):
+    """(text, encoding) of a shared parameter file.
+
+    Revit writes these as UTF-16 with a BOM; a file this tool created from
+    scratch is plain ASCII. Both have to round-trip byte-for-byte, so the
+    encoding is detected and handed back for the write."""
+    with open(path, "rb") as handle:
+        raw = handle.read()
+    if raw[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        return raw.decode("utf-16"), "utf-16"
+    for encoding in ("utf-8-sig", "utf-8", "latin-1"):
+        try:
+            return raw.decode(encoding), encoding
+        except (UnicodeDecodeError, UnicodeError):
+            continue
+    raise Exception("could not decode the shared parameter file as text")
+
+
+def _purge_stale_sp_definitions(path, requirements):
+    """Drop shared-parameter-file entries whose type contradicts the source.
+
+    Revit's API can create a definition in a shared parameter file but
+    never delete one, and it cannot retype an existing one at all - so a
+    name already sitting in this file as TEXT would be reused as TEXT
+    forever, no matter what the Excel Property Type column says. That is
+    exactly what made a parameter shown as Yes/No in the dialog land in
+    the model as Text.
+
+    This file belongs to the tool, so the stale line is removed from it
+    directly and the definition is then recreated with the right type by
+    the normal path. Only entries for parameters in *this* run, whose file
+    token is known and actually differs, are touched; a timestamped backup
+    is written before the first change. Returns [(name, old, new), ...]."""
+    wanted = {}
+    for req in requirements:
+        if not getattr(req, "param_type_raw", ""):
+            continue        # source never stated a type - nothing to contradict
+        token = SP_FILE_TYPE_TOKENS.get(getattr(req, "param_type_key", "TEXT"))
+        if token:
+            wanted[req.name] = token
+    if not wanted:
+        return []
+
+    text, encoding = _read_sp_file(path)
+    lines = text.split("\n")
+    kept = []
+    purged = []
+    for line in lines:
+        if line.startswith("PARAM\t"):
+            parts = line.rstrip("\r").split("\t")
+            if len(parts) > 3:
+                name, token = parts[2], parts[3]
+                target = wanted.get(name)
+                # Only act when BOTH sides are understood: an unfamiliar
+                # token (some exotic unit type) is left alone rather than
+                # purged on the assumption that it disagrees.
+                if (target and token != target
+                        and token in _KNOWN_SP_FILE_TOKENS):
+                    purged.append((name, token, target))
+                    continue        # drop this line
+        kept.append(line)
+
+    if not purged:
+        return []
+
+    backup = "{}.backup-{}.txt".format(
+        os.path.splitext(path)[0],
+        datetime.datetime.now().strftime("%Y%m%d-%H%M%S"))
+    with open(backup, "wb") as handle:
+        handle.write(text.encode(encoding))
+    with open(path, "wb") as handle:
+        handle.write("\n".join(kept).encode(encoding))
+    return purged
+
+
 def _type_key_for_definition(defn):
     """Best-effort canonical type key for an EXISTING Definition - the
     reverse of _spec_type_for_key/_parameter_type_for_key.
@@ -1081,10 +1178,16 @@ class ParameterAdder:
                 pass
         return bound_cats
     
-    def _setup_temp_shared_param_file(self):
+    def _setup_temp_shared_param_file(self, requirements=None):
         """
         Create a dedicated temp shared parameter file for adding new params.
         This avoids issues with read-only or network shared param files.
+
+        Any entry in it whose type contradicts what this run is asking for
+        is removed first (see _purge_stale_sp_definitions) - the file has to
+        be corrected on disk *before* Revit opens it, because once a name is
+        in there the API will only ever hand back that existing definition,
+        with its original type.
         """
         # Save original
         self._original_sp_path = self.app.SharedParametersFilename
@@ -1097,7 +1200,33 @@ class ParameterAdder:
                 f.write("# IFC+SG Shared Parameters - Auto-generated by DQT\n")
                 f.write("*META\tVERSION\tMINVERSION\n")
                 f.write("META\t2\t1\n")
+        elif requirements:
+            try:
+                for name, old_token, new_token in _purge_stale_sp_definitions(
+                        self._temp_sp_path, requirements):
+                    self.log.append(
+                        "RETYPE: {} was {} in the shared parameter file - "
+                        "removed so it can be recreated as {}".format(
+                            name, old_token, new_token))
+            except Exception as ex:
+                # Never block the run over this: without the purge the old
+                # type is simply reused, which is the pre-existing behaviour
+                # and is still reported by the mismatch warning below.
+                self.log.append(
+                    "WARNING: could not clean stale types out of the shared "
+                    "parameter file ({}) - parameters already in it keep "
+                    "their existing type.".format(ex))
         
+        try:
+            if self.app.SharedParametersFilename == self._temp_sp_path:
+                # Assigning the path Revit already holds can hand back a
+                # cached DefinitionFile - which would still contain the
+                # entries just purged from disk. Only happens when a previous
+                # run never reached _restore_shared_param_file (a crash), but
+                # that is exactly when the stale copy would be most confusing.
+                self.app.SharedParametersFilename = ""
+        except:
+            pass
         self.app.SharedParametersFilename = self._temp_sp_path
         sp_file = self.app.OpenSharedParameterFile()
         return sp_file
@@ -1165,16 +1294,17 @@ class ParameterAdder:
     def add_parameters(self, requirements, progress_callback=None):
         """Add selected parameters to model"""
         self.log = []
+        selected = [r for r in requirements if r.selected]
         
-        # Setup dedicated temp shared param file
-        sp_file = self._setup_temp_shared_param_file()
+        # Setup dedicated temp shared param file. The selection is handed in
+        # so entries whose type contradicts it can be cleared out before
+        # Revit reads the file.
+        sp_file = self._setup_temp_shared_param_file(selected)
         if not sp_file:
             self.log.append("ERROR: Could not create shared parameter file at {}".format(
                 self._temp_sp_path))
             self._restore_shared_param_file()
             return self.log
-        
-        selected = [r for r in requirements if r.selected]
         total = len(selected)
         added = 0
         skipped = 0

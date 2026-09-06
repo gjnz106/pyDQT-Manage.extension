@@ -80,21 +80,30 @@
       parameter, same as before this was added. Hover a parameter's name in
       the list to see the type it will be created with.
     </div>
+    <div class="box fixed">
+      <b>Stale types in the shared parameter file are corrected
+      automatically.</b> Every parameter this tool creates is registered in
+      its own shared parameter file, and Revit's API can add an entry there
+      but never delete or retype one - so a name added in an earlier run
+      (before Parameter Type mapping existed) was stuck as Text forever,
+      and kept being handed back as Text no matter what the Property Type
+      column said. Add Parameters now removes such a contradicting entry
+      from that file first, so the parameter is recreated with the type the
+      source asks for. A timestamped backup of the file is written before
+      the first change, and every correction is listed in the Activity Log
+      as a <span class="code">RETYPE</span> line.
+    </div>
     <div class="box warn">
-      <b>A parameter that already exists keeps its old type.</b> Revit has
-      no way to change an existing shared parameter's data type in place -
-      only to delete it and recreate it from scratch, which loses every
-      value already entered under it. So if a parameter of this name was
-      already added in an earlier run (before Parameter Type mapping
-      existed, or simply with a different Property Type value in an older
-      version of the mapping file), Add Parameters reuses that existing
-      definition exactly as it is rather than silently pretending to
-      change its type. When this happens the parameter's name turns red in
-      the list, its tooltip says so, and the Activity Log gets a WARNING
-      line naming the existing type, the type Excel asked for, and where to
-      delete it (Manage tab &rsaquo; Shared Parameters, and unbind it from
-      Project Parameters) before re-running to recreate it with the right
-      type.
+      <b>A parameter already bound in this project still keeps its old
+      type.</b> Once a parameter of that name exists in the model itself,
+      Add Parameters reuses it rather than pretending to change its type -
+      Revit can only retype by deleting and recreating, which loses every
+      value already entered under it, so that is your call and not
+      something the tool does behind your back. When this happens the Type
+      column turns red, its tooltip says so, and the Activity Log gets a
+      WARNING naming the existing type, the type the source asked for, and
+      where to remove it (Manage tab &rsaquo; Shared Parameters, and unbind
+      it from Project Parameters) before re-running.
     </div>
     <div class="box tip">
       <b>Shift+Click</b> works in the parameter list to tick a whole range

@@ -1,0 +1,7 @@
+# Timestamped copies the Parameter Loader writes before it corrects a
+# stale type in its shared parameter file - runtime artifacts, not source.
+*.backup-*.txt
+
+# IronPython/CPython bytecode
+__pycache__/
+*.pyc
