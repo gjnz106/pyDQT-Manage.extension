@@ -192,6 +192,75 @@ def normalize_type_key(raw_type):
     return TYPE_KEY_ALIASES.get(cleaned, "TEXT")
 
 
+def _type_key_for_definition(defn):
+    """Best-effort canonical type key for an EXISTING Definition - the
+    reverse of _spec_type_for_key/_parameter_type_for_key.
+
+    Used only to warn when a definition being reused (because a parameter
+    of this name already exists, in the shared parameter file or already
+    bound in the model) does not actually have the type the source asked
+    for. Revit has no in-place way to retype an existing shared parameter -
+    changing it means deleting the old definition and every value already
+    entered under it, then recreating it fresh - so this tool cannot do it
+    silently and instead has to surface the mismatch. Returns None when the
+    definition's own type can't be determined at all; that only skips the
+    warning; the reuse itself always proceeds either way, exactly as
+    before this check existed."""
+    try:
+        get_data_type = getattr(defn, "GetDataType", None)
+        if get_data_type:
+            forge_id = get_data_type()
+            for key in TYPE_KEY_LABELS:
+                spec = _spec_type_for_key(key)
+                if spec is None:
+                    continue
+                try:
+                    if spec.Equals(forge_id):
+                        return key
+                except:
+                    if spec == forge_id:
+                        return key
+    except:
+        pass
+    try:
+        ptype = getattr(defn, "ParameterType", None)
+        if ptype is not None:
+            for key in TYPE_KEY_LABELS:
+                pt = _parameter_type_for_key(key)
+                if pt is not None and pt == ptype:
+                    return key
+    except:
+        pass
+    return None
+
+
+def _type_mismatch_note(req, defn):
+    """None when reusing `defn` for `req` is fine; otherwise a short
+    message for the Activity Log explaining that the source asked for a
+    different type than the definition already reused actually has.
+
+    Only fires when the source genuinely stated a type (param_type_raw
+    non-empty) - a param with no type column at all (the Model Checker XML
+    import, or an unmapped Type column) defaults to TEXT for every
+    parameter, and comparing that default against whatever already exists
+    would just be noise, not a real mismatch to report."""
+    raw = getattr(req, "param_type_raw", "")
+    wanted_key = getattr(req, "param_type_key", "TEXT")
+    if not raw:
+        return None
+    existing_key = _type_key_for_definition(defn)
+    if existing_key is None or existing_key == wanted_key:
+        return None
+    return (
+        "{} already exists as {} - Excel says {}, but Revit has no way to "
+        "change an existing parameter's type in place. Delete it (Manage > "
+        "Shared Parameters, and unbind it from Project Parameters) and "
+        "re-run to recreate it as {}."
+    ).format(req.name, TYPE_KEY_LABELS.get(existing_key, existing_key),
+             TYPE_KEY_LABELS.get(wanted_key, wanted_key),
+             TYPE_KEY_LABELS.get(wanted_key, wanted_key))
+
+
 def _create_ext_def_options(param_name, type_key="TEXT"):
     """Create ExternalDefinitionCreationOptions with the requested data
     type - compatible with Revit 2024-2026+, with a legacy ParameterType
@@ -373,6 +442,8 @@ class ParamRequirement:
         self.group_pg = ""     # BuiltInParameterGroup key: "PG_IFC", "PG_GEOMETRY", etc.
         self.param_type_raw = ""    # original text from the source ("Length", "Boolean", ...)
         self.param_type_key = "TEXT"  # normalize_type_key(param_type_raw)
+        self.type_mismatch = False  # True if Add Parameters reused an existing
+                                     # definition whose type differs from param_type_key
         self._auto_map_group()
     
     def _auto_map_group(self):
@@ -1121,7 +1192,12 @@ class ParameterAdder:
                 # First check if definition exists in temp file already
                 defn = self._find_definition_in_file(sp_file, req.name)
                 
-                if not defn:
+                if defn:
+                    mismatch = _type_mismatch_note(req, defn)
+                    if mismatch:
+                        self.log.append("WARNING: " + mismatch)
+                        req.type_mismatch = True
+                else:
                     # Create new definition
                     defn = self._create_definition(
                         sp_file, group_name, req.name,
@@ -1161,6 +1237,10 @@ class ParameterAdder:
                         if it.Key.Name == req.name:
                             existing_binding = it.Current
                             defn = it.Key  # Use the existing definition key
+                            mismatch = _type_mismatch_note(req, defn)
+                            if mismatch:
+                                self.log.append("WARNING: " + mismatch)
+                                req.type_mismatch = True
                             break
                     except:
                         pass
@@ -1922,7 +2002,18 @@ class ParamLoaderWindow:
             name_txt.FontWeight = System.Windows.FontWeights.SemiBold
             name_txt.VerticalAlignment = System.Windows.VerticalAlignment.Center
             type_key = getattr(req, "param_type_key", "TEXT")
-            name_txt.ToolTip = "Type: {}".format(TYPE_KEY_LABELS.get(type_key, "Text"))
+            type_label = TYPE_KEY_LABELS.get(type_key, "Text")
+            if getattr(req, "type_mismatch", False):
+                name_txt.ToolTip = (
+                    "Type: {} requested, but this parameter already existed "
+                    "with a different type and was reused as-is - see the "
+                    "Activity Log for details.").format(type_label)
+                try:
+                    name_txt.Foreground = converter.ConvertFromString("#C62828")
+                except:
+                    pass
+            else:
+                name_txt.ToolTip = "Type: {}".format(type_label)
             Grid.SetColumn(name_txt, 2)
             row_grid.Children.Add(name_txt)
             
