@@ -644,6 +644,72 @@ def show_auto_assign_preview(preview_lines, total_components):
     return proceed[0]
 
 
+def show_text_report_dialog(title, subtitle, body_text):
+    """Resizable, scrollable, read-only report window with a single Close
+    button - for output too long or detailed for a fixed-size MessageBox.
+
+    Used for the Apply log when something failed: the old flow told the
+    user to "check pyRevit output for detailed log", a separate panel
+    most people never open, for text this dialog can show directly."""
+    REPORT_XAML = """
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="IFC-SG Subtype Definer | pyDQT"
+        Width="760" Height="560" MinWidth="480" MinHeight="300"
+        WindowStartupLocation="CenterScreen" ResizeMode="CanResize"
+        Background="%%BG%%">
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <Border Grid.Row="0" Background="%%PRIMARY%%" CornerRadius="4" Padding="12,8" Margin="0,0,0,10">
+            <StackPanel>
+                <TextBlock x:Name="txtReportTitle" FontSize="15" FontWeight="Bold" Foreground="%%TEXT%%"/>
+                <TextBlock x:Name="txtReportSubtitle" FontSize="10" Foreground="%%DARK%%"
+                           Margin="0,3,0,0" TextWrapping="Wrap"/>
+            </StackPanel>
+        </Border>
+
+        <Border Grid.Row="1" Background="%%CARD%%" BorderBrush="%%BORDER%%" BorderThickness="1" CornerRadius="3" Padding="8">
+            <TextBox x:Name="txtReportBody" IsReadOnly="True" BorderThickness="0" Background="Transparent"
+                     FontFamily="Consolas" FontSize="11" Foreground="%%TEXT%%"
+                     TextWrapping="Wrap" AcceptsReturn="True" IsReadOnlyCaretVisible="True"
+                     VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"/>
+        </Border>
+
+        <Grid Grid.Row="2" Margin="0,10,0,0">
+            <TextBlock Text="Dang Quoc Truong - DQT (c) 2026" FontSize="9" Foreground="%%GRAY%%"
+                       VerticalAlignment="Center" HorizontalAlignment="Left"/>
+            <Button x:Name="btnReportClose" Content="Close" Width="100" Height="30"
+                    Background="%%BTN_BG%%" Foreground="%%BTN_FG%%" BorderThickness="0"
+                    FontWeight="Bold" FontSize="11" Cursor="Hand" HorizontalAlignment="Right"/>
+        </Grid>
+    </Grid>
+</Window>
+""".replace("%%BG%%", Config.BACKGROUND) \
+   .replace("%%PRIMARY%%", Config.PRIMARY) \
+   .replace("%%CARD%%", Config.CARD_BG) \
+   .replace("%%BORDER%%", Config.BORDER) \
+   .replace("%%TEXT%%", Config.TEXT_PRIMARY) \
+   .replace("%%DARK%%", Config.TEXT_DARK) \
+   .replace("%%GRAY%%", Config.TEXT_SECONDARY) \
+   .replace("%%BTN_BG%%", Config.BUTTON_PRIMARY_BG) \
+   .replace("%%BTN_FG%%", Config.BUTTON_PRIMARY_FG)
+
+    stream = MemoryStream(Encoding.UTF8.GetBytes(REPORT_XAML))
+    win = XamlReader.Load(stream)
+    stream.Close()
+
+    win.FindName("txtReportTitle").Text = title
+    win.FindName("txtReportSubtitle").Text = subtitle
+    win.FindName("txtReportBody").Text = body_text
+    win.FindName("btnReportClose").Click += lambda s_, a_: win.Close()
+    win.ShowDialog()
+
+
 def show_column_mapping_dialog(excel_info, filepath):
     """Show a WPF dialog for user to pick which column maps to which field.
     Returns dict with keys: sheet, component, entity, subtype, revit, agency
@@ -1018,27 +1084,53 @@ def _try_lookup_get(elem, name):
         pass
     return None
 
-def _try_bip_set(elem, bip_name, value):
+def _try_bip_set(elem, bip_name, value, reasons=None):
+    """Attempt to write `value` through a BuiltInParameter.
+
+    `reasons`, when given a list, gets one line explaining why this
+    attempt did not stick - not on this Revit version, not present on
+    this element, read-only, or the exception Revit raised. Without that,
+    a caller only ever sees a flat True/False and has no way to tell "the
+    parameter doesn't exist here" from "Revit rejected the value"."""
     try:
         bip = getattr(BuiltInParameter, bip_name, None)
-        if bip is not None:
-            p = elem.get_Parameter(bip)
-            if p and not p.IsReadOnly:
-                p.Set(value)
-                return True
-    except:
-        pass
-    return False
+        if bip is None:
+            if reasons is not None:
+                reasons.append("{}: not defined on this Revit version".format(bip_name))
+            return False
+        p = elem.get_Parameter(bip)
+        if p is None:
+            if reasons is not None:
+                reasons.append("{}: parameter not present on this element".format(bip_name))
+            return False
+        if p.IsReadOnly:
+            if reasons is not None:
+                reasons.append("{}: parameter is read-only".format(bip_name))
+            return False
+        p.Set(value)
+        return True
+    except Exception as ex:
+        if reasons is not None:
+            reasons.append("{}: {}".format(bip_name, str(ex)))
+        return False
 
-def _try_lookup_set(elem, name, value):
+def _try_lookup_set(elem, name, value, reasons=None):
     try:
         p = elem.LookupParameter(name)
-        if p and not p.IsReadOnly:
-            p.Set(value)
-            return True
-    except:
-        pass
-    return False
+        if p is None:
+            if reasons is not None:
+                reasons.append("'{}': parameter not present on this element".format(name))
+            return False
+        if p.IsReadOnly:
+            if reasons is not None:
+                reasons.append("'{}': parameter is read-only".format(name))
+            return False
+        p.Set(value)
+        return True
+    except Exception as ex:
+        if reasons is not None:
+            reasons.append("'{}': {}".format(name, str(ex)))
+        return False
 
 def get_ifc_export_as(elem):
     return (_try_bip_get(elem, "IFC_EXPORT_ELEMENT_TYPE_AS")
@@ -1054,39 +1146,39 @@ def get_ifc_predefined_type(elem):
             or _try_lookup_get(elem, "IFC Predefined Type")
             or "")
 
-def set_ifc_export_as(elem, value, use_type=True):
+def set_ifc_export_as(elem, value, use_type=True, reasons=None):
     """Try ALL known IFC Export As parameters. Log which one succeeds."""
     # Try built-in type-level
-    if _try_bip_set(elem, "IFC_EXPORT_ELEMENT_TYPE_AS", value):
+    if _try_bip_set(elem, "IFC_EXPORT_ELEMENT_TYPE_AS", value, reasons):
         return True
     # Try built-in instance-level
-    if _try_bip_set(elem, "IFC_EXPORT_ELEMENT_AS", value):
+    if _try_bip_set(elem, "IFC_EXPORT_ELEMENT_AS", value, reasons):
         return True
     # Try various display/shared names
     for name in ["Export to IFC As", "Export Type to IFC As",
                  "IfcExportAs", "IFCExportAs"]:
-        if _try_lookup_set(elem, name, value):
+        if _try_lookup_set(elem, name, value, reasons):
             return True
     return False
 
-def set_ifc_predefined_type(elem, value, use_type=True):
+def set_ifc_predefined_type(elem, value, use_type=True, reasons=None):
     """Try ALL known IFC Predefined Type parameters."""
     # Try built-in type-level
-    if _try_bip_set(elem, "IFC_EXPORT_PREDEFINEDTYPE_TYPE", value):
+    if _try_bip_set(elem, "IFC_EXPORT_PREDEFINEDTYPE_TYPE", value, reasons):
         return True
     # Try built-in instance-level
-    if _try_bip_set(elem, "IFC_EXPORT_PREDEFINEDTYPE", value):
+    if _try_bip_set(elem, "IFC_EXPORT_PREDEFINEDTYPE", value, reasons):
         return True
     # Try various display/shared names
     for name in ["IFC Predefined Type", "Type IFC Predefined Type",
                  "IfcExportType", "IFCExportType"]:
-        if _try_lookup_set(elem, name, value):
+        if _try_lookup_set(elem, name, value, reasons):
             return True
     return False
 
-def set_ifc_object_type(elem, value, use_type=True):
+def set_ifc_object_type(elem, value, use_type=True, reasons=None):
     for name in ["IfcObjectType", "IFCObjectType", "ObjectType"]:
-        if _try_lookup_set(elem, name, value):
+        if _try_lookup_set(elem, name, value, reasons):
             return True
     return False
 
@@ -1914,14 +2006,21 @@ class IFCSGSubtypeWindow(object):
                     entity_ok = True
                     pdt_ok = True
                     obj_ok = True
+                    # Collects one line per rejected attempt (parameter
+                    # missing, read-only, or the exception Revit raised)
+                    # so a failure says WHY, not just which flag is False.
+                    reasons = []
 
                     if also_entity and primary_entity:
-                        entity_ok = set_ifc_export_as(target, primary_entity, use_type)
+                        entity_ok = set_ifc_export_as(
+                            target, primary_entity, use_type, reasons)
 
-                    pdt_ok = set_ifc_predefined_type(target, pdt_value, use_type)
+                    pdt_ok = set_ifc_predefined_type(
+                        target, pdt_value, use_type, reasons)
 
                     if is_ud and set_obj and obj_value:
-                        obj_ok = set_ifc_object_type(target, obj_value, use_type)
+                        obj_ok = set_ifc_object_type(
+                            target, obj_value, use_type, reasons)
 
                     if entity_ok and pdt_ok and obj_ok:
                         type_ok = True
@@ -1938,9 +2037,13 @@ class IFCSGSubtypeWindow(object):
                         break  # Success on this target, skip next
                     else:
                         try:
-                            debug_lines.append("[FAIL] {} '{}' entity={} pdt={} obj={} on {} (id:{})".format(
-                                target_label, row.Family + ":" + row.TypeName,
-                                entity_ok, pdt_ok, obj_ok, target_label, _eid_int(target.Id)))
+                            reason_text = "; ".join(reasons) if reasons \
+                                else "no parameter accepted the value"
+                            debug_lines.append(
+                                "[FAIL] {} '{}' entity={} pdt={} obj={} on {} (id:{}) - {}".format(
+                                    target_label, row.Family + ":" + row.TypeName,
+                                    entity_ok, pdt_ok, obj_ok, target_label,
+                                    _eid_int(target.Id), reason_text))
                         except:
                             pass
 
@@ -1964,16 +2067,23 @@ class IFCSGSubtypeWindow(object):
             msg += "ObjectType = '{}'\n".format(obj_value)
         msg += "\nSuccess: {}  |  Failed: {}\n".format(ok, fail)
 
-        # Print debug to pyrevit output
+        # Also print to pyRevit output for anyone already using that panel.
         if debug_lines:
             output.print_md("### IFC-SG Subtype Apply Log")
             for line in debug_lines:
                 output.print_md("- " + line)
 
         if fail > 0:
-            msg += "\nCheck pyRevit output for detailed log."
-
-        WPFMessageBox.Show(msg, "Done", MessageBoxButton.OK, MessageBoxImage.Information)
+            # A summary saying only "4 failed, check pyRevit output" sends
+            # the user hunting through a separate panel most people never
+            # open. Show the actual per-row reason - parameter missing,
+            # read-only, or the exception Revit raised - right here.
+            show_text_report_dialog(
+                "Apply Result - {} succeeded, {} failed".format(ok, fail),
+                msg.strip(),
+                "\n".join(debug_lines) if debug_lines else "(no detail captured)")
+        else:
+            WPFMessageBox.Show(msg, "Done", MessageBoxButton.OK, MessageBoxImage.Information)
 
     def _on_auto_assign(self, sender, args):
         """Auto-assign IFC entity + first subtype to all elements missing subtypes."""
