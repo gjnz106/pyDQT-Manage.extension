@@ -1516,13 +1516,15 @@ XAML_STR = '''
                                 <ColumnDefinition Width="65"/>
                                 <ColumnDefinition Width="200"/>
                                 <ColumnDefinition Width="70"/>
+                                <ColumnDefinition Width="80"/>
                                 <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
                             <CheckBox x:Name="chkHeaderAll" Grid.Column="0" VerticalAlignment="Center" IsChecked="True"/>
                             <TextBlock Grid.Column="1" Text="Status" FontSize="10" FontWeight="SemiBold" Foreground="#888" VerticalAlignment="Center"/>
                             <TextBlock Grid.Column="2" Text="Parameter Name" FontSize="10" FontWeight="SemiBold" Foreground="#888" VerticalAlignment="Center"/>
                             <TextBlock Grid.Column="3" Text="Group Under" FontSize="10" FontWeight="SemiBold" Foreground="#888" VerticalAlignment="Center"/>
-                            <TextBlock Grid.Column="4" Text="Categories" FontSize="10" FontWeight="SemiBold" Foreground="#888" VerticalAlignment="Center"/>
+                            <TextBlock Grid.Column="4" Text="Type" FontSize="10" FontWeight="SemiBold" Foreground="#888" VerticalAlignment="Center"/>
+                            <TextBlock Grid.Column="5" Text="Categories" FontSize="10" FontWeight="SemiBold" Foreground="#888" VerticalAlignment="Center"/>
                         </Grid>
                     </Border>
                     
@@ -1948,12 +1950,15 @@ class ParamLoaderWindow:
             gc4 = ColumnDefinition()
             gc4.Width = System.Windows.GridLength(70)
             gc5 = ColumnDefinition()
-            gc5.Width = System.Windows.GridLength(1, System.Windows.GridUnitType.Star)
+            gc5.Width = System.Windows.GridLength(80)
+            gc6 = ColumnDefinition()
+            gc6.Width = System.Windows.GridLength(1, System.Windows.GridUnitType.Star)
             row_grid.ColumnDefinitions.Add(gc1)
             row_grid.ColumnDefinitions.Add(gc2)
             row_grid.ColumnDefinitions.Add(gc3)
             row_grid.ColumnDefinitions.Add(gc4)
             row_grid.ColumnDefinitions.Add(gc5)
+            row_grid.ColumnDefinitions.Add(gc6)
             
             # Col 0: Checkbox
             chk = CheckBox()
@@ -2001,19 +2006,6 @@ class ParamLoaderWindow:
             name_txt.FontSize = 11
             name_txt.FontWeight = System.Windows.FontWeights.SemiBold
             name_txt.VerticalAlignment = System.Windows.VerticalAlignment.Center
-            type_key = getattr(req, "param_type_key", "TEXT")
-            type_label = TYPE_KEY_LABELS.get(type_key, "Text")
-            if getattr(req, "type_mismatch", False):
-                name_txt.ToolTip = (
-                    "Type: {} requested, but this parameter already existed "
-                    "with a different type and was reused as-is - see the "
-                    "Activity Log for details.").format(type_label)
-                try:
-                    name_txt.Foreground = converter.ConvertFromString("#C62828")
-                except:
-                    pass
-            else:
-                name_txt.ToolTip = "Type: {}".format(type_label)
             Grid.SetColumn(name_txt, 2)
             row_grid.Children.Add(name_txt)
             
@@ -2047,7 +2039,35 @@ class ParamLoaderWindow:
             Grid.SetColumn(grp_badge, 3)
             row_grid.Children.Add(grp_badge)
             
-            # Col 4: Categories
+            # Col 4: Type - the data type this parameter was (or will be)
+            # created with, from the source's Property Type column.
+            type_txt = TextBlock()
+            type_key = getattr(req, "param_type_key", "TEXT")
+            type_label = TYPE_KEY_LABELS.get(type_key, "Text")
+            type_txt.Text = type_label
+            type_txt.FontSize = 9
+            type_txt.VerticalAlignment = System.Windows.VerticalAlignment.Center
+            type_txt.TextTrimming = System.Windows.TextTrimming.CharacterEllipsis
+            if getattr(req, "type_mismatch", False):
+                type_txt.FontWeight = System.Windows.FontWeights.SemiBold
+                type_txt.ToolTip = (
+                    "{} requested, but this parameter already existed with a "
+                    "different type and was reused as-is - see the Activity "
+                    "Log for details.").format(type_label)
+                try:
+                    type_txt.Foreground = converter.ConvertFromString("#C62828")
+                except:
+                    pass
+            else:
+                type_txt.ToolTip = "Parameter Type: {}".format(type_label)
+                try:
+                    type_txt.Foreground = converter.ConvertFromString("#888")
+                except:
+                    pass
+            Grid.SetColumn(type_txt, 4)
+            row_grid.Children.Add(type_txt)
+            
+            # Col 5: Categories
             cats_txt = TextBlock()
             cat_str = ", ".join(req.categories[:3])
             if len(req.categories) > 3:
@@ -2061,7 +2081,7 @@ class ParamLoaderWindow:
             except:
                 pass
             cats_txt.ToolTip = "\n".join(req.categories)
-            Grid.SetColumn(cats_txt, 4)
+            Grid.SetColumn(cats_txt, 5)
             row_grid.Children.Add(cats_txt)
             
             # Make row clickable for shift-select
