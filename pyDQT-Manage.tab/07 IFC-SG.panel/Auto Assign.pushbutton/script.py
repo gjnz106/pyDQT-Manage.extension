@@ -724,8 +724,15 @@ def _match_comp(type_name, comp_list):
         if not cn:
             continue
         sc = 0
-        # Strongest signal: full component name appears in family type name
-        if cn in td:
+        # Strongest signal: full component name appears in family type name -
+        # but only once the name itself is long enough to mean something.
+        # Without the length check this bypasses the same >=3-char noise
+        # guard the keyword branch below applies: a short/abbreviated
+        # component name in the Excel mapping (real LTA/BCA sheets do have
+        # these) could score 100 from pure coincidental containment against
+        # an unrelated Family Type name instead of falling through to the
+        # keyword scoring that would correctly reject it.
+        if len(cn) >= 3 and cn in td:
             sc += 100
         else:
             # Match on individual keywords (>=3 chars to avoid noise)
