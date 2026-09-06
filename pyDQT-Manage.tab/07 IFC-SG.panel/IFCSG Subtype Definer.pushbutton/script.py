@@ -537,6 +537,98 @@ def read_excel_headers(filepath):
     return _read_excel_via_com(filepath)
 
 
+def show_auto_assign_preview(preview_lines, total_components):
+    """Resizable, scrollable Proceed/Cancel dialog for the Auto-Assign
+    preview list. Returns True if the user chose Proceed.
+
+    A plain MessageBox does not resize or scroll - on a real project's
+    mapping the preview can run to 50+ lines, taller than the screen, and
+    the box grows to fit it anyway. With no scrollbar and no way to make
+    it bigger or smaller, the buttons (and sometimes the title bar itself)
+    land off the visible desktop, so the dialog can be neither read in
+    full nor closed."""
+    PREVIEW_XAML = """
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Auto-Assign Preview | IFC-SG Subtype Definer"
+        Width="820" Height="640" MinWidth="520" MinHeight="320"
+        WindowStartupLocation="CenterScreen" ResizeMode="CanResize"
+        Background="%%BG%%">
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <Border Grid.Row="0" Background="%%PRIMARY%%" CornerRadius="4" Padding="12,8" Margin="0,0,0,10">
+            <StackPanel>
+                <TextBlock x:Name="txtPreviewTitle" FontSize="15" FontWeight="Bold" Foreground="%%TEXT%%"/>
+                <TextBlock Text="Only elements with Status != 'OK' will be updated. Existing assignments will NOT be overwritten."
+                           FontSize="10" Foreground="%%DARK%%" Margin="0,3,0,0" TextWrapping="Wrap"/>
+            </StackPanel>
+        </Border>
+
+        <Border Grid.Row="1" Background="%%CARD%%" BorderBrush="%%BORDER%%" BorderThickness="1" CornerRadius="3" Padding="8">
+            <TextBox x:Name="txtPreviewBody" IsReadOnly="True" BorderThickness="0" Background="Transparent"
+                     FontFamily="Consolas" FontSize="11" Foreground="%%TEXT%%"
+                     TextWrapping="Wrap" AcceptsReturn="True" IsReadOnlyCaretVisible="True"
+                     VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"/>
+        </Border>
+
+        <TextBlock Grid.Row="2" x:Name="txtPreviewCount" FontSize="10" Foreground="%%GRAY%%" Margin="2,8,0,0"/>
+
+        <Grid Grid.Row="3" Margin="0,10,0,0">
+            <TextBlock Text="Dang Quoc Truong - DQT (c) 2026" FontSize="9" Foreground="%%GRAY%%"
+                       VerticalAlignment="Center" HorizontalAlignment="Left"/>
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button x:Name="btnPreviewCancel" Content="Cancel" Width="100" Height="30"
+                        Background="%%BTN2_BG%%" Foreground="%%BTN2_FG%%" BorderBrush="%%BORDER%%"
+                        BorderThickness="1" FontSize="11" Cursor="Hand" Margin="0,0,8,0"/>
+                <Button x:Name="btnPreviewProceed" Content="Proceed" Width="100" Height="30"
+                        Background="%%BTN_BG%%" Foreground="%%BTN_FG%%" BorderThickness="0"
+                        FontWeight="Bold" FontSize="11" Cursor="Hand"/>
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Window>
+""".replace("%%BG%%", Config.BACKGROUND) \
+   .replace("%%PRIMARY%%", Config.PRIMARY) \
+   .replace("%%CARD%%", Config.CARD_BG) \
+   .replace("%%BORDER%%", Config.BORDER) \
+   .replace("%%TEXT%%", Config.TEXT_PRIMARY) \
+   .replace("%%DARK%%", Config.TEXT_DARK) \
+   .replace("%%GRAY%%", Config.TEXT_SECONDARY) \
+   .replace("%%BTN_BG%%", Config.BUTTON_PRIMARY_BG) \
+   .replace("%%BTN_FG%%", Config.BUTTON_PRIMARY_FG) \
+   .replace("%%BTN2_BG%%", Config.BUTTON_SECONDARY_BG) \
+   .replace("%%BTN2_FG%%", Config.BUTTON_SECONDARY_FG)
+
+    stream = MemoryStream(Encoding.UTF8.GetBytes(PREVIEW_XAML))
+    win = XamlReader.Load(stream)
+    stream.Close()
+
+    win.FindName("txtPreviewTitle").Text = \
+        "Auto-Assign will update {} component(s):".format(total_components)
+    win.FindName("txtPreviewBody").Text = "\n".join(preview_lines)
+    win.FindName("txtPreviewCount").Text = "{} line(s)".format(len(preview_lines))
+
+    proceed = [False]
+
+    def on_proceed(sender, args):
+        proceed[0] = True
+        win.Close()
+
+    def on_cancel(sender, args):
+        win.Close()
+
+    win.FindName("btnPreviewProceed").Click += on_proceed
+    win.FindName("btnPreviewCancel").Click += on_cancel
+    win.ShowDialog()
+    return proceed[0]
+
+
 def show_column_mapping_dialog(excel_info, filepath):
     """Show a WPF dialog for user to pick which column maps to which field.
     Returns dict with keys: sheet, component, entity, subtype, revit, agency
@@ -1915,16 +2007,11 @@ class IFCSGSubtypeWindow(object):
                 MessageBoxImage.Information)
             return
 
-        # Show preview dialog
-        preview_text = "Auto-Assign will update {} components:\n\n".format(len(auto_plan))
-        preview_text += "\n".join(preview_lines)
-        preview_text += "\n\nOnly elements with Status != 'OK' will be updated."
-        preview_text += "\nExisting assignments will NOT be overwritten."
-        preview_text += "\n\nProceed?"
-
-        result = WPFMessageBox.Show(preview_text, "Auto-Assign Preview",
-                                    MessageBoxButton.YesNo, MessageBoxImage.Question)
-        if result != MessageBoxResult.Yes:
+        # Show preview dialog - a resizable, scrollable window rather than
+        # a MessageBox, which cannot grow, shrink or scroll and on a large
+        # mapping ends up taller than the screen with no way to read the
+        # rest of the list or even close it.
+        if not show_auto_assign_preview(preview_lines, len(auto_plan)):
             return
 
         # Execute
