@@ -83,7 +83,9 @@
         keep going.
       </li>
       <li><b>Export Excel</b> writes Summary / Detailed / Failed sheets -
-        the record to attach to a submission.</li>
+        the record to attach to a submission. This writes the .xlsx
+        directly and does not need Microsoft Excel installed on the
+        machine.</li>
     </ol>
   </div>
 
@@ -127,6 +129,15 @@
       what that conversion needs (as 2026 did elsewhere in this suite), a
       row still turns into a live element instead of showing "not found"
       for everything.
+    </div>
+    <div class="box fixed">
+      Export Excel no longer goes through Microsoft Excel at all - it
+      writes the .xlsx file directly, so it works on machines where Excel
+      is not installed or, as on some Microsoft 365 Click-to-Run
+      installs, is installed but does not register the Office component
+      the old export path needed. A model with any category that has no
+      elements in it - common on most real projects - used to make the
+      export fail outright; that is fixed too.
     </div>
   </div>
 

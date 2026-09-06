@@ -39,14 +39,15 @@ import codecs
 import traceback
 import datetime
 
-# Shared spreadsheet reader (extension lib/). Reads .xlsx and .csv without
-# any Office component; Excel COM Interop is only touched for legacy .xls.
+# Shared spreadsheet reader/writer (extension lib/). Neither needs Excel
+# installed - Excel COM Interop is only touched for legacy .xls reads.
 _script_dir = os.path.dirname(__file__)
 _extension_dir = os.path.dirname(os.path.dirname(os.path.dirname(_script_dir)))
 _lib_path = os.path.join(_extension_dir, 'lib')
 if _lib_path not in sys.path:
     sys.path.insert(0, _lib_path)
 import xlsx_reader
+from xlsx_writer import XlsxWriter
 
 # =====================================================================
 # REVIT API COMPATIBILITY (2024/2025/2026+)
@@ -711,9 +712,6 @@ class ParamChecker:
 # =====================================================================
 # EXCEL REPORT
 # =====================================================================
-XLSX_FORMAT = 51  # xlOpenXMLWorkbook - SaveAs must be told, or Excel picks
-                  # its own default format and the .xlsx name lies about it.
-
 INVALID_FILENAME_CHARS = '\\/:*?"<>|\r\n\t'
 MAX_PATH = 250    # Excel refuses to save beyond the Windows path limit
 
@@ -736,153 +734,110 @@ def safe_filename(text, max_length=40):
 
 
 class ExcelReporter:
-    """Generate Excel report for IFC-SG parameter check"""
+    """Generate the Excel report for an IFC-SG parameter check.
+
+    Written directly as OOXML via lib/xlsx_writer.py rather than through
+    Excel COM Interop - clr.AddReference('Microsoft.Office.Interop.Excel')
+    fails on machines where Click-to-Run Microsoft 365 never registered
+    the Excel Primary Interop Assembly (the exact failure this suite's
+    native .xlsx reader was already built to route around for imports).
+    Export needs no Excel installation at all now, on any machine."""
 
     def __init__(self, doc):
         self.doc = doc
 
-    def _rgb(self, r, g, b):
-        return r + (g * 256) + (b * 256 * 256)
-
     def generate(self, config, results, filepath):
-        clr.AddReference('Microsoft.Office.Interop.Excel')
-        from Microsoft.Office.Interop import Excel as ExcelInterop
+        writer = XlsxWriter()
 
-        excel_app = ExcelInterop.ApplicationClass()
-        excel_app.Visible = False
-        excel_app.DisplayAlerts = False
+        # --- Sheet 1: Summary ---
+        ws = writer.add_sheet("Summary")
+        ws.set(1, 1, "IFC-SG PARAMETER CHECK REPORT",
+               bold=True, size=16, fill="F0CC88")
+        ws.merge(1, 1, 1, 5, fill="F0CC88", bold=True, size=16)
 
-        wb = None
-        try:
-            wb = excel_app.Workbooks.Add()
-            
-            # --- Sheet 1: Summary ---
-            ws = wb.Sheets[1]
-            ws.Name = "Summary"
-            
-            ws.Cells[1, 1].Value2 = "IFC-SG PARAMETER CHECK REPORT"
-            ws.Cells[1, 1].Font.Size = 16
-            ws.Cells[1, 1].Font.Bold = True
-            ws.Range["A1:E1"].Merge()
-            ws.Range["A1:E1"].Interior.Color = self._rgb(240, 204, 136)
-            
-            row = 3
-            info = [
-                ("Project", self.doc.ProjectInformation.Name or "N/A"),
-                ("Config", config.name),
-                ("Source", config.source),
-                ("Date", datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
-            ]
-            for label, val in info:
-                ws.Cells[row, 1].Value2 = label
-                ws.Cells[row, 1].Font.Bold = True
-                ws.Cells[row, 2].Value2 = val
-                row += 1
-            
+        row = 3
+        info = [
+            ("Project", self.doc.ProjectInformation.Name or "N/A"),
+            ("Config", config.name),
+            ("Source", config.source),
+            ("Date", datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+        ]
+        for label, val in info:
+            ws.set(row, 1, label, bold=True)
+            ws.set(row, 2, val)
             row += 1
-            # Stats
-            total = len(results)
-            passed = len([r for r in results if r.status == "pass"])
-            failed = len([r for r in results if r.status == "fail"])
-            warning = len([r for r in results if r.status == "warning"])
-            no_elem = len([r for r in results if r.status == "no_elements"])
-            
-            stats = [("Total Checks", total), ("Passed", passed),
-                     ("Failed (all missing)", failed), ("Warning (partial)", warning),
-                     ("No Elements", no_elem)]
-            for label, val in stats:
-                ws.Cells[row, 1].Value2 = label
-                ws.Cells[row, 1].Font.Bold = True
-                ws.Cells[row, 2].Value2 = val
+
+        row += 1
+        total = len(results)
+        passed = len([r for r in results if r.status == "pass"])
+        failed = len([r for r in results if r.status == "fail"])
+        warning = len([r for r in results if r.status == "warning"])
+        no_elem = len([r for r in results if r.status == "no_elements"])
+
+        stats = [("Total Checks", total), ("Passed", passed),
+                 ("Failed (all missing)", failed), ("Warning (partial)", warning),
+                 ("No Elements", no_elem)]
+        for label, val in stats:
+            ws.set(row, 1, label, bold=True)
+            ws.set(row, 2, val)
+            row += 1
+        ws.autosize_columns()
+
+        # --- Sheet 2: Detailed Results ---
+        ws2 = writer.add_sheet("Detailed Results")
+        headers = ["Discipline", "Category", "Parameter", "Status",
+                   "Total Elements", "Missing Count", "Element IDs (sample)",
+                   "Note"]
+        for i, h in enumerate(headers, 1):
+            ws2.set(1, i, h, bold=True, fill="F0CC88")
+
+        row = 2
+        status_colors = {
+            "pass": "C8E6C9", "fail": "FFCDD2",
+            "warning": "FFECB3", "no_elements": "E0E0E0",
+        }
+        for r in results:
+            ws2.set(row, 1, r.discipline)
+            ws2.set(row, 2, r.category)
+            ws2.set(row, 3, r.param_name)
+            ws2.set(row, 4, r.status.upper(), fill=status_colors.get(r.status))
+            ws2.set(row, 5, r.total_elements)
+            ws2.set(row, 6, r.missing_count)
+            # element_ids is None for a "no_elements" row (nothing of that
+            # category exists in the model to have ids) - r.element_ids[:20]
+            # on None used to raise TypeError here and take the whole
+            # export down the moment any category had no elements, which
+            # on a real project is close to guaranteed to happen at least
+            # once.
+            ws2.set(row, 7, ", ".join(str(eid) for eid in (r.element_ids or [])[:20]))
+            if getattr(r, "unmapped", False):
+                ws2.set(row, 8, "Category not supported by this checker")
+            row += 1
+        ws2.autosize_columns()
+
+        # --- Sheet 3: Failed Only ---
+        ws3 = writer.add_sheet("Failed Parameters")
+        fail_headers = ["Discipline", "Category", "Parameter", "Missing Count", "Total Elements"]
+        for i, h in enumerate(fail_headers, 1):
+            ws3.set(1, i, h, bold=True, fill="FFCDD2")
+
+        row = 2
+        for r in results:
+            if r.status in ("fail", "warning"):
+                ws3.set(row, 1, r.discipline)
+                ws3.set(row, 2, r.category)
+                ws3.set(row, 3, r.param_name)
+                ws3.set(row, 4, r.missing_count)
+                ws3.set(row, 5, r.total_elements)
                 row += 1
-            
-            ws.Columns["A:E"].AutoFit()
-            
-            # --- Sheet 2: Detailed Results ---
-            ws2 = wb.Sheets.Add(After=wb.Sheets[wb.Sheets.Count])
-            ws2.Name = "Detailed Results"
-            
-            headers = ["Discipline", "Category", "Parameter", "Status",
-                       "Total Elements", "Missing Count", "Element IDs (sample)",
-                       "Note"]
-            for i, h in enumerate(headers, 1):
-                ws2.Cells[1, i].Value2 = h
-                ws2.Cells[1, i].Font.Bold = True
-                ws2.Cells[1, i].Interior.Color = self._rgb(240, 204, 136)
-            
-            row = 2
-            status_colors = {
-                "pass": self._rgb(200, 230, 201),
-                "fail": self._rgb(255, 205, 210),
-                "warning": self._rgb(255, 236, 179),
-                "no_elements": self._rgb(224, 224, 224),
-            }
-            
-            for r in results:
-                ws2.Cells[row, 1].Value2 = r.discipline
-                ws2.Cells[row, 2].Value2 = r.category
-                ws2.Cells[row, 3].Value2 = r.param_name
-                ws2.Cells[row, 4].Value2 = r.status.upper()
-                ws2.Cells[row, 5].Value2 = r.total_elements
-                ws2.Cells[row, 6].Value2 = r.missing_count
-                ws2.Cells[row, 7].Value2 = ", ".join(str(eid) for eid in r.element_ids[:20])
-                if getattr(r, "unmapped", False):
-                    ws2.Cells[row, 8].Value2 = "Category not supported by this checker"
 
-                color = status_colors.get(r.status)
-                if color:
-                    ws2.Cells[row, 4].Interior.Color = color
-                row += 1
+        if row == 2:
+            ws3.set(2, 1, "All parameters passed!", bold=True)
+            ws3.merge(2, 1, 2, 5)
+        ws3.autosize_columns()
 
-            ws2.Columns["A:H"].AutoFit()
-            
-            # --- Sheet 3: Failed Only ---
-            ws3 = wb.Sheets.Add(After=wb.Sheets[wb.Sheets.Count])
-            ws3.Name = "Failed Parameters"
-            
-            fail_headers = ["Discipline", "Category", "Parameter", "Missing Count", "Total Elements"]
-            for i, h in enumerate(fail_headers, 1):
-                ws3.Cells[1, i].Value2 = h
-                ws3.Cells[1, i].Font.Bold = True
-                ws3.Cells[1, i].Interior.Color = self._rgb(255, 205, 210)
-            
-            row = 2
-            for r in results:
-                if r.status in ("fail", "warning"):
-                    ws3.Cells[row, 1].Value2 = r.discipline
-                    ws3.Cells[row, 2].Value2 = r.category
-                    ws3.Cells[row, 3].Value2 = r.param_name
-                    ws3.Cells[row, 4].Value2 = r.missing_count
-                    ws3.Cells[row, 5].Value2 = r.total_elements
-                    row += 1
-            
-            if row == 2:
-                ws3.Cells[2, 1].Value2 = "All parameters passed!"
-                ws3.Range["A2:E2"].Merge()
-            
-            ws3.Columns["A:E"].AutoFit()
-
-            wb.SaveAs(filepath, XLSX_FORMAT)
-            wb.Close()
-            excel_app.Quit()
-            System.Runtime.InteropServices.Marshal.ReleaseComObject(excel_app)
-            return True
-
-        except Exception as e:
-            # Clean up without letting the cleanup itself throw - a bare
-            # wb.Close() here used to raise NameError when the failure
-            # happened before the workbook existed, hiding the real error.
-            try:
-                if wb is not None:
-                    wb.Close(False)
-            except:
-                pass
-            try:
-                excel_app.Quit()
-                System.Runtime.InteropServices.Marshal.ReleaseComObject(excel_app)
-            except:
-                pass
-            raise e
+        writer.save(filepath)
+        return True
 
 
 # =====================================================================
@@ -3129,10 +3084,13 @@ class IFCSGCheckerWindow:
             except Exception as e:
                 self.txtStatus.Text = "Export failed: {}".format(str(e))
                 # Show the whole traceback - "export does not work" with no
-                # detail is impossible to act on.
+                # detail is impossible to act on. Export writes the .xlsx
+                # directly and does not need Excel installed, so the
+                # realistic causes left are the destination file being
+                # open elsewhere or a permissions problem on the folder.
                 System.Windows.MessageBox.Show(
-                    "Export error:\n{}\n\nMake sure Microsoft Excel is "
-                    "installed and the file is not already open.\n\n{}".format(
+                    "Export error:\n{}\n\nMake sure the destination file "
+                    "is not already open in Excel or another program.\n\n{}".format(
                         str(e), traceback.format_exc()),
                     "Error", MessageBoxButton.OK, MessageBoxImage.Error)
             finally:
