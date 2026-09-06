@@ -803,13 +803,7 @@ class ExcelReporter:
             ws2.set(row, 4, r.status.upper(), fill=status_colors.get(r.status))
             ws2.set(row, 5, r.total_elements)
             ws2.set(row, 6, r.missing_count)
-            # element_ids is None for a "no_elements" row (nothing of that
-            # category exists in the model to have ids) - r.element_ids[:20]
-            # on None used to raise TypeError here and take the whole
-            # export down the moment any category had no elements, which
-            # on a real project is close to guaranteed to happen at least
-            # once.
-            ws2.set(row, 7, ", ".join(str(eid) for eid in (r.element_ids or [])[:20]))
+            ws2.set(row, 7, ", ".join(str(eid) for eid in r.element_ids[:20]))
             if getattr(r, "unmapped", False):
                 ws2.set(row, 8, "Category not supported by this checker")
             row += 1
