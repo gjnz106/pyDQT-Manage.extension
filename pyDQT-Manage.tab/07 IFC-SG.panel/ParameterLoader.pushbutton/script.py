@@ -189,6 +189,11 @@ def normalize_type_key(raw_type):
         return "TEXT"
     cleaned = re.sub(r"[_\-]+", " ", str(raw_type).strip().lower())
     cleaned = " ".join(cleaned.split())
+    # A hand-typed Excel cell just as often reads "Yes / No" as "Yes/No" -
+    # the alias table only lists the tight form, so close the gap here
+    # instead of trying to list every spacing variant. Without this, "Yes
+    # / No" fell through to TEXT exactly like an unrecognized label would.
+    cleaned = re.sub(r"\s*/\s*", "/", cleaned)
     return TYPE_KEY_ALIASES.get(cleaned, "TEXT")
 
 
