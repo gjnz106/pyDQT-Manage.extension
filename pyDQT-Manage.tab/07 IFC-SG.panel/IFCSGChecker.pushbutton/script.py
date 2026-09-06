@@ -58,6 +58,40 @@ def _eid_int(eid):
     except:
         return eid.IntegerValue  # Revit 2024/2025
 
+def _make_element_id(value, errors=None):
+    """Build an ElementId from a plain int - the reverse of _eid_int.
+
+    Every result row stores element ids as plain ints (that is what
+    _eid_int hands back), and turning them back into an ElementId to zoom,
+    select or look one up is a separate round trip whose exact
+    constructor requirements have moved between Revit releases (the same
+    2026 rename that retired .IntegerValue for .Value touched what the
+    constructor accepts too). Tries the bare value first - the form that
+    has worked across every Revit version this tool has been run on so
+    far - then explicit Int64 and Int32 boxing, so a change hostile to
+    one strategy still finds another instead of the id silently
+    vanishing.
+
+    `errors`, when given a list, gets the exception from the last failed
+    attempt - the difference between "genuinely not found" (returns None
+    with no exception - a deleted element, or one under a closed
+    workset) and "the conversion itself is broken" that a caller can
+    surface instead of a flat, misleading "not found"."""
+    attempts = (
+        lambda: ElementId(value),
+        lambda: ElementId(System.Int64(value)),
+        lambda: ElementId(System.Int32(value)),
+    )
+    last_err = None
+    for attempt in attempts:
+        try:
+            return attempt()
+        except Exception as ex:
+            last_err = ex
+    if errors is not None and last_err is not None:
+        errors.append(str(last_err))
+    return None
+
 def _get_group_type_id(pg_key):
     """Get ForgeTypeId for parameter group - compatible with Revit 2024-2026+
     pg_key: e.g. 'PG_IFC', 'PG_GEOMETRY', 'PG_FIRE_PROTECTION'
@@ -2121,12 +2155,22 @@ class IFCSGCheckerWindow:
         in explicitly since it is a single, deliberate action."""
         try:
             net_ids = System.Collections.Generic.List[ElementId]()
+            conv_errors = []
             for eid in element_ids:
                 try:
-                    net_ids.Add(ElementId(int(eid)))
-                except:
-                    pass
+                    target_id = _make_element_id(int(eid), conv_errors)
+                except Exception as ex:
+                    target_id = None
+                    conv_errors.append(str(ex))
+                if target_id is not None:
+                    net_ids.Add(target_id)
             if net_ids.Count == 0:
+                if conv_errors:
+                    msg = "Could not resolve any element id in Revit - {}".format(
+                        conv_errors[-1])
+                    self.txtStatus.Text = msg
+                    System.Windows.MessageBox.Show(msg, "Zoom To Elements",
+                        MessageBoxButton.OK, MessageBoxImage.Error)
                 return
             uidoc.Selection.SetElementIds(net_ids)
             uidoc.ShowElements(net_ids)
@@ -2143,14 +2187,24 @@ class IFCSGCheckerWindow:
         """Select elements in Revit (no zoom - see _zoom_to_elements)."""
         try:
             ids = System.Collections.Generic.List[ElementId]()
+            conv_errors = []
             for eid in element_ids:
                 try:
-                    ids.Add(ElementId(int(eid)))  # Revit 2026: accepts Int64
-                except:
-                    pass
+                    target_id = _make_element_id(int(eid), conv_errors)
+                except Exception as ex:
+                    target_id = None
+                    conv_errors.append(str(ex))
+                if target_id is not None:
+                    ids.Add(target_id)
             if ids.Count > 0:
                 uidoc.Selection.SetElementIds(ids)
                 self.txtStatus.Text = "Selected {} elements in Revit".format(ids.Count)
+            elif conv_errors:
+                msg = "Could not resolve any element id in Revit - {}".format(
+                    conv_errors[-1])
+                self.txtStatus.Text = msg
+                System.Windows.MessageBox.Show(msg, "Select Elements",
+                    MessageBoxButton.OK, MessageBoxImage.Error)
         except Exception as e:
             msg = "Select error: {}".format(str(e))
             self.txtStatus.Text = msg
@@ -2673,14 +2727,26 @@ class IFCSGCheckerWindow:
         Every lookup is guarded on its own: an element that was deleted
         since the check ran, or one whose .Name throws (some system
         families do), still gets a row showing what could be read rather
-        than taking the whole dialog down."""
+        than taking the whole dialog down.
+
+        "(not found)" on its own means doc.GetElement() genuinely
+        returned nothing - a deleted element, or one on a closed workset.
+        If turning the stored id back into an ElementId is what actually
+        failed, the reason is appended instead of hiding behind the same
+        generic label - a real API problem needs to look different from
+        "harmless, the model just changed since the check ran"."""
         info = {"id": str(eid), "cat": "", "type": "", "name": ""}
+        errors = []
+        el = None
         try:
-            el = doc.GetElement(ElementId(int(eid)))
-        except:
-            el = None
+            target_id = _make_element_id(int(eid), errors)
+            if target_id is not None:
+                el = doc.GetElement(target_id)
+        except Exception as ex:
+            errors.append(str(ex))
         if el is None:
-            info["cat"] = "(not found)"
+            info["cat"] = "(not found - {})".format(errors[-1]) if errors \
+                else "(not found)"
             return info
         try:
             if el.Category is not None:
@@ -2864,19 +2930,27 @@ class IFCSGCheckerWindow:
             ids.update(r.element_ids)
         return ids
 
-    def _ticked_ids_as_net_list(self):
+    def _ticked_ids_as_net_list(self, errors=None):
         """Ticked element ids as a .NET List[ElementId] - Zoom and Isolate
         both call Revit API methods that need a real ICollection<ElementId>,
-        not a Python list/set."""
+        not a Python list/set.
+
+        `errors`, when given a list, collects the reason behind any id
+        that failed to convert - so a caller can tell "nothing was ticked"
+        apart from "rows were ticked but every id failed to convert"."""
         ids = self._ticked_element_ids()
         if not ids:
             return None
         net_ids = System.Collections.Generic.List[ElementId]()
         for eid in ids:
             try:
-                net_ids.Add(ElementId(int(eid)))
-            except:
-                pass
+                target_id = _make_element_id(int(eid), errors)
+            except Exception as ex:
+                target_id = None
+                if errors is not None:
+                    errors.append(str(ex))
+            if target_id is not None:
+                net_ids.Add(target_id)
         return net_ids if net_ids.Count > 0 else None
 
     def _update_tick_count(self):
@@ -2897,11 +2971,29 @@ class IFCSGCheckerWindow:
             return
         self._select_elements_in_revit(list(ids))
 
+    def _no_ticked_net_ids_message(self, ticked_ids, conv_errors):
+        """Message for a Zoom/Isolate click that ended up with nothing to
+        act on - distinguishes an empty tick from ids that were ticked
+        but every one of them failed to convert to a Revit ElementId, so
+        the status text never blames "tick a row" when rows were ticked."""
+        if not ticked_ids:
+            return "Tick at least one row that has elements."
+        msg = "Could not resolve the ticked element ids in Revit"
+        if conv_errors:
+            msg += " - {}".format(conv_errors[-1])
+        return msg
+
     def _on_zoom_ticked(self, sender, args):
         """Select and frame every element behind the ticked rows."""
-        net_ids = self._ticked_ids_as_net_list()
+        ticked_ids = self._ticked_element_ids()
+        conv_errors = []
+        net_ids = self._ticked_ids_as_net_list(conv_errors) if ticked_ids else None
         if net_ids is None:
-            self.txtStatus.Text = "Tick at least one row that has elements."
+            msg = self._no_ticked_net_ids_message(ticked_ids, conv_errors)
+            self.txtStatus.Text = msg
+            if ticked_ids:
+                System.Windows.MessageBox.Show(msg, "Zoom To Ticked",
+                    MessageBoxButton.OK, MessageBoxImage.Error)
             return
         try:
             uidoc.Selection.SetElementIds(net_ids)
@@ -2917,9 +3009,15 @@ class IFCSGCheckerWindow:
     def _on_isolate_ticked(self, sender, args):
         """Temporarily isolate every element behind the ticked rows in the
         active view - Reset Isolate/Hide undoes it."""
-        net_ids = self._ticked_ids_as_net_list()
+        ticked_ids = self._ticked_element_ids()
+        conv_errors = []
+        net_ids = self._ticked_ids_as_net_list(conv_errors) if ticked_ids else None
         if net_ids is None:
-            self.txtStatus.Text = "Tick at least one row that has elements."
+            msg = self._no_ticked_net_ids_message(ticked_ids, conv_errors)
+            self.txtStatus.Text = msg
+            if ticked_ids:
+                System.Windows.MessageBox.Show(msg, "Isolate Ticked",
+                    MessageBoxButton.OK, MessageBoxImage.Error)
             return
         view = doc.ActiveView
         if view is None:

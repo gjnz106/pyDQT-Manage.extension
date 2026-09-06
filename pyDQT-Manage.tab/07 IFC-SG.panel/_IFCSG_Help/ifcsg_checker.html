@@ -120,6 +120,14 @@
       locked document - a popup names the error instead of only updating
       the small status line at the bottom, which was easy to miss.
     </div>
+    <div class="box fixed">
+      Select, Zoom, Isolate and the Detail list all resolve the ids the
+      check stored back into Revit elements with a fallback chain rather
+      than one fixed conversion - so if a future Revit release changes
+      what that conversion needs (as 2026 did elsewhere in this suite), a
+      row still turns into a live element instead of showing "not found"
+      for everything.
+    </div>
   </div>
 
   <div class="pagenav">
