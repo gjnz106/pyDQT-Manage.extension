@@ -69,6 +69,42 @@ def _strip_desc(text):
     """'IfcWall.PARAPET [Parapet Wall]' -> 'IfcWall.PARAPET'."""
     return str(text).split(" [")[0]
 
+
+def _parse_ifc_option(value):
+    """Split a chosen option like 'IfcDoor.*BLASTDOOR' into what actually
+    belongs in each Revit parameter: (export_as, object_type).
+
+    The leading '*' on the part after the entity is the Industry
+    Mapping's own USERDEFINED marker (IFC_SG_MAPPING above uses the same
+    convention as Auto Assign's mapping Excel) - it is a marker for this
+    tool to read, not text that should ever land in a live Revit
+    parameter. USERDEFINED writes the bare entity to Export to IFC As
+    and the cleaned subtype to IfcObjectType; anything else (no subtype,
+    or a standard non-* subtype) keeps the option exactly as chosen in
+    Export to IFC As, with IfcObjectType cleared.
+    """
+    if not value:
+        return "", ""
+    if "." not in value:
+        return value, ""
+    entity, subtype = value.split(".", 1)
+    if subtype.startswith("*"):
+        return entity, subtype[1:]
+    return value, ""
+
+
+def _current_ifc_display(current_ifc, current_objtype):
+    """Grid text for the 'Current IFC' column.
+
+    A USERDEFINED assignment now writes just the bare entity (e.g.
+    "IfcDoor") to Export to IFC As, with the real subtype text in the
+    separate IfcObjectType parameter - shown here as "IfcDoor
+    (BLASTDOOR)" so that information is not simply invisible in the grid.
+    """
+    if current_ifc and current_objtype:
+        return "{} ({})".format(current_ifc, current_objtype)
+    return current_ifc
+
 # Get the current document
 doc = __revit__.ActiveUIDocument.Document
 uidoc = __revit__.ActiveUIDocument
@@ -284,12 +320,18 @@ IFC_SG_MAPPING = {
 
 class ElementData:
     """Class to hold element data for the grid"""
-    def __init__(self, element, category, name, current_ifc):
+    def __init__(self, element, category, name, current_ifc, current_objtype=""):
         self.element = element
         self.element_id = element.Id
         self.category = category
         self.name = name
         self.current_ifc = current_ifc
+        # The free-text ObjectType a USERDEFINED subtype was given - kept
+        # separate from current_ifc (which stays the raw "Export to IFC
+        # As" value change-detection compares against) purely so the grid
+        # can show which custom subtype is actually assigned instead of
+        # just the bare entity name. See _current_ifc_display.
+        self.current_objtype = current_objtype
         self.new_ifc = current_ifc  # Will be modified by user
         # What the "New IFC Export As" dropdown shows for this row, e.g.
         # "IfcWall.PARAPET [Parapet Wall]". Kept separately from new_ifc so a
@@ -687,7 +729,8 @@ class ManualAssignWindow(object):
                 row["eid"] = str(_eid_int(ed.element_id))
                 row["category"] = ed.category
                 row["name"] = ed.name
-                row["current_ifc"] = ed.current_ifc or "(Not Assigned)"
+                row["current_ifc"] = (_current_ifc_display(ed.current_ifc, ed.current_objtype)
+                                       or "(Not Assigned)")
                 row["new_ifc"] = display
                 row["opts"] = opts
                 self.dt.Rows.Add(row)
@@ -880,7 +923,8 @@ class ManualAssignWindow(object):
 
         answer = WPFMessageBox.Show(
             "Apply the IFC class to {} element(s)?\n\n"
-            "This writes the 'Export to IFC As' parameter.".format(len(changes)),
+            "This writes the 'Export to IFC As' parameter, and "
+            "'IfcObjectType' for any USERDEFINED subtype.".format(len(changes)),
             "Confirm changes", MessageBoxButton.YesNo, MessageBoxImage.Question)
         if answer != MessageBoxResult.Yes:
             return
@@ -903,6 +947,8 @@ class ManualAssignWindow(object):
             for ed, ifc_value in changes:
                 try:
                     element = ed.element
+                    export_as, object_type = _parse_ifc_option(ifc_value)
+
                     param = element.LookupParameter("Export to IFC As")
                     if param is None:
                         param = element.LookupParameter("IfcExportAs")
@@ -911,8 +957,25 @@ class ManualAssignWindow(object):
                             DB.BuiltInParameter.IFC_EXPORT_ELEMENT_AS)
 
                     if param and not param.IsReadOnly:
-                        param.Set(ifc_value if ifc_value else "")
+                        param.Set(export_as)
                         success += 1
+
+                        # The real text of a USERDEFINED subtype belongs in
+                        # IfcObjectType, not baked into Export to IFC As as
+                        # literal "*" text - see _parse_ifc_option. Cleared
+                        # (not just left alone) when the new choice carries
+                        # no such subtype, so a value from an earlier
+                        # assignment does not linger and look current.
+                        obj_param = element.LookupParameter("Type IfcObjectType[Type]")
+                        if obj_param is None:
+                            obj_param = element.LookupParameter("IfcObjectType")
+                        if obj_param and not obj_param.IsReadOnly:
+                            obj_param.Set(object_type or "")
+                        elif object_type:
+                            errors.append(
+                                "Element {} - IfcObjectType parameter missing or "
+                                "read-only, '{}' subtype not recorded".format(
+                                    _eid_int(element.Id), object_type))
                     else:
                         errors.append("Element {} - parameter missing or read-only".format(
                             _eid_int(element.Id)))
@@ -943,6 +1006,7 @@ class ManualAssignWindow(object):
         """Re-read the parameter from Revit and reset the pending choices."""
         for ed in self.elements_data:
             ed.current_ifc = GetCurrentIFCExport(ed.element)
+            ed.current_objtype = GetCurrentObjectType(ed.element)
             ed.new_ifc = ed.current_ifc
             ed.new_display = None
         self._reload_rows()
@@ -1010,8 +1074,25 @@ def GetCurrentIFCExport(element):
             return param.AsString()
     except:
         pass
-    
+
     return None
+
+
+def GetCurrentObjectType(element):
+    """Read back the free-text ObjectType a USERDEFINED subtype was
+    given. Named parameter only - no BuiltInParameter holds this value
+    (see Auto Assign's get_current_objtype for why)."""
+    try:
+        param = element.LookupParameter("Type IfcObjectType[Type]")
+        if param is None:
+            param = element.LookupParameter("IfcObjectType")
+        if param and param.HasValue:
+            v = param.AsString()
+            if v:
+                return v
+    except:
+        pass
+    return ""
 
 
 def GetElementName(element):
@@ -1100,8 +1181,9 @@ def CollectElements():
             category = elem.Category.Name if elem.Category else "Unknown"
             name = GetElementName(elem)
             current_ifc = GetCurrentIFCExport(elem)
-            
-            elem_data = ElementData(elem, category, name, current_ifc)
+            current_objtype = GetCurrentObjectType(elem)
+
+            elem_data = ElementData(elem, category, name, current_ifc, current_objtype)
             elements_data.append(elem_data)
         except:
             continue
