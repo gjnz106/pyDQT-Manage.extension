@@ -115,6 +115,16 @@
       identical for every custom subtype and did not say which one was
       actually assigned.
     </div>
+    <div class="box fixed">
+      Applying a <span class="code">[SG] *</span> (USERDEFINED) subtype no
+      longer reports every row as failed just because the model has no
+      <span class="code">IfcObjectType</span>-style parameter bound for
+      that category. <span class="code">Export to IFC As</span> and
+      <span class="code">IFC Predefined Type</span> (the real assignment)
+      still get written and count as a success; only the free-text
+      ObjectType is skipped, and that is now called out as a warning in
+      the result instead of turning the whole row into a failure.
+    </div>
   </div>
 
   <div class="pagenav">

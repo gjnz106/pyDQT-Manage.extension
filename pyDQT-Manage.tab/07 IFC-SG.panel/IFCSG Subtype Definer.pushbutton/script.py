@@ -1177,7 +1177,12 @@ def set_ifc_predefined_type(elem, value, use_type=True, reasons=None):
     return False
 
 def set_ifc_object_type(elem, value, use_type=True, reasons=None):
-    for name in ["IfcObjectType", "IFCObjectType", "ObjectType"]:
+    # "Type IfcObjectType[Type]" is the literal name Auto Assign's own
+    # get_current_objtype/set_ifc_values already use for the same value
+    # in this same project - tried first so the two tools agree on where
+    # a USERDEFINED subtype's text actually lives instead of only one of
+    # them ever finding it.
+    for name in ["Type IfcObjectType[Type]", "IfcObjectType", "IFCObjectType", "ObjectType"]:
         if _try_lookup_set(elem, name, value, reasons):
             return True
     return False
@@ -1188,7 +1193,7 @@ def get_ifc_object_type(elem):
     Named parameter only, same set set_ifc_object_type writes to - there
     is no BuiltInParameter for this value (see Auto Assign's
     get_current_objtype for why IFC_EXPORT_ELEMENT_TYPE_AS is NOT it)."""
-    for name in ["IfcObjectType", "IFCObjectType", "ObjectType"]:
+    for name in ["Type IfcObjectType[Type]", "IfcObjectType", "IFCObjectType", "ObjectType"]:
         v = _try_lookup_get(elem, name)
         if v:
             return v
@@ -2007,6 +2012,7 @@ class IFCSGSubtypeWindow(object):
 
         ok = 0
         fail = 0
+        obj_missing = 0
         debug_lines = []
 
         t = Transaction(doc, "DQT - Set IFC-SG Subtypes")
@@ -2026,6 +2032,7 @@ class IFCSGSubtypeWindow(object):
                     targets_tried.append(("Instance", inst))
 
                 type_ok = False
+                type_obj_missing = False
                 for target_label, target in targets_tried:
                     entity_ok = True
                     pdt_ok = True
@@ -2046,16 +2053,32 @@ class IFCSGSubtypeWindow(object):
                         obj_ok = set_ifc_object_type(
                             target, obj_value, use_type, reasons)
 
-                    if entity_ok and pdt_ok and obj_ok:
+                    # ObjectType does not gate success: the "*" marker
+                    # only means "write USERDEFINED plus this free text
+                    # if there is somewhere to put it" - a model with no
+                    # IfcObjectType-like parameter bound for this category
+                    # still gets the real assignment (Entity + Predefined
+                    # Type = USERDEFINED), it just cannot also carry the
+                    # custom text, which is reported as a warning instead
+                    # of failing the whole row.
+                    if entity_ok and pdt_ok:
                         type_ok = True
+                        if not obj_ok:
+                            type_obj_missing = True
                         # Logging is not allowed to cost a successful
                         # assignment - a formatting slip here used to
                         # raise inside this same try block and roll back
                         # every change already made in this Apply pass.
                         try:
-                            debug_lines.append("[OK] {} '{}' -> {} on {} (id:{})".format(
+                            line = "[OK] {} '{}' -> {} on {} (id:{})".format(
                                 target_label, row.Family + ":" + row.TypeName,
-                                pdt_value, target_label, _eid_int(target.Id)))
+                                pdt_value, target_label, _eid_int(target.Id))
+                            if not obj_ok:
+                                reason_text = "; ".join(reasons) if reasons \
+                                    else "no parameter accepted the value"
+                                line += (" (WARNING: ObjectType '{}' not "
+                                         "recorded - {})").format(obj_value, reason_text)
+                            debug_lines.append(line)
                         except:
                             pass
                         break  # Success on this target, skip next
@@ -2071,6 +2094,8 @@ class IFCSGSubtypeWindow(object):
                         except:
                             pass
 
+                if type_ok and type_obj_missing:
+                    obj_missing += 1
                 if type_ok:
                     ok += 1
                 else:
@@ -2090,6 +2115,15 @@ class IFCSGSubtypeWindow(object):
         if is_ud and obj_value:
             msg += "ObjectType = '{}'\n".format(obj_value)
         msg += "\nSuccess: {}  |  Failed: {}\n".format(ok, fail)
+        if obj_missing:
+            # Entity + Predefined Type still went through for these - only
+            # the ObjectType free text could not be recorded, because no
+            # IfcObjectType-like parameter exists on the element to hold
+            # it. Called out by itself so it reads as "recorded, but only
+            # partly" and not as a plain failure the row count would hide.
+            msg += "({} of the successes could not also record ObjectType " \
+                   "'{}' - no matching parameter on those elements)\n".format(
+                       obj_missing, obj_value)
 
         # Also print to pyRevit output for anyone already using that panel.
         if debug_lines:
@@ -2097,11 +2131,14 @@ class IFCSGSubtypeWindow(object):
             for line in debug_lines:
                 output.print_md("- " + line)
 
-        if fail > 0:
+        if fail > 0 or obj_missing > 0:
             # A summary saying only "4 failed, check pyRevit output" sends
             # the user hunting through a separate panel most people never
             # open. Show the actual per-row reason - parameter missing,
-            # read-only, or the exception Revit raised - right here.
+            # read-only, or the exception Revit raised - right here. Also
+            # shown (not just a plain "Done" box) when nothing failed
+            # outright but some ObjectType text still could not be
+            # recorded, so that warning is not silently invisible.
             show_text_report_dialog(
                 "Apply Result - {} succeeded, {} failed".format(ok, fail),
                 msg.strip(),
