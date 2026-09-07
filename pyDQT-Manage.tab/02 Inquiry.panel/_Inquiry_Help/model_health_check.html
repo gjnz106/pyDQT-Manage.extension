@@ -48,6 +48,9 @@
   <div class="card">
     <h2>Workflow</h2>
     <ol class="steps">
+      <li>(Optional) Open the <b>Settings</b> tab first to adjust any
+        metric's thresholds or weight to match your own standards, before
+        running an analysis.</li>
       <li><b>Re-Analyze</b> re-runs all 17 metrics against the current
         model.</li>
       <li>Read the overall score and grade, then scan the heatmap for
@@ -64,6 +67,21 @@
       This tool only reads the model - fixing a flagged metric (purging
       unused content, resolving warnings, converting in-place families,
       etc.) means switching to the matching tool elsewhere in pyDQT.
+    </div>
+    <div class="box fixed">
+      <b>Settings tab.</b> Every metric's 5 threshold values (the upper
+      bound of Good / Acceptable / Warning / Concerning / Critical -
+      anything above Critical is Severe) and its weight (1-5, how much it
+      counts toward the overall score) can be edited directly, right next
+      to the Dashboard tab. <span class="code">Save & Apply</span> writes
+      the change to <span class="code">threshold_config.json</span> next
+      to this tool - so it survives closing Revit - and immediately
+      re-scores the dashboard from the last analysis, no need to
+      Re-Analyze again just because a threshold changed.
+      <span class="code">Reset to Defaults</span> restores every metric to
+      the built-in values and deletes that file. A row with an invalid
+      value (not a number, or out of ascending order) blocks the whole
+      save rather than silently accepting the other 16.
     </div>
   </div>
 
