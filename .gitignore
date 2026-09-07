@@ -2,6 +2,11 @@
 # stale type in its shared parameter file - runtime artifacts, not source.
 *.backup-*.txt
 
+# Model Health Check's per-machine custom thresholds/weights (Settings
+# tab -> Save & Apply) - a user's own edited values, not source; the
+# tool falls back to its hardcoded defaults when this file is absent.
+HealthCheck.pushbutton/threshold_config.json
+
 # IronPython/CPython bytecode
 __pycache__/
 *.pyc

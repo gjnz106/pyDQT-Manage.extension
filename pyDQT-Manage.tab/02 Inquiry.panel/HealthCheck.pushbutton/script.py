@@ -33,7 +33,7 @@ from System.Windows import (
     Window, Thickness, HorizontalAlignment, VerticalAlignment,
     WindowStartupLocation, Visibility, TextWrapping, FontWeights,
     GridLength, GridUnitType, MessageBox, MessageBoxButton, MessageBoxImage,
-    CornerRadius as WinCornerRadius, Point
+    MessageBoxResult, CornerRadius as WinCornerRadius, Point
 )
 import System.Windows.Controls as WPFControls
 from System.Windows.Controls import (
@@ -59,6 +59,8 @@ WPFGrid = WPFControls.Grid
 import os
 import datetime
 import codecs
+import copy
+import json
 from collections import OrderedDict
 
 
@@ -240,6 +242,115 @@ METRIC_THRESHOLDS = OrderedDict([
         "weight": 4
     }),
 ])
+
+# The hardcoded values above, snapshotted before any saved override is
+# applied - "Reset to Defaults" in the Settings tab restores from this,
+# never from METRIC_THRESHOLDS itself (which gets mutated in place below).
+METRIC_THRESHOLDS_DEFAULTS = copy.deepcopy(METRIC_THRESHOLDS)
+
+# ============================================================
+# CUSTOM THRESHOLDS - user-editable via the Settings tab, persisted to
+# disk so a change survives closing the tool. Only "thresholds" and
+# "weight" are ever overridden: label/tooltip/unit/selectable describe
+# the metric itself, not a policy the tool measures it against, so they
+# always come from the hardcoded definition above.
+# ============================================================
+THRESHOLD_CONFIG_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "threshold_config.json")
+
+
+def _load_threshold_overrides():
+    """{key: {"thresholds": [...], "weight": N}} from disk, or {} if the
+    file is missing, unreadable, or not valid JSON - a broken settings
+    file must never stop the tool from opening; it just falls back to
+    the hardcoded defaults for every entry."""
+    if not os.path.isfile(THRESHOLD_CONFIG_PATH):
+        return {}
+    try:
+        with open(THRESHOLD_CONFIG_PATH, "r") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _valid_thresholds_list(t):
+    """5 non-decreasing numbers - the shape get_health_score/get_status_text
+    actually need. Anything else (wrong length, non-numeric, out of
+    order, or a bool masquerading as a number) is rejected so a
+    corrupted or hand-edited settings file can only ever fall back to
+    the default for that one metric, never break the scoring math."""
+    if not isinstance(t, list) or len(t) != 5:
+        return False
+    for x in t:
+        if isinstance(x, bool) or not isinstance(x, (int, float)):
+            return False
+    return all(t[i] <= t[i + 1] for i in range(4))
+
+
+def _parse_threshold_number(text):
+    """One Settings-tab textbox's text -> int (or float, if it genuinely
+    has a fractional part) - every hardcoded default is a whole number,
+    so keeping a typed "100" as 100 rather than 100.0 matches what the
+    user wrote and what a re-opened Settings tab would show back."""
+    text = (text or "").strip()
+    if not text:
+        raise ValueError("value cannot be blank")
+    try:
+        v = float(text)
+    except ValueError:
+        raise ValueError("'{}' is not a number".format(text))
+    if v != v or v in (float("inf"), float("-inf")):
+        raise ValueError("'{}' is not a valid number".format(text))
+    return int(v) if v == int(v) else v
+
+
+def _apply_threshold_overrides():
+    """Merge saved overrides onto METRIC_THRESHOLDS in place, so every
+    place below that reads METRIC_THRESHOLDS[key]["thresholds"]/["weight"]
+    - scoring, coloring, the heatmap, the Excel/HTML export - automatically
+    sees the customized values with no other change needed. An entry for
+    an unknown key, or one that fails validation, is simply skipped and
+    that metric keeps its hardcoded default."""
+    for key, val in _load_threshold_overrides().items():
+        if key not in METRIC_THRESHOLDS or not isinstance(val, dict):
+            continue
+        t = val.get("thresholds")
+        if _valid_thresholds_list(t):
+            METRIC_THRESHOLDS[key]["thresholds"] = list(t)
+        w = val.get("weight")
+        if isinstance(w, int) and not isinstance(w, bool) and 1 <= w <= 5:
+            METRIC_THRESHOLDS[key]["weight"] = w
+
+
+def _save_threshold_overrides():
+    """Persist the CURRENT thresholds/weight for every metric - not only
+    the ones that differ from the hardcoded default - so the file on disk
+    is a complete, self-describing snapshot: readable on its own, and
+    reloading it always reproduces exactly what was on screen when Save
+    was pressed."""
+    data = {}
+    for key, cfg in METRIC_THRESHOLDS.items():
+        data[key] = {"thresholds": list(cfg["thresholds"]), "weight": cfg.get("weight", 1)}
+    with open(THRESHOLD_CONFIG_PATH, "w") as f:
+        json.dump(data, f, indent=2)
+
+
+def _reset_threshold_overrides():
+    """Restore every metric's thresholds/weight to the hardcoded default
+    and remove the saved settings file, so a fresh run of the tool (no
+    file at all) behaves identically to right after Reset."""
+    for key, cfg in METRIC_THRESHOLDS_DEFAULTS.items():
+        METRIC_THRESHOLDS[key]["thresholds"] = list(cfg["thresholds"])
+        METRIC_THRESHOLDS[key]["weight"] = cfg.get("weight", 1)
+    if os.path.isfile(THRESHOLD_CONFIG_PATH):
+        try:
+            os.remove(THRESHOLD_CONFIG_PATH)
+        except Exception:
+            pass
+
+
+_apply_threshold_overrides()
 
 
 # ============================================================
@@ -747,7 +858,281 @@ class ModelHealthWindow(Window):
         WPFGrid.SetRow(footer, 5)
         root.Children.Add(footer)
 
-        self.Content = root
+        # ---- Tabs: the dashboard above, plus Settings to edit the
+        # thresholds/weights BEFORE running an analysis, per request. ----
+        self.tabs = WPFControls.TabControl()
+        self.tabs.Background = brush(DQT_BACKGROUND)
+        self.tabs.BorderThickness = Thickness(0)
+
+        self.tab_dashboard = WPFControls.TabItem()
+        self.tab_dashboard.Header = self._make_tab_header("Dashboard")
+        self.tab_dashboard.Content = root
+        self.tabs.Items.Add(self.tab_dashboard)
+
+        self.tab_settings = WPFControls.TabItem()
+        self.tab_settings.Header = self._make_tab_header(u"⚙ Settings")
+        self.tab_settings.Content = self._make_settings_tab()
+        self.tabs.Items.Add(self.tab_settings)
+
+        self.Content = self.tabs
+
+    def _make_tab_header(self, text):
+        tb = TextBlock()
+        tb.Text = text
+        tb.FontSize = 13
+        tb.FontWeight = FontWeights.SemiBold
+        tb.Foreground = brush(DQT_TEXT_DARK)
+        tb.Padding = Thickness(8, 3, 8, 3)
+        return tb
+
+    # ---- SETTINGS TAB: edit threshold bands + weight per metric ----
+    def _make_settings_tab(self):
+        outer = WPFGrid()
+        outer.Margin = Thickness(14)
+        for h in [GridLength(1, GridUnitType.Auto),   # intro
+                  GridLength(1, GridUnitType.Star),   # table
+                  GridLength(1, GridUnitType.Auto)]:  # save bar
+            rd = RowDefinition()
+            rd.Height = h
+            outer.RowDefinitions.Add(rd)
+
+        intro = Border()
+        intro.Background = brush(DQT_PRIMARY)
+        intro.CornerRadius = WinCornerRadius(6)
+        intro.Padding = Thickness(16, 12, 16, 12)
+        intro.Margin = Thickness(0, 0, 0, 10)
+        intro_txt = TextBlock()
+        intro_txt.Text = (
+            u"Set the threshold boundaries and weight used to grade each "
+            u"metric, then “Save & Apply” before running "
+            u"Re-Analyze. Each value is the upper bound of its band - "
+            u"Good ≤ Acceptable ≤ Warning ≤ Concerning ≤ "
+            u"Critical - anything above the Critical value is Severe. "
+            u"Weight (1-5) is how much that metric counts toward the "
+            u"overall weighted score.")
+        intro_txt.FontSize = 12
+        intro_txt.TextWrapping = TextWrapping.Wrap
+        intro_txt.Foreground = brush(DQT_TEXT_DARK)
+        intro.Child = intro_txt
+        WPFGrid.SetRow(intro, 0)
+        outer.Children.Add(intro)
+
+        table_border = Border()
+        table_border.Background = brush("#FFFFFF")
+        table_border.BorderBrush = brush(DQT_BORDER)
+        table_border.BorderThickness = Thickness(1)
+        table_border.CornerRadius = WinCornerRadius(6)
+        table_border.Margin = Thickness(0, 0, 0, 10)
+        sv = ScrollViewer()
+        sv.VerticalScrollBarVisibility = ScrollBarVisibility.Auto
+        sv.HorizontalScrollBarVisibility = ScrollBarVisibility.Auto
+
+        table = WPFGrid()
+        table.Margin = Thickness(10)
+        col_widths = [190, 90, 100, 90, 105, 85, 100]
+        for w in col_widths:
+            cd = ColumnDefinition()
+            cd.Width = GridLength(w)
+            table.ColumnDefinitions.Add(cd)
+
+        headers = [u"Metric", u"Good ≤", u"Acceptable ≤",
+                   u"Warning ≤", u"Concerning ≤", u"Critical ≤",
+                   u"Weight (1-5)"]
+        header_row = RowDefinition()
+        header_row.Height = GridLength(1, GridUnitType.Auto)
+        table.RowDefinitions.Add(header_row)
+        for ci, htext in enumerate(headers):
+            htb = TextBlock()
+            htb.Text = htext
+            htb.FontSize = 10
+            htb.FontWeight = FontWeights.Bold
+            htb.Foreground = brush(DQT_TEXT_DARK)
+            htb.Margin = Thickness(4, 6, 4, 6)
+            htb.TextWrapping = TextWrapping.Wrap
+            WPFGrid.SetRow(htb, 0)
+            WPFGrid.SetColumn(htb, ci)
+            table.Children.Add(htb)
+
+        self._threshold_boxes = OrderedDict()
+        row_i = 1
+        for key, cfg in METRIC_THRESHOLDS.items():
+            rd = RowDefinition()
+            rd.Height = GridLength(1, GridUnitType.Auto)
+            table.RowDefinitions.Add(rd)
+            row_bg = brush("#FAF6EC") if row_i % 2 == 0 else brush("#FFFFFF")
+
+            lbl = TextBlock()
+            lbl.Text = cfg["label"]
+            lbl.FontSize = 11
+            lbl.FontWeight = FontWeights.SemiBold
+            lbl.Foreground = brush(DQT_TEXT)
+            lbl.VerticalAlignment = VerticalAlignment.Center
+            lbl.Margin = Thickness(4, 4, 4, 4)
+            lbl.Background = row_bg
+            tip = cfg.get("tooltip", "")
+            if tip:
+                lbl.ToolTip = tip
+            WPFGrid.SetRow(lbl, row_i)
+            WPFGrid.SetColumn(lbl, 0)
+            table.Children.Add(lbl)
+
+            boxes = []
+            for ci in range(5):
+                tb = TextBox()
+                tb.Text = str(cfg["thresholds"][ci])
+                tb.FontSize = 11
+                tb.Padding = Thickness(4, 3, 4, 3)
+                tb.Margin = Thickness(3, 3, 3, 3)
+                tb.HorizontalContentAlignment = HorizontalAlignment.Center
+                tb.BorderBrush = brush(DQT_BORDER)
+                tb.Background = brush("#FFFFFF")
+                WPFGrid.SetRow(tb, row_i)
+                WPFGrid.SetColumn(tb, ci + 1)
+                table.Children.Add(tb)
+                boxes.append(tb)
+
+            wtb = TextBox()
+            wtb.Text = str(cfg.get("weight", 1))
+            wtb.FontSize = 11
+            wtb.Padding = Thickness(4, 3, 4, 3)
+            wtb.Margin = Thickness(3, 3, 3, 3)
+            wtb.HorizontalContentAlignment = HorizontalAlignment.Center
+            wtb.BorderBrush = brush(DQT_BORDER)
+            wtb.Background = brush("#FFFFFF")
+            WPFGrid.SetRow(wtb, row_i)
+            WPFGrid.SetColumn(wtb, 6)
+            table.Children.Add(wtb)
+
+            self._threshold_boxes[key] = {"boxes": boxes, "weight_box": wtb}
+            row_i += 1
+
+        sv.Content = table
+        table_border.Child = sv
+        WPFGrid.SetRow(table_border, 1)
+        outer.Children.Add(table_border)
+
+        # Save bar: status text (left) + Reset/Save buttons (right)
+        status_bar = WPFGrid()
+        c1 = ColumnDefinition()
+        c1.Width = GridLength(1, GridUnitType.Star)
+        c2 = ColumnDefinition()
+        c2.Width = GridLength(1, GridUnitType.Auto)
+        status_bar.ColumnDefinitions.Add(c1)
+        status_bar.ColumnDefinitions.Add(c2)
+
+        self.txt_settings_status = TextBlock()
+        self.txt_settings_status.FontSize = 11
+        self.txt_settings_status.Foreground = brush("#888888")
+        self.txt_settings_status.VerticalAlignment = VerticalAlignment.Center
+        WPFGrid.SetColumn(self.txt_settings_status, 0)
+        status_bar.Children.Add(self.txt_settings_status)
+
+        btn_group = StackPanel()
+        btn_group.Orientation = Orientation.Horizontal
+
+        self.btn_reset_thresholds = Button()
+        self.btn_reset_thresholds.Content = u"↺ Reset to Defaults"
+        self.btn_reset_thresholds.Background = brush("#FFFFFF")
+        self.btn_reset_thresholds.Foreground = brush(DQT_TEXT_DARK)
+        self.btn_reset_thresholds.Padding = Thickness(12, 8, 12, 8)
+        self.btn_reset_thresholds.BorderBrush = brush(DQT_PRIMARY_DARK)
+        self.btn_reset_thresholds.BorderThickness = Thickness(1)
+        self.btn_reset_thresholds.Margin = Thickness(0, 0, 8, 0)
+        self.btn_reset_thresholds.Cursor = Cursors.Hand
+        self.btn_reset_thresholds.Click += self._on_reset_thresholds
+        btn_group.Children.Add(self.btn_reset_thresholds)
+
+        self.btn_save_thresholds = Button()
+        self.btn_save_thresholds.Content = "Save & Apply"
+        self.btn_save_thresholds.Background = brush(DQT_PRIMARY)
+        self.btn_save_thresholds.Foreground = brush(DQT_TEXT_DARK)
+        self.btn_save_thresholds.FontWeight = FontWeights.SemiBold
+        self.btn_save_thresholds.Padding = Thickness(16, 8, 16, 8)
+        self.btn_save_thresholds.BorderBrush = brush(DQT_PRIMARY_DARK)
+        self.btn_save_thresholds.BorderThickness = Thickness(1)
+        self.btn_save_thresholds.Cursor = Cursors.Hand
+        self.btn_save_thresholds.Click += self._on_save_thresholds
+        btn_group.Children.Add(self.btn_save_thresholds)
+
+        WPFGrid.SetColumn(btn_group, 1)
+        status_bar.Children.Add(btn_group)
+
+        WPFGrid.SetRow(status_bar, 2)
+        outer.Children.Add(status_bar)
+
+        return outer
+
+    def _on_save_thresholds(self, sender, args):
+        """Validate every row, then apply + persist in one all-or-nothing
+        step - a bad value in one metric must never silently save the
+        other 16 while leaving that one row's edit lost."""
+        new_values = {}
+        for key, refs in self._threshold_boxes.items():
+            label = METRIC_THRESHOLDS[key]["label"]
+            try:
+                t = [_parse_threshold_number(tb.Text) for tb in refs["boxes"]]
+            except ValueError as ex:
+                MessageBox.Show(
+                    u"{}: {}".format(label, ex),
+                    "Invalid Value", MessageBoxButton.OK, MessageBoxImage.Warning)
+                return
+            if not _valid_thresholds_list(t):
+                MessageBox.Show(
+                    u"{}: the 5 values must be in non-decreasing order\n"
+                    u"(Good ≤ Acceptable ≤ Warning ≤ "
+                    u"Concerning ≤ Critical).".format(label),
+                    "Invalid Thresholds", MessageBoxButton.OK, MessageBoxImage.Warning)
+                return
+            w_text = (refs["weight_box"].Text or "").strip()
+            try:
+                w = int(w_text)
+                is_int = float(w_text) == w
+            except Exception:
+                is_int = False
+            if not is_int or not (1 <= w <= 5):
+                MessageBox.Show(
+                    u"{}: Weight must be a whole number from 1 to 5.".format(label),
+                    "Invalid Weight", MessageBoxButton.OK, MessageBoxImage.Warning)
+                return
+            new_values[key] = (t, w)
+
+        for key, (t, w) in new_values.items():
+            METRIC_THRESHOLDS[key]["thresholds"] = t
+            METRIC_THRESHOLDS[key]["weight"] = w
+        _save_threshold_overrides()
+
+        # Re-score/re-render from the metrics already collected - no need
+        # to re-query Revit, only the grading policy changed.
+        if self.metrics:
+            self._update_score()
+            self._build_heatmap()
+            self._build_recommendations()
+
+        self.txt_settings_status.Text = "Saved and applied at {}.".format(
+            datetime.datetime.now().strftime("%H:%M:%S"))
+        self.tabs.SelectedItem = self.tab_dashboard
+
+    def _on_reset_thresholds(self, sender, args):
+        result = MessageBox.Show(
+            "Reset every metric's thresholds and weight to the built-in "
+            "defaults?\n\nThis also deletes the saved settings file.",
+            "Reset to Defaults", MessageBoxButton.YesNo, MessageBoxImage.Question)
+        if result != MessageBoxResult.Yes:
+            return
+
+        _reset_threshold_overrides()
+        for key, refs in self._threshold_boxes.items():
+            cfg = METRIC_THRESHOLDS[key]
+            for ci, tb in enumerate(refs["boxes"]):
+                tb.Text = str(cfg["thresholds"][ci])
+            refs["weight_box"].Text = str(cfg.get("weight", 1))
+
+        if self.metrics:
+            self._update_score()
+            self._build_heatmap()
+            self._build_recommendations()
+
+        self.txt_settings_status.Text = "Reset to built-in defaults."
 
     # ---- HEADER ----
     def _make_header(self):
@@ -1437,7 +1822,13 @@ class ModelHealthWindow(Window):
             "  Re-Analyze re-runs all metrics against the current model.\n"
             "  Each row in the recommendations list can Select Elements to "
             "select the offending elements straight in Revit.\n"
-            "  Export Report saves the dashboard as a report file.",
+            "  Export Report saves the dashboard as a report file.\n\n"
+            "SETTINGS TAB\n"
+            "  Edit each metric's 5 threshold values and weight (1-5) "
+            "before running an analysis. Save & Apply writes them to "
+            "threshold_config.json next to this tool and re-scores the "
+            "dashboard immediately; Reset to Defaults restores the "
+            "built-in values and deletes that file.",
             "Model Health Check - Help",
             MessageBoxButton.OK, MessageBoxImage.Information)
 
