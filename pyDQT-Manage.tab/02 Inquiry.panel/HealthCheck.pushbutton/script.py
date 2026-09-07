@@ -39,8 +39,17 @@ import System.Windows.Controls as WPFControls
 from System.Windows.Controls import (
     StackPanel, Border, TextBlock, Button, ScrollViewer, Canvas,
     ColumnDefinition, RowDefinition, Orientation, ScrollBarVisibility,
-    ToolTip, TextBox
+    ToolTip
 )
+# TextBox is deliberately NOT imported bare here: Autodesk.Revit.UI (wildcard-
+# imported below, after this) also defines a class named TextBox - its
+# ribbon-panel text box control, which has no public constructor - and a
+# wildcard import always wins over an earlier explicit one of the same
+# name. A bare TextBox() therefore silently resolves to the wrong class
+# and fails at runtime with "Cannot create instances of TextBox because
+# it has no public constructors". Always construct it as
+# WPFControls.TextBox() instead, the same defensive pattern already used
+# for WPFGrid = WPFControls.Grid against the identical Grid collision.
 from System.Windows.Media import (
     SolidColorBrush, Color, BrushConverter, Pen,
     PathGeometry, PathFigure, ArcSegment, SweepDirection,
@@ -978,7 +987,7 @@ class ModelHealthWindow(Window):
 
             boxes = []
             for ci in range(5):
-                tb = TextBox()
+                tb = WPFControls.TextBox()
                 tb.Text = str(cfg["thresholds"][ci])
                 tb.FontSize = 11
                 tb.Padding = Thickness(4, 3, 4, 3)
@@ -991,7 +1000,7 @@ class ModelHealthWindow(Window):
                 table.Children.Add(tb)
                 boxes.append(tb)
 
-            wtb = TextBox()
+            wtb = WPFControls.TextBox()
             wtb.Text = str(cfg.get("weight", 1))
             wtb.FontSize = 11
             wtb.Padding = Thickness(4, 3, 4, 3)
