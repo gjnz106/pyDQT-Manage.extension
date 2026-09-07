@@ -110,6 +110,12 @@ TYPE_KEY_ALIASES = {
     "single line text": "TEXT", "character": "TEXT", "varchar": "TEXT",
     "multiline text": "MULTILINE_TEXT", "multi line text": "MULTILINE_TEXT",
     "memo": "MULTILINE_TEXT", "note": "MULTILINE_TEXT", "notes": "MULTILINE_TEXT",
+    # "MULTILINETEXT" (no space) is the literal DATATYPE token a Revit
+    # shared parameter file's own PARAM lines use - normalize_type_key
+    # only strips underscores/hyphens, not a run-together compound word,
+    # so without this exact-spelling alias every multiline-text parameter
+    # imported from a shared parameter file silently fell back to TEXT.
+    "multilinetext": "MULTILINE_TEXT",
     "url": "URL", "hyperlink": "URL", "link": "URL",
     "boolean": "YESNO", "bool": "YESNO", "yesno": "YESNO", "yes/no": "YESNO",
     "yes no": "YESNO", "flag": "YESNO", "checkbox": "YESNO",
@@ -711,6 +717,49 @@ class RequirementParser:
             req.disciplines = data["discs"]
             req.param_type_raw = data["type_raw"]
             req.param_type_key = normalize_type_key(data["type_raw"])
+            reqs.append(req)
+        return reqs
+
+    @staticmethod
+    def from_shared_parameter_file(filepath):
+        """Parse a Revit shared parameter (.txt) file directly - every
+        definition it contains becomes a requirement, bulk-loaded in one
+        pass instead of adding each one by hand through Revit's own
+        Shared Parameters dialog.
+
+        A shared parameter file carries no project category bindings at
+        all (that only exists once a parameter is bound in a project) -
+        so every requirement here comes back with categories=[], and
+        Add Parameters' existing "some parameters have no category"
+        prompt covers the whole batch in one picker, exactly as it
+        already does for a source row with a blank category column.
+
+        Reuses _read_sp_file - the same reader _purge_stale_sp_definitions
+        relies on for round-tripping this tool's own shared parameter
+        file - so both paths agree on how the file's encoding and PARAM
+        line layout (PARAM, GUID, NAME, DATATYPE, ...) are read. A
+        malformed or duplicate-named row is skipped rather than aborting
+        the whole import, the same resilience the Excel reader already
+        has for one bad sheet or row."""
+        text, _ = _read_sp_file(filepath)
+        seen = {}
+        for line in text.split("\n"):
+            line = line.rstrip("\r")
+            if not line.startswith("PARAM\t"):
+                continue
+            parts = line.split("\t")
+            if len(parts) < 4:
+                continue  # malformed row - not enough columns to trust
+            name = parts[2].strip()
+            if not name or name in seen:
+                continue  # blank name, or an earlier row already claimed it
+            seen[name] = parts[3].strip()
+
+        reqs = []
+        for name in sorted(seen.keys()):
+            req = ParamRequirement(name)
+            req.param_type_raw = seen[name]
+            req.param_type_key = normalize_type_key(seen[name])
             reqs.append(req)
         return reqs
 
@@ -1544,9 +1593,11 @@ XAML_STR = '''
             <StackPanel Orientation="Horizontal">
                 <TextBlock Text="Import from:" FontWeight="SemiBold" FontSize="12" 
                            VerticalAlignment="Center" Margin="0,0,10,0" Foreground="#5D4E37"/>
-                <Button x:Name="btnImportXML" Content="&#x1F4C4; Autodesk Model Checker XML" 
+                <Button x:Name="btnImportXML" Content="&#x1F4C4; Autodesk Model Checker XML"
                         Style="{StaticResource BtnPrimary}" Margin="0,0,6,0"/>
-                <Button x:Name="btnImportExcel" Content="&#x1F4CA; Excel Parameter Mapping" 
+                <Button x:Name="btnImportExcel" Content="&#x1F4CA; Excel Parameter Mapping"
+                        Style="{StaticResource BtnPrimary}" Margin="0,0,6,0"/>
+                <Button x:Name="btnImportSPF" Content="&#x1F4CB; Shared Parameter File"
                         Style="{StaticResource BtnPrimary}" Margin="0,0,20,0"/>
                 <TextBlock x:Name="txtSourceInfo" Text="No source loaded" FontSize="11" 
                            Foreground="#999" VerticalAlignment="Center"/>
@@ -1726,7 +1777,7 @@ class ParamLoaderWindow:
     
     def _get_controls(self):
         names = [
-            "btnImportXML", "btnImportExcel", "txtSourceInfo",
+            "btnImportXML", "btnImportExcel", "btnImportSPF", "txtSourceInfo",
             "txtTotalParams", "txtExisting", "txtToAdd", "txtCategories",
             "btnSelectNew", "btnSelectAll", "btnSelectNone",
             "txtSearch", "btnShowAll", "btnShowNew", "btnShowExist",
@@ -1753,8 +1804,8 @@ class ParamLoaderWindow:
             "  TO ADD     - missing, and what the Add button will create\n"
             "  CATEGORIES - distinct categories the list touches\n\n"
             "WORKFLOW\n"
-            "  1. Import from an Autodesk Model Checker XML or an Excel "
-            "mapping\n"
+            "  1. Import from an Autodesk Model Checker XML, an Excel "
+            "mapping, or a Revit shared parameter (.txt) file\n"
             "  2. Filter/sort the list, tick the parameters you want\n"
             "     (Select New picks everything not already in the model)\n"
             "  3. Add Parameters creates them as Instance project parameters\n"
@@ -1768,6 +1819,7 @@ class ParamLoaderWindow:
         self.btnHelp.Click += self._on_help
         self.btnImportXML.Click += self._on_import_xml
         self.btnImportExcel.Click += self._on_import_excel
+        self.btnImportSPF.Click += self._on_import_spf
         self.btnSelectNew.Click += self._on_select_new
         self.btnSelectAll.Click += self._on_select_all
         self.btnSelectNone.Click += self._on_select_none
@@ -1838,7 +1890,30 @@ class ParamLoaderWindow:
                 System.Windows.MessageBox.Show(
                     "Error:\n{}".format(str(e)),
                     "Import Error", MessageBoxButton.OK, MessageBoxImage.Error)
-    
+
+    def _on_import_spf(self, sender, args):
+        from System.Windows.Forms import OpenFileDialog, DialogResult
+        dlg = OpenFileDialog()
+        dlg.Filter = "Shared Parameter Files (*.txt)|*.txt|All Files (*.*)|*.*"
+        dlg.Title = "Import Shared Parameter File"
+        if dlg.ShowDialog() == DialogResult.OK:
+            try:
+                reqs = RequirementParser.from_shared_parameter_file(dlg.FileName)
+                if not reqs:
+                    System.Windows.MessageBox.Show(
+                        "No parameter definitions were found in this file.\n\n"
+                        "Make sure it is a Revit shared parameter file "
+                        "(Manage tab > Shared Parameters > ... shows its path), "
+                        "not a project or family file.",
+                        "Nothing to Import", MessageBoxButton.OK, MessageBoxImage.Warning)
+                    return
+                self.requirements = reqs
+                self._post_import(os.path.basename(dlg.FileName))
+            except Exception as e:
+                System.Windows.MessageBox.Show(
+                    "Error:\n{}".format(str(e)),
+                    "Import Error", MessageBoxButton.OK, MessageBoxImage.Error)
+
     def _post_import(self, source_name):
         """After import: check existing, update UI"""
         self.window.Cursor = System.Windows.Input.Cursors.Wait

@@ -46,9 +46,11 @@
     <h2>Workflow</h2>
     <ol class="steps">
       <li><b>Import</b> the requirement list - from an Autodesk Model
-        Checker XML export, or from an Excel mapping file. Excel also lets
-        you map a <b>Parameter Type</b> column, so each parameter is
-        created with the right data type instead of always Text.</li>
+        Checker XML export, an Excel mapping file, or a Revit
+        <b>shared parameter (.txt) file</b> to bulk-load every definition
+        it contains in one pass. Excel also lets you map a
+        <b>Parameter Type</b> column, so each parameter is created with
+        the right data type instead of always Text.</li>
       <li><b>Filter / sort</b> the list (All / New / Existing, sortable by
         name, group, category or status) and <b>tick</b> the parameters you
         want. <span class="code">Select New</span> ticks everything not
@@ -119,6 +121,18 @@
       assembly the old importer depended on. Only the legacy binary
       <code>.xls</code> still needs Excel; re-save such a file as
       <code>.xlsx</code> and it imports without it.
+    </div>
+    <div class="box fixed">
+      <b>Shared Parameter File import.</b> Point it at any Revit shared
+      parameter <code>.txt</code> file (find its path under Manage tab
+      &rsaquo; Shared Parameters) and every definition it contains loads
+      as a requirement, each with its real data type carried over -
+      instead of adding them one at a time through Revit's own Shared
+      Parameters dialog. The file itself has no category information (a
+      shared parameter definition is not yet bound to anything), so every
+      parameter it contributes comes up as <b>Missing category</b> and
+      the usual picker lets you assign categories to the whole batch in
+      one step.
     </div>
   </div>
 
