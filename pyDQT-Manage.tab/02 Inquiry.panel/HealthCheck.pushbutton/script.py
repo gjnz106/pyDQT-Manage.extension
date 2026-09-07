@@ -919,7 +919,7 @@ class ModelHealthWindow(Window):
             u"Critical - anything above the Critical value is Severe. "
             u"Weight (1-5) is how much that metric counts toward the "
             u"overall weighted score.")
-        intro_txt.FontSize = 12
+        intro_txt.FontSize = 13
         intro_txt.TextWrapping = TextWrapping.Wrap
         intro_txt.Foreground = brush(DQT_TEXT_DARK)
         intro.Child = intro_txt
@@ -936,9 +936,14 @@ class ModelHealthWindow(Window):
         sv.VerticalScrollBarVisibility = ScrollBarVisibility.Auto
         sv.HorizontalScrollBarVisibility = ScrollBarVisibility.Auto
 
+        # Column widths and cell padding/margins sized for FontSize 13 -
+        # the same size the Dashboard's heatmap uses for its own row
+        # content (metric label / value), so the two tabs read as one
+        # consistent tool rather than Settings looking like a squeezed-in
+        # afterthought.
         table = WPFGrid()
         table.Margin = Thickness(10)
-        col_widths = [190, 90, 100, 90, 105, 85, 100]
+        col_widths = [230, 105, 120, 105, 130, 100, 120]
         for w in col_widths:
             cd = ColumnDefinition()
             cd.Width = GridLength(w)
@@ -953,10 +958,10 @@ class ModelHealthWindow(Window):
         for ci, htext in enumerate(headers):
             htb = TextBlock()
             htb.Text = htext
-            htb.FontSize = 10
+            htb.FontSize = 13
             htb.FontWeight = FontWeights.Bold
             htb.Foreground = brush(DQT_TEXT_DARK)
-            htb.Margin = Thickness(4, 6, 4, 6)
+            htb.Margin = Thickness(6, 8, 6, 8)
             htb.TextWrapping = TextWrapping.Wrap
             WPFGrid.SetRow(htb, 0)
             WPFGrid.SetColumn(htb, ci)
@@ -972,11 +977,11 @@ class ModelHealthWindow(Window):
 
             lbl = TextBlock()
             lbl.Text = cfg["label"]
-            lbl.FontSize = 11
+            lbl.FontSize = 13
             lbl.FontWeight = FontWeights.SemiBold
             lbl.Foreground = brush(DQT_TEXT)
             lbl.VerticalAlignment = VerticalAlignment.Center
-            lbl.Margin = Thickness(4, 4, 4, 4)
+            lbl.Margin = Thickness(6, 6, 6, 6)
             lbl.Background = row_bg
             tip = cfg.get("tooltip", "")
             if tip:
@@ -989,9 +994,9 @@ class ModelHealthWindow(Window):
             for ci in range(5):
                 tb = WPFControls.TextBox()
                 tb.Text = str(cfg["thresholds"][ci])
-                tb.FontSize = 11
-                tb.Padding = Thickness(4, 3, 4, 3)
-                tb.Margin = Thickness(3, 3, 3, 3)
+                tb.FontSize = 13
+                tb.Padding = Thickness(6, 5, 6, 5)
+                tb.Margin = Thickness(4, 4, 4, 4)
                 tb.HorizontalContentAlignment = HorizontalAlignment.Center
                 tb.BorderBrush = brush(DQT_BORDER)
                 tb.Background = brush("#FFFFFF")
@@ -1002,9 +1007,9 @@ class ModelHealthWindow(Window):
 
             wtb = WPFControls.TextBox()
             wtb.Text = str(cfg.get("weight", 1))
-            wtb.FontSize = 11
-            wtb.Padding = Thickness(4, 3, 4, 3)
-            wtb.Margin = Thickness(3, 3, 3, 3)
+            wtb.FontSize = 13
+            wtb.Padding = Thickness(6, 5, 6, 5)
+            wtb.Margin = Thickness(4, 4, 4, 4)
             wtb.HorizontalContentAlignment = HorizontalAlignment.Center
             wtb.BorderBrush = brush(DQT_BORDER)
             wtb.Background = brush("#FFFFFF")
@@ -1030,7 +1035,7 @@ class ModelHealthWindow(Window):
         status_bar.ColumnDefinitions.Add(c2)
 
         self.txt_settings_status = TextBlock()
-        self.txt_settings_status.FontSize = 11
+        self.txt_settings_status.FontSize = 12
         self.txt_settings_status.Foreground = brush("#888888")
         self.txt_settings_status.VerticalAlignment = VerticalAlignment.Center
         WPFGrid.SetColumn(self.txt_settings_status, 0)
