@@ -43,6 +43,31 @@ def _open_help_page(html_filename):
         return False
 
 
+class _OverwriteImportLoadOptions(IFamilyLoadOptions):
+    """Reload options for Import: always overwrite the existing family
+    and its parameter values, with no interactive prompt.
+
+    Every family this tool's Import button is meant to bring back in
+    (per the Export -> Purge Families -> Import round trip) already
+    exists in the project - that is the whole point of the workflow.
+    Document.LoadFamily(path) with no options asks Revit's own "Family
+    Already Exists" dialog what to do for each one; running unattended
+    inside a Transaction, that either blocks forever waiting for a click
+    that is never coming or raises, and the caller's bare `except: pass`
+    swallowed the exception - so only the handful of families that were
+    NOT already in the project (no conflict, no dialog) ever actually
+    loaded. Same pattern as _OverwriteLoadOptions in FamilyFont.pushbutton."""
+    def OnFamilyFound(self, familyInUse, overwriteParameterValues):
+        overwriteParameterValues.Value = True
+        return True
+
+    def OnSharedFamilyFound(self, sharedFamily, familyInUse, source,
+                             overwriteParameterValues):
+        source.Value = FamilySource.Family
+        overwriteParameterValues.Value = True
+        return True
+
+
 # ============================================================================
 # REVIT VERSION COMPATIBILITY
 # ============================================================================
@@ -2128,23 +2153,45 @@ class FamilyManagerWindow(WPFWindow):
         dlg.Filter = "Revit Family|*.rfa"
         dlg.Multiselect = True
         dlg.Title = "Select families to import"
-        
+
         if dlg.ShowDialog() != DialogResult.OK:
             return
-        
+
         count = 0
+        errors = []
+        load_opts = _OverwriteImportLoadOptions()
         try:
             with revit.Transaction("Import Families"):
                 for f in dlg.FileNames:
                     try:
-                        if self.doc.LoadFamily(f):
+                        # Without _OverwriteImportLoadOptions, LoadFamily(f)
+                        # falls back to Revit's own "Family Already Exists"
+                        # dialog for every file whose family is already in
+                        # this project - which is the entire point of the
+                        # Export -> Purge Families -> Import round trip this
+                        # button exists for. That interactive prompt, run
+                        # unattended inside a Transaction, either stalls or
+                        # raises - and the bare `except: pass` this used to
+                        # have swallowed the failure silently, so only the
+                        # handful of files with no name conflict at all (no
+                        # dialog to answer) ever actually loaded.
+                        ok, _fam = self.doc.LoadFamily(f, load_opts)
+                        if ok:
                             count += 1
-                    except:
-                        pass
-            forms.alert("Imported {} families".format(count), title="Done")
+                        else:
+                            errors.append("{}: not loaded".format(os.path.basename(f)))
+                    except Exception as ex:
+                        errors.append("{}: {}".format(os.path.basename(f), str(ex)))
+
+            msg = "Imported {} of {} families".format(count, len(dlg.FileNames))
+            if errors:
+                msg += "\n\nErrors ({}):\n- {}".format(len(errors), "\n- ".join(errors[:5]))
+                if len(errors) > 5:
+                    msg += "\n... and {} more".format(len(errors) - 5)
+            forms.alert(msg, title="Done")
         except Exception as ex:
             forms.alert("Error: {}".format(str(ex)), title="Error")
-        
+
         self.load_data()
         self.update_ui()
     

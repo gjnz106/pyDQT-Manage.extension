@@ -55,6 +55,17 @@
       Rename and Delete are only wired up for the Families tab and Type
       Manager - Parameters and Health Check are for viewing/analysis.
     </div>
+    <div class="box fixed">
+      <b>Export &rarr; Purge Families &rarr; Import</b> now reloads every
+      changed family, not just the ones that happened to have no name
+      conflict. Every family Import picks up already exists in the
+      project by definition - that is the whole point of the round trip -
+      and Revit's own "Family Already Exists" prompt used to be asked
+      with nobody there to answer it, so only a handful ever actually
+      came back in. Import now answers that prompt itself (always
+      overwrite, with the reloaded copy's parameter values) instead of
+      leaving it unanswered.
+    </div>
   </div>
 
   <div class="pagenav">
