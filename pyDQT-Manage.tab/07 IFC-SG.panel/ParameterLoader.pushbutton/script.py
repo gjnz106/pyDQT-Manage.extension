@@ -1845,7 +1845,7 @@ class ParamLoaderWindow:
         self.window.Cursor = System.Windows.Input.Cursors.Wait
         
         # Check which already exist
-        t = Transaction(doc, "Check Parameters")
+        t = Transaction(doc, "DQT - Check Existing Parameters")
         t.Start()
         try:
             self.adder.check_existing(self.requirements)
@@ -2345,7 +2345,7 @@ class ParamLoaderWindow:
         self.window.Cursor = System.Windows.Input.Cursors.Wait
         self.txtStatus.Text = "Adding parameters..."
         
-        t = Transaction(doc, "IFC-SG Add Parameters")
+        t = Transaction(doc, "DQT - Add IFC-SG Parameters")
         t.Start()
         
         try:
