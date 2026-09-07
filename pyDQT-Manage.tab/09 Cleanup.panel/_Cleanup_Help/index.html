@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Cleanup Toolset - Help</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page-header">
+  <div class="inner">
+    <div>
+      <h1>Cleanup Toolset</h1>
+      <p class="subtitle">by Dang Quoc Truong (DQT) &middot; pyDQT-Manage</p>
+    </div>
+    <span class="badge">2 tools</span>
+  </div>
+</div>
+
+<div class="wrap">
+
+  <div class="card">
+    <h2>What this panel is for</h2>
+    <p class="lede">
+      Model housekeeping - removing unused family content and elements you
+      no longer need - with a scan step before anything is deleted.
+    </p>
+    <p>
+      These two tools cover different scopes: <b>Purge Families</b> cleans
+      up a whole <i>folder of .rfa files on disk</i>, and <b>Smart
+      Delete</b> removes specific <i>elements you pick</i> after checking
+      what depends on them.
+    </p>
+  </div>
+
+  <div class="tool-grid">
+
+    <a class="tool-card" href="purge_families.html">
+      <span class="step-no">ON DISK</span>
+      <h3>Purge Families</h3>
+      <p>Batch-purge every .rfa in a folder until Revit reports nothing
+      purgeable left, with an optional bulk rename pass.</p>
+    </a>
+
+    <a class="tool-card" href="smart_delete.html">
+      <span class="step-no">TARGETED</span>
+      <h3>Smart Delete</h3>
+      <p>Pick specific elements and see what depends on them before you
+      delete - flags anything that isn't safe to remove.</p>
+    </a>
+
+  </div>
+
+  <div class="card">
+    <h2>Which tool do I need?</h2>
+    <table class="cmp">
+      <tr><th>I want to&hellip;</th><th>Use</th></tr>
+      <tr><td>Purge a whole library folder of family files on disk</td><td>Purge Families</td></tr>
+      <tr><td>Delete a handful of specific elements safely</td><td>Smart Delete</td></tr>
+    </table>
+  </div>
+
+  <footer class="site">Cleanup Toolset &middot; Dang Quoc Truong (DQT) &copy; 2026</footer>
+</div>
+</body>
+</html>

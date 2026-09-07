@@ -23,8 +23,8 @@ from System.Collections.Generic import List
 import System
 import re, datetime, codecs, os, json
 
-# Name-building rules live in lib/ rather than inline, so any rename tool
-# in the suite produces the same result from the same options.
+# Shared with Purge Families' folder rename - one source for how a new name is
+# built, so the two tools cannot drift apart.
 from dqt_name_ops import title_case_name, convert_case, strip_spaces
 
 
