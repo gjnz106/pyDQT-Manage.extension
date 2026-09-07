@@ -588,6 +588,20 @@ def _cell_bool(row, column):
     return bool(value)
 
 
+def _csv_field(value):
+    """One CSV field, quoted per RFC 4180 when it needs to be.
+
+    The exported report used to just replace a comma with a semicolon,
+    which silently rewrites the real name of any Family/Type that
+    happens to contain one (e.g. "Door, Blast") instead of representing
+    it correctly - the report would show a name that does not match
+    anything in the model."""
+    text = "" if value is None else str(value)
+    if any(c in text for c in (",", "\"", "\n", "\r")):
+        text = "\"" + text.replace("\"", "\"\"") + "\""
+    return text
+
+
 class ManualAssignWindow(object):
     """WPF window for manual IFC class assignment (DQT gold theme)."""
 
@@ -1047,7 +1061,7 @@ class ManualAssignWindow(object):
                 count = min(self.dt.Rows.Count, len(self.filtered_data))
                 for i in range(count):
                     row = self.dt.Rows[i]
-                    values = [_cell_text(row, column).replace(",", ";")
+                    values = [_csv_field(_cell_text(row, column))
                               for column in ("sel", "eid", "category", "name",
                                              "current_ifc", "new_ifc")]
                     handle.write(",".join(values) + "\n")

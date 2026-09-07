@@ -85,6 +85,13 @@
       handy for a before/after record.
     </div>
     <div class="box fixed">
+      A Family/Type <b>name containing a comma</b> (e.g. "Door, Blast")
+      now survives the CSV export correctly, quoted per the CSV standard
+      - an earlier version replaced the comma with a semicolon instead,
+      silently changing the name shown in the report to one that no
+      longer matches anything in the model.
+    </div>
+    <div class="box fixed">
       Picking a <span class="code">*</span> subtype (e.g.
       <span class="code">IfcDoor.*BLASTDOOR</span>, Blast Door) now writes
       correctly: the bare entity <span class="code">IfcDoor</span> goes to
