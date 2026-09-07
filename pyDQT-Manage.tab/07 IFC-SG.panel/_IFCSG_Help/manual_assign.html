@@ -55,7 +55,9 @@
         class in the bulk dropdown and press <b>Apply to Ticked</b> to set
         it on every ticked row at once.</li>
       <li><b>Apply Changes to Revit</b> writes the
-        <span class="code">Export to IFC As</span> parameter.</li>
+        <span class="code">Export to IFC As</span> parameter, and
+        <span class="code">IfcObjectType</span> too for any subtype marked
+        <span class="code">*</span> in the mapping.</li>
     </ol>
   </div>
 
@@ -63,8 +65,8 @@
     <h2>Dropdown values</h2>
     <dl class="kv">
       <dt class="v-dark">(Keep Current)</dt><dd>Leave this element untouched - the default for every row.</dd>
-      <dt class="v-dark">(Clear)</dt><dd>Blank the parameter.</dd>
-      <dt class="v-dark">Everything else</dt><dd>Comes from the IFC-SG mapping for that element's category.</dd>
+      <dt class="v-dark">(Clear)</dt><dd>Blank both parameters.</dd>
+      <dt class="v-dark">Everything else</dt><dd>Comes from the IFC-SG mapping for that element's category - a <span class="code">*</span> prefix marks a USERDEFINED subtype, same convention as Auto Assign and Subtype Definer.</dd>
     </dl>
   </div>
 
@@ -81,6 +83,20 @@
     <div class="box tip">
       <b>Export Report</b> writes the currently visible rows to a CSV file -
       handy for a before/after record.
+    </div>
+    <div class="box fixed">
+      Picking a <span class="code">*</span> subtype (e.g.
+      <span class="code">IfcDoor.*BLASTDOOR</span>, Blast Door) now writes
+      correctly: the bare entity <span class="code">IfcDoor</span> goes to
+      <span class="code">Export to IFC As</span> and
+      <span class="code">BLASTDOOR</span> goes to
+      <span class="code">IfcObjectType</span> - an earlier version wrote
+      the whole marked string, asterisk included, straight into
+      <span class="code">Export to IFC As</span>, which is not a value any
+      IFC export or checker recognises. <b>Current IFC</b> now shows
+      <span class="code">IfcDoor (BLASTDOOR)</span> for such elements so
+      the custom subtype stays visible instead of only showing the bare
+      entity name.
     </div>
   </div>
 
