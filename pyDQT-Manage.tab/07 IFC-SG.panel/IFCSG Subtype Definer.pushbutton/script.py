@@ -1182,6 +1182,18 @@ def set_ifc_object_type(elem, value, use_type=True, reasons=None):
             return True
     return False
 
+def get_ifc_object_type(elem):
+    """Read back the free-text ObjectType a USERDEFINED subtype was given.
+
+    Named parameter only, same set set_ifc_object_type writes to - there
+    is no BuiltInParameter for this value (see Auto Assign's
+    get_current_objtype for why IFC_EXPORT_ELEMENT_TYPE_AS is NOT it)."""
+    for name in ["IfcObjectType", "IFCObjectType", "ObjectType"]:
+        v = _try_lookup_get(elem, name)
+        if v:
+            return v
+    return ""
+
 
 # ==============================================================================
 # Data Classes
@@ -1240,13 +1252,25 @@ def build_type_rows(elems):
 
         cur_entity = ""
         cur_subtype = ""
+        cur_objtype = ""
         if type_elem:
             cur_entity = get_ifc_export_as(type_elem)
             cur_subtype = get_ifc_predefined_type(type_elem)
+            cur_objtype = get_ifc_object_type(type_elem)
         if not cur_entity:
             cur_entity = get_ifc_export_as(e)
         if not cur_subtype:
             cur_subtype = get_ifc_predefined_type(e)
+        if not cur_objtype:
+            cur_objtype = get_ifc_object_type(e)
+
+        # A USERDEFINED PredefinedType is only half the picture - the
+        # actual custom subtype text lives in the separate ObjectType
+        # parameter. Showing the bare word "USERDEFINED" in the grid told
+        # a reviewer THAT a custom subtype was set but not WHICH one,
+        # indistinguishable from every other USERDEFINED row at a glance.
+        if cur_subtype and cur_subtype.upper() == "USERDEFINED" and cur_objtype:
+            cur_subtype = "USERDEFINED ({})".format(cur_objtype)
 
         key = (fam_name, type_name)
         if key not in type_groups:
