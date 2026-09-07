@@ -86,6 +86,14 @@
       <span class="code">Export to IFC As</span> / <span class="code">IfcObjectType</span>
       parameters already exist to write into.
     </div>
+    <div class="box fixed">
+      <span class="code">IfcObjectType</span> is read and written only by
+      its own name now, matching Subtype Definer elsewhere in this suite -
+      an earlier version also tried Revit's built-in "Export Type to IFC
+      As" parameter first, which looks similar by name but actually holds
+      the type-level IFC entity <i>class</i> (e.g.
+      <span class="code">IfcDoorType</span>), not the object type text.
+    </div>
   </div>
 
   <div class="pagenav">

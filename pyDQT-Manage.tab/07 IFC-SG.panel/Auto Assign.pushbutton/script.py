@@ -556,10 +556,18 @@ def get_current_ifc(element):
     return ""
 
 def get_current_objtype(element):
-    """Get current IfcObjectType value."""
+    """Get current IfcObjectType value.
+
+    No BuiltInParameter is tried here on purpose. IFC_EXPORT_ELEMENT_TYPE_AS
+    is "Export Type to IFC As" - the type-level counterpart of
+    IFC_EXPORT_ELEMENT_AS, used to pick the IFC entity CLASS (e.g.
+    "IfcDoorType"), not the free-text ObjectType/subtype string this
+    function actually wants. IfcObjectType itself is populated from a
+    plain named parameter ("IfcObjectType" or "ObjectTypeOverride"), never
+    a built-in one - the same reason IFC-SG Subtype Definer, elsewhere in
+    this suite, only ever looks this up by name too."""
     try:
-        p = _get_param(element, BuiltInParameter.IFC_EXPORT_ELEMENT_TYPE_AS,
-                        "Type IfcObjectType[Type]", "IfcObjectType")
+        p = _get_param(element, None, "Type IfcObjectType[Type]", "IfcObjectType")
         if p and p.HasValue:
             v = p.AsString()
             if v and v.strip(): return v.strip()
@@ -576,9 +584,9 @@ def set_ifc_values(element, export_as, object_type):
             p1.Set(export_as)
             ok = True
 
-        # Set IfcObjectType (for USERDEFINED)
-        p2 = _get_param(element, BuiltInParameter.IFC_EXPORT_ELEMENT_TYPE_AS,
-                         "Type IfcObjectType[Type]", "IfcObjectType")
+        # Set IfcObjectType (for USERDEFINED) - named parameter only, see
+        # get_current_objtype for why no BuiltInParameter belongs here.
+        p2 = _get_param(element, None, "Type IfcObjectType[Type]", "IfcObjectType")
         if p2 and not p2.IsReadOnly:
             p2.Set(object_type or "")
     except: pass
