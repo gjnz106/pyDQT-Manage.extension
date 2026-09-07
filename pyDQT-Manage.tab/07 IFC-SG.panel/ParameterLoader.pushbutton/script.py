@@ -1083,8 +1083,7 @@ class CategoryPickerDialog:
     def _render_categories(self):
         self.spPickCategories.Children.Clear()
         self._checkboxes = []
-        converter = BrushConverter()
-        
+
         search = (self.txtPickSearch.Text or "").strip().lower()
         
         # Sort categories alphabetically
