@@ -317,6 +317,18 @@ IFC_SG_MAPPING = {
     ],
 }
 
+# A Curtain Wall in Revit is a Wall Type, not a separate category - an
+# actual curtain wall element's Category.Name is "Walls", same as a
+# plain wall, so its per-row dropdown (keyed by Category.Name via
+# _options_for) never offered the "Curtain Walls" mapping entries
+# (IfcCurtainWall) at all; only the bulk-assign combo saw them, since
+# that one lists every mapping entry regardless of category. This folds
+# those entries into the "Walls" dropdown too - additive only, a plain
+# wall's own options are unaffected.
+_EXTRA_MAPPING_KEYS = {
+    "Walls": ["Curtain Walls"],
+}
+
 
 class ElementData:
     """Class to hold element data for the grid"""
@@ -690,12 +702,17 @@ class ManualAssignWindow(object):
         opts = ObservableCollection[System.String]()
         opts.Add("(Keep Current)")
         opts.Add("(Clear)")
-        for mapping in IFC_SG_MAPPING.get(category, []):
-            entity = mapping["entity"]
-            subtype = mapping["subtype"]
-            desc = mapping["desc"]
-            option = "{}.{}".format(entity, subtype) if subtype else entity
-            opts.Add("{} [{}]".format(option, desc) if desc else option)
+        seen = set()
+        for key in [category] + _EXTRA_MAPPING_KEYS.get(category, []):
+            for mapping in IFC_SG_MAPPING.get(key, []):
+                entity = mapping["entity"]
+                subtype = mapping["subtype"]
+                desc = mapping["desc"]
+                option = "{}.{}".format(entity, subtype) if subtype else entity
+                if option in seen:
+                    continue
+                seen.add(option)
+                opts.Add("{} [{}]".format(option, desc) if desc else option)
         opts.Add("IfcBuildingElementProxy")
         opts.Add("IfcElement")
 
