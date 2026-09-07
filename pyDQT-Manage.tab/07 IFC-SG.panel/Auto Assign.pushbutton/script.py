@@ -575,8 +575,19 @@ def get_current_objtype(element):
     return ""
 
 def set_ifc_values(element, export_as, object_type):
-    """Set both Export to IFC As and IfcObjectType. Returns True on success."""
+    """Set both Export to IFC As and IfcObjectType.
+
+    Returns (ok, obj_ok). `ok` is the real assignment - Export to IFC As -
+    and is all a caller should gate overall success on, same as the
+    IFC-SG Subtype Definer's Apply (see that tool's fix for a model where
+    a category has no IfcObjectType-style parameter bound: the entity
+    assignment must not be reported as failed just because of that).
+    `obj_ok` is only meaningful when `object_type` is non-empty - it is
+    False when a USERDEFINED subtype's free text genuinely could not be
+    recorded anywhere, so a caller can warn instead of the gap being
+    silently invisible."""
     ok = False
+    obj_ok = True
     try:
         p1 = _get_param(element, BuiltInParameter.IFC_EXPORT_ELEMENT_AS,
                          "Export to IFC As", "IfcExportAs")
@@ -589,8 +600,10 @@ def set_ifc_values(element, export_as, object_type):
         p2 = _get_param(element, None, "Type IfcObjectType[Type]", "IfcObjectType")
         if p2 and not p2.IsReadOnly:
             p2.Set(object_type or "")
+        elif object_type:
+            obj_ok = False
     except: pass
-    return ok
+    return ok, obj_ok
 
 def collect_elements(categories):
     result = {}
@@ -1230,7 +1243,7 @@ def show_preview(elems_by_cat, mapping, src):
 # Apply Assignment
 # =====================================================================
 def apply_assignment(final_mapping, mode):
-    stats = {"total":0,"success":0,"skipped":0,"failed":0,"by_category":{}}
+    stats = {"total":0,"success":0,"skipped":0,"failed":0,"obj_missing":0,"by_category":{}}
     errors = []
     t = Transaction(doc, "DQT - Auto Assign IFC v3.0")
     t.Start()
@@ -1245,8 +1258,20 @@ def apply_assignment(final_mapping, mode):
                 try:
                     if mode=="assign_empty" and get_current_ifc(el):
                         stats["skipped"]+=1; sk+=1; continue
-                    if set_ifc_values(el, ea, ot):
+                    exported, obj_ok = set_ifc_values(el, ea, ot)
+                    if exported:
                         stats["success"]+=1; ok+=1
+                        if ot and not obj_ok:
+                            # The real assignment (Export to IFC As) went
+                            # through - only the free-text ObjectType had
+                            # nowhere to go on this element. Not a failure
+                            # (see set_ifc_values), but not silently
+                            # invisible either.
+                            stats["obj_missing"] += 1
+                            errors.append(
+                                "{} [{}] - assigned '{}', but ObjectType '{}' "
+                                "not recorded (no matching parameter)".format(
+                                    lbl, _eid_int(el.Id), ea, ot))
                     else:
                         stats["failed"]+=1; fl+=1
                         errors.append("{} [{}] - read-only".format(lbl, _eid_int(el.Id)))
@@ -1363,6 +1388,10 @@ class MainWindow(object):
         stats, errs = apply_assignment(pr["final_mapping"], pr["mode"])
         msg = "Done!\n\nTotal: {}\nSuccess: {}\nSkipped: {}\nFailed: {}\n".format(
             stats["total"], stats["success"], stats["skipped"], stats["failed"])
+        if stats.get("obj_missing"):
+            msg += "({} of the successes could not also record ObjectType - " \
+                   "no matching parameter on those elements)\n".format(
+                       stats["obj_missing"])
         if stats["by_category"]:
             msg += "\nBy Category:\n"
             for c, cs in sorted(stats["by_category"].items()):
@@ -1374,7 +1403,9 @@ class MainWindow(object):
         if errs:
             msg += "\nErrors ({}):\n".format(len(errs))
             for e in errs[:10]: msg += "  {}\n".format(e)
-        ic = MessageBoxImage.Information if stats["failed"]==0 else MessageBoxImage.Warning
+        ic = (MessageBoxImage.Information
+              if stats["failed"]==0 and not stats.get("obj_missing")
+              else MessageBoxImage.Warning)
         WPFMessageBox.Show(msg, "IFC-SG Auto Assign", MessageBoxButton.OK, ic)
         self.win.Close()
 
