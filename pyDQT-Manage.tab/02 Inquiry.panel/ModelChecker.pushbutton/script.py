@@ -620,25 +620,36 @@ class RuleEngine:
         
         # Get base/survey points
         collector = FilteredElementCollector(self.doc).OfClass(BasePoint)
-        
+
         actual_value = None
         point_name = "Survey Point" if point_type == "survey" else "Project Base Point"
-        
+
+        # N/S, E/W and Elevation as shown in the Properties palette come from
+        # the BasePoint's own parameters, NOT from bp.Position - Position is the
+        # point's location in the model's internal coordinate system (relative
+        # to the Internal Origin), which stays near zero regardless of how far
+        # the shared/survey coordinate has been shifted (e.g. State Plane
+        # coordinates in the tens of millions). Reading .Position here was the
+        # bug: the check always compared against ~0, so it failed no matter
+        # what expected_value was configured, and the reported "actual" never
+        # matched what the user sees in Properties.
+        axis_bip = {
+            "NS": BuiltInParameter.BASEPOINT_NORTHSOUTH_PARAM,
+            "EW": BuiltInParameter.BASEPOINT_EASTWEST_PARAM,
+            "Elev": BuiltInParameter.BASEPOINT_ELEVATION_PARAM,
+        }.get(axis)
+
         for bp in collector:
             is_survey = bp.IsShared
             if (point_type == "survey" and is_survey) or (point_type == "base" and not is_survey):
-                pos = bp.Position
-                if axis == "NS":
-                    actual_value = pos.Y  # North/South = Y in Revit internal
-                elif axis == "EW":
-                    actual_value = pos.X  # East/West = X in Revit internal
-                elif axis == "Elev":
-                    actual_value = pos.Z
+                param = bp.get_Parameter(axis_bip) if axis_bip else None
+                if param is not None and param.HasValue:
+                    actual_value = param.AsDouble()
                 break
-        
+
         if actual_value is None:
             return RuleResult(rule, "error", "Could not find {}".format(point_name))
-        
+
         # Convert from internal units (feet) to display units for reporting
         # Note: comparison uses internal units, display converts for user
         actual_ft = actual_value
