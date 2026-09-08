@@ -142,8 +142,30 @@ def _bind_param_insert(document, defn, binding, pg_key="PG_IFC"):
         return document.ParameterBindings.Insert(defn, binding)
     except:
         pass
-    
+
     return False
+
+def _length_internal_to_mm(value_internal):
+    """Internal decimal feet as millimetres, matching what the Properties
+    palette shows for Survey Point / Project Base Point coordinates on the
+    millimetre-based BCA/IFC-SG projects this checkset targets. A length
+    parameter's AsDouble() always comes back in Revit's internal unit
+    (decimal feet) regardless of the project's display unit, so comparing
+    it directly against a value the user typed straight off the palette
+    (in millimetres) still didn't match even after reading the right
+    parameter - e.g. 258246.564049 (internal) vs 78713552.7 (palette) for
+    the same Survey Point N/S. Compatible with both the SpecTypeId/
+    UnitTypeId API (Revit 2021+) and the older DisplayUnitType API."""
+    try:
+        from Autodesk.Revit.DB import UnitUtils
+        try:
+            from Autodesk.Revit.DB import UnitTypeId
+            return UnitUtils.ConvertFromInternalUnits(value_internal, UnitTypeId.Millimeters)
+        except Exception:
+            from Autodesk.Revit.DB import DisplayUnitType
+            return UnitUtils.ConvertFromInternalUnits(value_internal, DisplayUnitType.DUT_MILLIMETERS)
+    except Exception:
+        return value_internal * 304.8
 
 
 # =====================================================================
@@ -650,20 +672,25 @@ class RuleEngine:
         if actual_value is None:
             return RuleResult(rule, "error", "Could not find {}".format(point_name))
 
-        # Convert from internal units (feet) to display units for reporting
-        # Note: comparison uses internal units, display converts for user
-        actual_ft = actual_value
-        expected_ft = expected  # User provides in project units - might need conversion
-        
-        diff = abs(actual_ft - expected_ft)
-        
+        # AsDouble() is always in Revit's internal unit (decimal feet), never
+        # the project's display unit - convert to millimetres so it lines up
+        # with expected_value, which the user types straight off the
+        # Properties palette (this checkset's BCA/IFC-SG projects are always
+        # millimetre-based). Skipping this was the second half of the same
+        # bug: even after reading the right parameter, the reported "actual"
+        # was still off by the feet-to-millimetre factor (~304.8x).
+        actual_mm = _length_internal_to_mm(actual_value)
+        expected_mm = expected  # User provides this in millimetres already
+
+        diff = abs(actual_mm - expected_mm)
+
         if diff <= tolerance:
             return RuleResult(rule, "pass",
-                "{} {} = {:.6f} (expected: {})".format(point_name, axis, actual_ft, expected))
+                "{} {} = {:.6f} (expected: {})".format(point_name, axis, actual_mm, expected))
         else:
             return RuleResult(rule, "fail",
                 "{} {} = {:.6f} (expected: {}, diff: {:.6f})".format(
-                    point_name, axis, actual_ft, expected, diff))
+                    point_name, axis, actual_mm, expected, diff))
     
     # -----------------------------------------------------------------
     # RULE TYPE: count_check - Check element counts
