@@ -2,4 +2,3 @@ title: Inquiry
 layout:
   - HealthCheck
   - ModelChecker
-  - InPlaceModel

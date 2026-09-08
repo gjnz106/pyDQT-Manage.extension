@@ -4,7 +4,7 @@
   "type": "extension",
   "rocket_mode_compatible": true,
   "name": "pyDQT-Manage",
-  "description": "DQT BIM Leader tools - Inquiry/QA-QC, IFC-SG compliance, Settings standards, Cleanup",
+  "description": "DQT BIM Leader tools - Update check, Inquiry/QA-QC, Manage, IFC-SG compliance, Template, Clean up",
   "author": "Dang Quoc Truong (DQT)",
   "author_profile": "",
   "url": "",
