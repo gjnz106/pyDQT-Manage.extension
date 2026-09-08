@@ -167,6 +167,44 @@ def _length_internal_to_mm(value_internal):
     except Exception:
         return value_internal * 304.8
 
+def _coordinate_as_shown_in_revit(document, value_internal):
+    """The coordinate rounded exactly the way the Properties palette shows
+    it, by asking Revit to format the value itself and parsing that same
+    string back to a float - instead of a raw unit conversion.
+
+    A plain feet-to-millimetre conversion is mathematically exact (1 ft =
+    304.8 mm exactly) but the *internal* double Revit stores for a
+    survey-scale coordinate (tens of millions of mm) already carries
+    whatever quantization happened when the point was placed/moved, so
+    converting it back can land a few hundredths of a millimetre off the
+    rounded number the palette displays and the user reads off to type
+    into expected_value - e.g. actual 78713552.722047 vs a palette/
+    expected_value of 78713552.7. Formatting through Revit's own
+    UnitFormatUtils reproduces the palette's rounding exactly, so a
+    correctly-surveyed point compares equal instead of failing by a
+    sub-0.1 mm residue. Falls back to a plain conversion if the formatting
+    API is unavailable."""
+    try:
+        import re
+        units = document.GetUnits()
+        text = None
+        try:
+            from Autodesk.Revit.DB import UnitFormatUtils, SpecTypeId
+            text = UnitFormatUtils.Format(units, SpecTypeId.Length, value_internal, False)
+        except Exception:
+            from Autodesk.Revit.DB import UnitFormatUtils, UnitType
+            text = UnitFormatUtils.Format(units, UnitType.UT_Length, value_internal, False, False)
+        if text:
+            # Drop thousands separators and any trailing unit symbol (e.g.
+            # "78,713,552.7 mm") so only the leading numeric token is parsed.
+            cleaned = text.replace(",", "").strip()
+            match = re.match(r"^-?\d+(\.\d+)?", cleaned)
+            if match:
+                return float(match.group(0))
+    except Exception:
+        pass
+    return _length_internal_to_mm(value_internal)
+
 
 # =====================================================================
 # REVIT CONTEXT
@@ -676,10 +714,12 @@ class RuleEngine:
         # the project's display unit - convert to millimetres so it lines up
         # with expected_value, which the user types straight off the
         # Properties palette (this checkset's BCA/IFC-SG projects are always
-        # millimetre-based). Skipping this was the second half of the same
-        # bug: even after reading the right parameter, the reported "actual"
-        # was still off by the feet-to-millimetre factor (~304.8x).
-        actual_mm = _length_internal_to_mm(actual_value)
+        # millimetre-based). A plain unit conversion can still be a hair off
+        # the palette's own rounded number (the internal double already
+        # carries whatever quantization happened when the point was placed),
+        # so ask Revit to format the value itself and read that back -
+        # exactly the number shown on screen, not a re-derived one.
+        actual_mm = _coordinate_as_shown_in_revit(self.doc, actual_value)
         expected_mm = expected  # User provides this in millimetres already
 
         diff = abs(actual_mm - expected_mm)
