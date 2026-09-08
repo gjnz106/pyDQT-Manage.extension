@@ -576,14 +576,29 @@ class RequirementParser:
     
     @staticmethod
     def from_xml(filepath):
-        """Parse Autodesk Model Checker XML"""
+        """Parse an Autodesk Model Checker XML, or an IFC+SG Shared
+        Parameters Tool configuration XML - the "Autodesk Model Checker
+        XML" import handles both, telling them apart by root element.
+
+        Model Checker XML nests Heading/Section/Check elements and never
+        states a parameter's type, only its name (CheckName). The Shared
+        Parameters Tool config (root <SharedParametersConfig>, exported by
+        Autodesk's IFC+SG tool) is flatter - one <Parameter> element per
+        requirement under <Parameters>, already carrying its own type
+        (Type="Boolean"/"Double"/"Integer"/"Text") and <Categories>. Before
+        this, opening one of those here silently returned 0 parameters:
+        root.findall("Heading") is empty for it, so the table came back
+        blank with no error at all."""
         import xml.etree.ElementTree as ET
         tree = ET.parse(filepath)
         root = tree.getroot()
-        
+
+        if root.tag == "SharedParametersConfig":
+            return RequirementParser._from_sptool_xml(root)
+
         # Build: param_name -> set of (discipline, category)
         param_map = {}
-        
+
         for h in root.findall("Heading"):
             disc = h.get("HeadingText", "")
             for s in h.findall("Section"):
@@ -596,7 +611,7 @@ class RequirementParser:
                         param_map[param] = {"cats": set(), "discs": set()}
                     param_map[param]["cats"].add(cat)
                     param_map[param]["discs"].add(disc)
-        
+
         # Convert to ParamRequirement list
         reqs = []
         for name, data in sorted(param_map.items()):
@@ -604,9 +619,48 @@ class RequirementParser:
             req.categories = sorted(data["cats"])
             req.disciplines = data["discs"]
             reqs.append(req)
-        
+
         return reqs
-    
+
+    @staticmethod
+    def _from_sptool_xml(root):
+        """Parse a SharedParametersConfig (IFC+SG Shared Parameters Tool)
+        XML's <Parameters>/<Parameter> elements - each one already a
+        complete requirement (name, Group as discipline, Type, and its own
+        <Categories>/<Category> list), unlike Model Checker XML where the
+        same CheckName can repeat under several Heading/Section pairs and
+        has to be merged. Two <Parameter> elements sharing a Name (not
+        seen in a real export, but not guaranteed either) are merged the
+        same defensive way."""
+        param_map = {}
+        for p in root.findall("./Parameters/Parameter"):
+            name = p.get("Name", "")
+            if not name:
+                continue
+            if name not in param_map:
+                param_map[name] = {"cats": set(), "discs": set(), "type_raw": ""}
+            for cat in p.findall("./Categories/Category"):
+                cat_name = cat.get("Name", "")
+                if cat_name:
+                    param_map[name]["cats"].add(cat_name)
+            group = p.get("Group", "")
+            if group:
+                param_map[name]["discs"].add(group)
+            if not param_map[name]["type_raw"]:
+                type_raw = p.get("Type", "")
+                if type_raw:
+                    param_map[name]["type_raw"] = type_raw
+
+        reqs = []
+        for name, data in sorted(param_map.items()):
+            req = ParamRequirement(name)
+            req.categories = sorted(data["cats"])
+            req.disciplines = data["discs"]
+            req.param_type_raw = data["type_raw"]
+            req.param_type_key = normalize_type_key(data["type_raw"])
+            reqs.append(req)
+        return reqs
+
     @staticmethod
     def read_excel_headers(filepath):
         """Sheet names, column headers and a short preview, for the mapping
