@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Clean up Toolset - Help</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page-header">
+  <div class="inner">
+    <div>
+      <h1>Clean up Toolset</h1>
+      <p class="subtitle">by Dang Quoc Truong (DQT) &middot; pyDQT-Manage</p>
+    </div>
+    <span class="badge">3 tools</span>
+  </div>
+</div>
+
+<div class="wrap">
+
+  <div class="card">
+    <h2>What this panel is for</h2>
+    <p class="lede">
+      Model housekeeping - removing unused family content and elements you
+      no longer need - with a scan step before anything is deleted.
+    </p>
+    <p>
+      Three tools cover different scopes: <b>Purge Families</b> cleans
+      up a whole <i>folder of .rfa files on disk</i>, <b>Smart
+      Delete</b> removes specific <i>elements you pick</i> after checking
+      what depends on them, and <b>In-Place Model Manager</b> finds
+      <i>in-place families</i> worth converting to a real loadable family
+      or removing outright.
+    </p>
+  </div>
+
+  <div class="tool-grid">
+
+    <a class="tool-card" href="purge_families.html">
+      <span class="step-no">ON DISK</span>
+      <h3>Purge Families</h3>
+      <p>Batch-purge every .rfa in a folder until Revit reports nothing
+      purgeable left, with an optional bulk rename pass.</p>
+    </a>
+
+    <a class="tool-card" href="smart_delete.html">
+      <span class="step-no">TARGETED</span>
+      <h3>Smart Delete</h3>
+      <p>Pick specific elements and see what depends on them before you
+      delete - flags anything that isn't safe to remove.</p>
+    </a>
+
+    <a class="tool-card" href="in_place_model.html">
+      <span class="step-no">FAMILIES</span>
+      <h3>In-Place Model Manager</h3>
+      <p>List every in-place family with geometry complexity and quality
+      flags, to find conversion/deletion candidates.</p>
+    </a>
+
+  </div>
+
+  <div class="card">
+    <h2>Which tool do I need?</h2>
+    <table class="cmp">
+      <tr><th>I want to&hellip;</th><th>Use</th></tr>
+      <tr><td>Purge a whole library folder of family files on disk</td><td>Purge Families</td></tr>
+      <tr><td>Delete a handful of specific elements safely</td><td>Smart Delete</td></tr>
+      <tr><td>Find in-place families to convert or delete</td><td>In-Place Model Manager</td></tr>
+    </table>
+  </div>
+
+  <footer class="site">Clean up Toolset &middot; Dang Quoc Truong (DQT) &copy; 2026</footer>
+</div>
+</body>
+</html>
