@@ -658,7 +658,7 @@ class RequirementParser:
     @staticmethod
     def from_excel(filepath, sheet_name=None, col_param=1, col_category=2,
                    col_discipline=None, col_type=None, header_row=1,
-                   strip_spaces=False):
+                   strip_spaces=True, remove_na=True):
         """Parse a workbook with the user's column mapping.
 
         col_type is optional, like col_category/col_discipline - a source
@@ -669,7 +669,11 @@ class RequirementParser:
         strip_spaces, when True, removes all whitespace from the
         Parameter Name column's value ("Inner Diameter" -> "InnerDiameter")
         before it's used as the parameter's name - rows that only differ
-        by whitespace then merge into the same requirement."""
+        by whitespace then merge into the same requirement.
+
+        remove_na, when True, skips rows whose Parameter Name column
+        value is just a "not available" placeholder ("N.A", "N.A.",
+        "N/A", "NA", any case) instead of a real name."""
         try:
             book = xlsx_reader.read_workbook(filepath)
         except xlsx_reader.XlsxReadError as e:
@@ -692,6 +696,12 @@ class RequirementParser:
             val = cells.get(col)
             return str(val).strip() if val is not None else ""
 
+        def _is_na(value):
+            """True for a bare 'not available' placeholder ('N.A', 'N.A.',
+            'N/A', 'NA', any case) - not for a real name that merely
+            contains one, like 'NASA Panel'."""
+            return value.strip(".").lower() in ("n.a", "n/a", "na")
+
         param_map = {}
         for ri in sorted(rows.keys()):
             if ri <= header_row:
@@ -699,6 +709,8 @@ class RequirementParser:
             cells = rows[ri]
             param = _cell(cells, col_param)
             if not param:
+                continue
+            if remove_na and _is_na(param):
                 continue
             if strip_spaces:
                 param = re.sub(r"\s+", "", param)
@@ -864,9 +876,12 @@ MAPPER_XAML = '''
         </Border>
 
         <!-- Name cleanup -->
-        <CheckBox x:Name="chkStripSpaces" Grid.Row="3" Margin="0,0,0,10" FontSize="11"
-                  Foreground="#5D4E37"
-                  Content="Remove spaces in Parameter Name (e.g. &quot;Inner Diameter&quot; -&gt; &quot;InnerDiameter&quot;)"/>
+        <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,0,0,10">
+            <CheckBox x:Name="chkStripSpaces" FontSize="11" Foreground="#5D4E37" IsChecked="True"
+                      Content="Remove spaces in Parameter Name" Margin="0,0,20,0"/>
+            <CheckBox x:Name="chkRemoveNA" FontSize="11" Foreground="#5D4E37" IsChecked="True"
+                      Content="Remove N.A"/>
+        </StackPanel>
 
         <!-- Preview -->
         <Border Grid.Row="4" Background="White" BorderBrush="#E0E0E0" BorderThickness="1"
@@ -920,6 +935,7 @@ class ExcelColumnMapper:
         self.cmbColDiscipline = self.window.FindName("cmbColDiscipline")
         self.cmbColType = self.window.FindName("cmbColType")
         self.chkStripSpaces = self.window.FindName("chkStripSpaces")
+        self.chkRemoveNA = self.window.FindName("chkRemoveNA")
         self.txtPreview = self.window.FindName("txtPreview")
         self.txtMapInfo = self.window.FindName("txtMapInfo")
         self.btnMapOK = self.window.FindName("btnMapOK")
@@ -1043,7 +1059,8 @@ class ExcelColumnMapper:
             "col_discipline": col_discipline,
             "col_type": col_type,
             "header_row": header_row,
-            "strip_spaces": bool(self.chkStripSpaces.IsChecked)
+            "strip_spaces": bool(self.chkStripSpaces.IsChecked),
+            "remove_na": bool(self.chkRemoveNA.IsChecked)
         }
         self.window.DialogResult = System.Nullable[System.Boolean](True)
         self.window.Close()
@@ -1902,7 +1919,8 @@ class ParamLoaderWindow:
                     col_discipline=mapping.get("col_discipline"),
                     col_type=mapping.get("col_type"),
                     header_row=mapping.get("header_row", 1),
-                    strip_spaces=mapping.get("strip_spaces", False)
+                    strip_spaces=mapping.get("strip_spaces", True),
+                    remove_na=mapping.get("remove_na", True)
                 )
                 self._post_import(os.path.basename(dlg.FileName))
             except Exception as e:
