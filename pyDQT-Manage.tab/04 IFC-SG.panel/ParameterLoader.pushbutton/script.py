@@ -657,13 +657,19 @@ class RequirementParser:
     
     @staticmethod
     def from_excel(filepath, sheet_name=None, col_param=1, col_category=2,
-                   col_discipline=None, col_type=None, header_row=1):
+                   col_discipline=None, col_type=None, header_row=1,
+                   strip_spaces=False):
         """Parse a workbook with the user's column mapping.
 
         col_type is optional, like col_category/col_discipline - a source
         with no type column (or one left unmapped) yields param_type_key
         "TEXT" for every parameter, the tool's behaviour before type
-        mapping existed."""
+        mapping existed.
+
+        strip_spaces, when True, removes all whitespace from the
+        Parameter Name column's value ("Inner Diameter" -> "InnerDiameter")
+        before it's used as the parameter's name - rows that only differ
+        by whitespace then merge into the same requirement."""
         try:
             book = xlsx_reader.read_workbook(filepath)
         except xlsx_reader.XlsxReadError as e:
@@ -694,6 +700,10 @@ class RequirementParser:
             param = _cell(cells, col_param)
             if not param:
                 continue
+            if strip_spaces:
+                param = re.sub(r"\s+", "", param)
+                if not param:
+                    continue
             cat = _cell(cells, col_category)
             disc = _cell(cells, col_discipline)
             if param not in param_map:
@@ -771,7 +781,7 @@ MAPPER_XAML = '''
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Excel Column Mapping - DQT"
-        Height="552" Width="650"
+        Height="578" Width="650"
         WindowStartupLocation="CenterScreen"
         Background="#FEF8E7"
         ResizeMode="NoResize">
@@ -780,10 +790,11 @@ MAPPER_XAML = '''
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
-        
+
         <!-- Header -->
         <Border Grid.Row="0" Background="#F0CC88" CornerRadius="4" Padding="12,8" Margin="0,0,0,12">
             <TextBlock Text="Map Excel Columns" FontSize="16" FontWeight="Bold" Foreground="#333"/>
@@ -851,9 +862,14 @@ MAPPER_XAML = '''
                            VerticalAlignment="Center" HorizontalAlignment="Center"/>
             </Grid>
         </Border>
-        
+
+        <!-- Name cleanup -->
+        <CheckBox x:Name="chkStripSpaces" Grid.Row="3" Margin="0,0,0,10" FontSize="11"
+                  Foreground="#5D4E37"
+                  Content="Remove spaces in Parameter Name (e.g. &quot;Inner Diameter&quot; -&gt; &quot;InnerDiameter&quot;)"/>
+
         <!-- Preview -->
-        <Border Grid.Row="3" Background="White" BorderBrush="#E0E0E0" BorderThickness="1" 
+        <Border Grid.Row="4" Background="White" BorderBrush="#E0E0E0" BorderThickness="1"
                 CornerRadius="4" Padding="8">
             <Grid>
                 <Grid.RowDefinitions>
@@ -871,7 +887,7 @@ MAPPER_XAML = '''
         </Border>
         
         <!-- Buttons -->
-        <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
+        <StackPanel Grid.Row="5" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
             <TextBlock x:Name="txtMapInfo" Text="" FontSize="10" Foreground="#888" 
                        VerticalAlignment="Center" Margin="0,0,12,0"/>
             <Button x:Name="btnMapOK" Content="Import" Padding="20,8" FontSize="12" FontWeight="Bold"
@@ -903,6 +919,7 @@ class ExcelColumnMapper:
         self.cmbColCategory = self.window.FindName("cmbColCategory")
         self.cmbColDiscipline = self.window.FindName("cmbColDiscipline")
         self.cmbColType = self.window.FindName("cmbColType")
+        self.chkStripSpaces = self.window.FindName("chkStripSpaces")
         self.txtPreview = self.window.FindName("txtPreview")
         self.txtMapInfo = self.window.FindName("txtMapInfo")
         self.btnMapOK = self.window.FindName("btnMapOK")
@@ -1025,7 +1042,8 @@ class ExcelColumnMapper:
             "col_category": col_category,
             "col_discipline": col_discipline,
             "col_type": col_type,
-            "header_row": header_row
+            "header_row": header_row,
+            "strip_spaces": bool(self.chkStripSpaces.IsChecked)
         }
         self.window.DialogResult = System.Nullable[System.Boolean](True)
         self.window.Close()
@@ -1883,7 +1901,8 @@ class ParamLoaderWindow:
                     col_category=mapping.get("col_category"),
                     col_discipline=mapping.get("col_discipline"),
                     col_type=mapping.get("col_type"),
-                    header_row=mapping.get("header_row", 1)
+                    header_row=mapping.get("header_row", 1),
+                    strip_spaces=mapping.get("strip_spaces", False)
                 )
                 self._post_import(os.path.basename(dlg.FileName))
             except Exception as e:
