@@ -83,6 +83,17 @@
       version required closing it first).
     </div>
     <div class="box tip">
+      An IFC+SG <b>classification workbook</b> exported from Autodesk's
+      Classification Manager (e.g. a file named
+      <span class="code">..._Classification_for_Subtypes.xlsx</span>, with
+      "Element"/"Space" sheets and a NUMBER/DESCRIPTION/LEVEL/REVIT CATEGORY
+      header) is recognised automatically and loads with no column-mapping
+      dialog at all - every value in that format is a custom SG subtype, so
+      it always loads as <span class="code">*</span> (USERDEFINED); it has no
+      IFC4 Entity column, so "Also set IFC Entity" has nothing to write for
+      those components.
+    </div>
+    <div class="box tip">
       Toposolid (Revit 2024+) and Topography (older Revit) are both handled
       automatically - you do not need to know which one your Revit version uses.
     </div>

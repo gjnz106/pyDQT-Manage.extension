@@ -180,6 +180,24 @@ def resolve_revit_categories(name):
     return REVIT_CAT_MAP.get(key, []) if key else []
 
 
+# Reverse of REVIT_CAT_MAP: BuiltInCategory's own raw int id -> the same
+# display name ("Doors", "Rooms", ...) used everywhere else in this tool.
+# The IFC+SG classification workbook (IFCSG_Classification_for_Subtypes.xlsx
+# and similar Autodesk Classification Manager exports) states its "REVIT
+# CATEGORY" column as that raw id (e.g. -2000023) rather than a name, so
+# _load_classification_workbook() below looks the name up here once and
+# from then on this file's rows flow through the exact same
+# resolve_revit_categories()/REVIT_CAT_MAP path as the official Industry
+# Mapping Excel's named column.
+REVIT_CAT_ID_TO_NAME = {}
+for _cat_name, _cat_bics in REVIT_CAT_MAP.items():
+    for _bic_val in _cat_bics:
+        try:
+            REVIT_CAT_ID_TO_NAME[int(_bic_val)] = _cat_name
+        except Exception:
+            pass
+
+
 # ==============================================================================
 # Excel Reader - built-in .xlsx (zip/XML) reader, no Office needed, with a
 # COM Interop fallback for legacy .xls files.
@@ -961,11 +979,160 @@ def _parse_row_into_mapping(mapping, get_cell, r, c_comp, c_ent, c_sub, c_rev, c
         m["agencies"].add(agency)
 
 
+# ==============================================================================
+# IFC+SG Classification Workbook - an alternate source this tool can load
+# directly, alongside the official Industry Mapping Excel handled by
+# show_column_mapping_dialog()/_parse_row_into_mapping() above.
+#
+# An export from Autodesk's Classification Manager (e.g.
+# IFCSG_Classification_for_Subtypes.xlsx, "IFC+SG Userdefined Subtype")
+# uses a completely different, fixed layout: a few metadata rows
+# (TITLE/DESCRIPTION/VERSION/FUNCTION/...), then a NUMBER/DESCRIPTION/
+# LEVEL/REVIT CATEGORY header, then a 3-level hierarchy (LEVEL 1 root,
+# LEVEL 2 category groups, LEVEL 3 the actual rows) with no "IFC4 Entity"
+# column at all - every value in it is a component name (NUMBER) plus a
+# custom SG subtype (DESCRIPTION) for a BuiltInCategory id (REVIT
+# CATEGORY), because the whole workbook only ever defines USERDEFINED
+# subtypes. Before this, opening one of these here meant the column
+# mapping dialog had no "IFC4 Entity" column to offer and refused to
+# proceed at all ("Component Name and IFC4 Entity are required"), so the
+# parameter table simply never loaded.
+# ==============================================================================
+
+_CLASSIFICATION_HEADER = ("NUMBER", "DESCRIPTION", "LEVEL", "REVIT CATEGORY")
+
+
+def _classification_header_row(get_cell, max_scan=15):
+    """Row number of the NUMBER/DESCRIPTION/LEVEL/REVIT CATEGORY header in
+    one sheet of an IFC+SG classification workbook, or None if this sheet
+    isn't one - the header sits a few metadata rows down (row 7 in the
+    reported file), never row 1, so a plain "read row 1" check would
+    always miss it."""
+    for r in range(1, max_scan + 1):
+        cells = tuple(_cell_str(get_cell(r, c)).upper() for c in (1, 2, 3, 4))
+        if cells == _CLASSIFICATION_HEADER:
+            return r
+    return None
+
+
+def _parse_classification_row_into_mapping(mapping, get_cell, r):
+    """Fold one LEVEL-3 row of an IFC+SG classification workbook into
+    `mapping`, in the same shape _parse_row_into_mapping() builds from the
+    official Industry Mapping Excel.
+
+    LEVEL 1 (the single root row) and LEVEL 2 (a category group heading,
+    e.g. "Doors" - a component name and Revit category only exist on its
+    LEVEL 3 children) carry nothing to add and are skipped. Every subtype
+    token gets the '*' marker _parse_row_into_mapping already uses for a
+    custom SG subtype from the official Excel (stripping one first, in
+    case the source cell already had it) - Apply/Auto-Assign then treat
+    it exactly the same way: PredefinedType=USERDEFINED, the token itself
+    (minus '*') written into IfcObjectType. There is no IFC4 Entity column
+    in this format, so ifc_entities is left empty for every component."""
+    if _cell_str(get_cell(r, 3)) != "3":
+        return
+
+    comp = _cell_str(get_cell(r, 1))
+    if not comp:
+        return
+
+    subtypes_in_cell = []
+    sub_str = _cell_str(get_cell(r, 2))
+    if sub_str and sub_str not in ("N.A", "N.A."):
+        for s in sub_str.split(","):
+            s = s.strip().lstrip("*")
+            if s and s not in ("N.A", "N.A."):
+                subtypes_in_cell.append("*" + s)
+
+    cat_name = ""
+    raw_cat = _cell_str(get_cell(r, 4))
+    if raw_cat:
+        try:
+            cat_name = REVIT_CAT_ID_TO_NAME.get(int(raw_cat), "")
+        except ValueError:
+            cat_name = ""
+
+    if comp not in mapping:
+        mapping[comp] = {
+            "ifc_entities": set(), "subtypes": set(),
+            "revit_categories": set(), "agencies": set(),
+        }
+    m = mapping[comp]
+    for st in subtypes_in_cell:
+        m["subtypes"].add(st)
+    if cat_name:
+        m["revit_categories"].add(cat_name)
+
+
+def _load_classification_workbook(excel_info):
+    """Mapping dict built directly from every sheet of `excel_info` that
+    carries the classification-workbook header, or None if none does (the
+    caller then falls back to the normal column-mapping dialog for the
+    official Industry Mapping Excel).
+
+    A classification export typically carries one sheet per FUNCTION
+    ("Element", "Space", ...) - all matching sheets are read and merged
+    into one mapping, the same way a component repeated under several
+    Heading/Section pairs would be, so a component that only appears
+    under "Space" still ends up in the same tool as one only under
+    "Element". Only the native .xlsx reader's rows are used - a legacy
+    .xls in this format would need Excel Interop for cell-by-cell access
+    the same way the official-Excel COM fallback does, but no export of
+    this format has ever been seen as anything but a modern .xlsx."""
+    native_rows_by_sheet = excel_info.get("_native_rows")
+    if not native_rows_by_sheet:
+        return None
+
+    mapping = {}
+    matched_sheets = []
+    for sheet_name in excel_info["sheets"]:
+        rows = native_rows_by_sheet.get(sheet_name)
+        if not rows:
+            continue
+
+        def get_cell(row, col, _rows=rows):
+            return _rows.get(row, {}).get(col)
+
+        header_row = _classification_header_row(get_cell)
+        if header_row is None:
+            continue
+        matched_sheets.append(sheet_name)
+        for r in sorted(row for row in rows if row > header_row):
+            try:
+                _parse_classification_row_into_mapping(mapping, get_cell, r)
+            except Exception:
+                continue
+
+    if not matched_sheets:
+        return None
+
+    for comp, m in mapping.items():
+        m["ifc_entities"] = sorted(m["ifc_entities"])
+        m["subtypes"] = sorted(m["subtypes"])
+        m["revit_categories"] = sorted(m["revit_categories"])
+        m["agencies"] = sorted(m["agencies"])
+
+    output.print_md(
+        "**Recognised as an IFC+SG classification workbook** - read {} "
+        "component(s) from sheet(s): {}".format(
+            len(mapping), ", ".join(matched_sheets)))
+    return mapping
+
+
 def load_mapping_with_dialog(filepath):
     """Load Excel with Column Mapping Dialog."""
     excel_info = read_excel_headers(filepath)
     if not excel_info:
         return None
+
+    # An IFC+SG classification workbook (e.g.
+    # IFCSG_Classification_for_Subtypes.xlsx) has no "IFC4 Entity" column
+    # for the dialog below to offer, so it is recognized and parsed here
+    # directly, before the dialog ever opens - see
+    # _load_classification_workbook() for why.
+    classification_mapping = _load_classification_workbook(excel_info)
+    if classification_mapping is not None:
+        return classification_mapping
 
     col_result = show_column_mapping_dialog(excel_info, filepath)
     if not col_result.get("ok"):
@@ -2164,11 +2331,17 @@ class IFCSGSubtypeWindow(object):
                 continue
 
             entity = m["ifc_entities"][0] if m.get("ifc_entities") else ""
-            if not entity:
+            subtypes = m.get("subtypes", [])
+            if not entity and not subtypes:
+                # Nothing this mapping row could set on these elements at
+                # all - skip. A classification-workbook component (no
+                # IFC4 Entity column in that format at all) still reaches
+                # here as long as it has a subtype: only the "Export to
+                # IFC As" write is skipped below, same as unchecking
+                # "Apply Entity" would do for any other component.
                 continue
 
             # Pick first subtype (prefer USERDEFINED/SG, then standard)
-            subtypes = m.get("subtypes", [])
             if not subtypes:
                 # No subtype defined - just set entity
                 subtype_str = ""
