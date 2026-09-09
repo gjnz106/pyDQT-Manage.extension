@@ -1,19 +1,23 @@
 title: Manage
 layout:
+  # Model QA & Imported Content - warnings, worksets, CAD/images
   - Warning
-  - Material List
   - WorksetChecker
   - CADImportManager
   - ImageManager
+  # Model Content & Parameters - groups, families, params, materials
   - GroupManager
   - FamilyManager
   - ParaManager
+  - Material List
+  # Graphics, Styles & Fonts - lines, hatching, fonts
   - Line Style Edit
   - Line Pattern
-  - Text
-  - DimensionManager
-  - WallLayerManager
   - Hatching
   - FamilyFont
-  - ViewTemplate
+  # Annotation, Dimensions & Views - text, dimensions, legends, view templates, walls
+  - Text
+  - DimensionManager
   - LegendManager
+  - ViewTemplate
+  - WallLayerManager
