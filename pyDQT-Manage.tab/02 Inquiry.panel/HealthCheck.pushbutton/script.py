@@ -154,14 +154,6 @@ METRIC_THRESHOLDS = OrderedDict([
         "selectable": True,
         "weight": 2
     }),
-    ("worksets", {
-        "label": "Worksets",
-        "thresholds": [10, 20, 30, 40, 50],
-        "tooltip": "User worksets. Excessive worksets complicate management.",
-        "unit": "",
-        "selectable": False,
-        "weight": 1
-    }),
     ("cad_links", {
         "label": "CAD Links",
         "thresholds": [10, 25, 50, 80, 120],
@@ -170,21 +162,13 @@ METRIC_THRESHOLDS = OrderedDict([
         "selectable": True,
         "weight": 3
     }),
-    ("views", {
-        "label": "Views",
-        "thresholds": [200, 500, 1000, 2000, 4000],
-        "tooltip": "Total views. Too many slow file open/save.",
+    ("imported_images", {
+        "label": "Imported Images",
+        "thresholds": [5, 15, 30, 60, 100],
+        "tooltip": "Embedded raster images. Each one bloats file size and can go missing if the source file moves.",
         "unit": "",
         "selectable": True,
         "weight": 3
-    }),
-    ("sheets", {
-        "label": "Sheets",
-        "thresholds": [100, 200, 400, 600, 1000],
-        "tooltip": "Total sheets with placed views increase file size.",
-        "unit": "",
-        "selectable": True,
-        "weight": 2
     }),
     ("groups", {
         "label": "Groups",
@@ -201,30 +185,6 @@ METRIC_THRESHOLDS = OrderedDict([
         "unit": "",
         "selectable": True,
         "weight": 1
-    }),
-    ("reference_planes", {
-        "label": "Ref. Planes",
-        "thresholds": [100, 200, 500, 800, 1500],
-        "tooltip": "Leftover reference planes clutter the model.",
-        "unit": "",
-        "selectable": True,
-        "weight": 1
-    }),
-    ("detail_lines", {
-        "label": "Detail Lines",
-        "thresholds": [1000, 5000, 10000, 25000, 50000],
-        "tooltip": "Excessive detail lines = drafting overuse.",
-        "unit": "",
-        "selectable": True,
-        "weight": 2
-    }),
-    ("filled_regions", {
-        "label": "Filled Regions",
-        "thresholds": [100, 500, 1000, 3000, 5000],
-        "tooltip": "Many filled regions slow view rendering.",
-        "unit": "",
-        "selectable": True,
-        "weight": 2
     }),
     ("rooms_unplaced", {
         "label": "Unplaced Rooms",
@@ -377,15 +337,10 @@ class ModelHealthAnalyzer:
         self._cad_imports()
         self._in_place_families()
         self._rvt_links()
-        self._worksets()
         self._cad_links()
-        self._views()
-        self._sheets()
+        self._imported_images()
         self._groups()
         self._design_options()
-        self._reference_planes()
-        self._detail_lines()
-        self._filled_regions()
         self._unplaced_rooms()
         self._unpinned_links()
         self._duplicate_elements()
@@ -456,16 +411,6 @@ class ModelHealthAnalyzer:
         except:
             self.metrics["rvt_links"] = 0
 
-    def _worksets(self):
-        try:
-            if self.doc.IsWorkshared:
-                ws = FilteredWorksetCollector(self.doc).OfKind(WorksetKind.UserWorkset).ToWorksets()
-                self.metrics["worksets"] = ws.Count
-            else:
-                self.metrics["worksets"] = 0
-        except:
-            self.metrics["worksets"] = 0
-
     def _cad_links(self):
         try:
             col = FilteredElementCollector(self.doc).OfClass(ImportInstance).WhereElementIsNotElementType()
@@ -481,29 +426,16 @@ class ModelHealthAnalyzer:
         except:
             self.metrics["cad_links"] = 0
 
-    def _views(self):
+    def _imported_images(self):
         try:
-            col = FilteredElementCollector(self.doc).OfClass(View).WhereElementIsNotElementType()
-            elems = []
-            for v in col:
-                try:
-                    if not v.IsTemplate and v.ViewType != ViewType.Internal:
-                        elems.append(v)
-                except:
-                    pass
-            self.metrics["views"] = len(elems)
-            self._store_ids("views", elems)
-        except:
-            self.metrics["views"] = 0
-
-    def _sheets(self):
-        try:
-            col = FilteredElementCollector(self.doc).OfClass(ViewSheet).WhereElementIsNotElementType()
+            # Same collection this suite's Image Manager tool uses for the
+            # same elements - every raster Image placed into the model.
+            col = FilteredElementCollector(self.doc).OfClass(ImageInstance).WhereElementIsNotElementType()
             elems = list(col)
-            self.metrics["sheets"] = len(elems)
-            self._store_ids("sheets", elems)
+            self.metrics["imported_images"] = len(elems)
+            self._store_ids("imported_images", elems)
         except:
-            self.metrics["sheets"] = 0
+            self.metrics["imported_images"] = 0
 
     def _groups(self):
         try:
@@ -522,40 +454,6 @@ class ModelHealthAnalyzer:
             self._store_ids("design_options", elems)
         except:
             self.metrics["design_options"] = 0
-
-    def _reference_planes(self):
-        try:
-            col = FilteredElementCollector(self.doc).OfClass(ReferencePlane).WhereElementIsNotElementType()
-            elems = list(col)
-            self.metrics["reference_planes"] = len(elems)
-            self._store_ids("reference_planes", elems)
-        except:
-            self.metrics["reference_planes"] = 0
-
-    def _detail_lines(self):
-        try:
-            col = FilteredElementCollector(self.doc).OfClass(CurveElement).WhereElementIsNotElementType()
-            elems = []
-            for ce in col:
-                try:
-                    cat = ce.Category
-                    if cat and "Lines" in cat.Name:
-                        elems.append(ce)
-                except:
-                    pass
-            self.metrics["detail_lines"] = len(elems)
-            self._store_ids("detail_lines", elems)
-        except:
-            self.metrics["detail_lines"] = 0
-
-    def _filled_regions(self):
-        try:
-            col = FilteredElementCollector(self.doc).OfClass(FilledRegion).WhereElementIsNotElementType()
-            elems = list(col)
-            self.metrics["filled_regions"] = len(elems)
-            self._store_ids("filled_regions", elems)
-        except:
-            self.metrics["filled_regions"] = 0
 
     def _unplaced_rooms(self):
         try:
@@ -684,15 +582,10 @@ RECOMMENDATIONS = {
     "cad_imports": "Delete imported CAD. Use linked CAD instead.",
     "in_place_families": "Convert In-Place to loadable families.",
     "rvt_links": "Review if all RVT links are necessary. Unload unused.",
-    "worksets": "Consolidate worksets if possible.",
     "cad_links": "Minimize CAD links. Convert to native Revit elements.",
-    "views": "Delete unused views. Use View Templates.",
-    "sheets": "Archive completed sheets. Remove test sheets.",
+    "imported_images": "Delete unused imported images. Link large raster files instead of embedding them.",
     "groups": "Ungroup where possible. Use families instead.",
     "design_options": "Finalize and accept primary design options.",
-    "reference_planes": "Delete unnamed/unnecessary reference planes.",
-    "detail_lines": "Review detail lines. Use line-based detail components.",
-    "filled_regions": "Minimize filled regions. Use material hatching.",
     "rooms_unplaced": "Place or delete unplaced rooms.",
     "linked_dwg_not_pinned": "Pin all linked files to prevent accidental movement.",
     "duplicate_elements": "Review and delete overlapping duplicate elements. They cause double counting in schedules and visual artifacts.",
@@ -1822,12 +1715,11 @@ class ModelHealthWindow(Window):
             return
         MessageBox.Show(
             "Model Health Check\n\n"
-            "Analyzes the model against 17 metrics (file size, warnings, "
-            "CAD imports/links, in-place families, RVT links, worksets, "
-            "views, sheets, groups, design options, reference planes, "
-            "detail lines, filled regions, unplaced rooms, unpinned links, "
-            "duplicate elements) and combines them into one weighted "
-            "score.\n\n"
+            "Analyzes the model against 12 metrics (file size, warnings, "
+            "CAD imports/links, in-place families, RVT links, imported "
+            "images, groups, design options, unplaced rooms, unpinned "
+            "links, duplicate elements) and combines them into one "
+            "weighted score.\n\n"
             "HEALTH SCALE\n"
             "  Good / Acceptable / Warning / Concerning / Critical / Severe\n"
             "  - each metric's row in the heatmap is coloured on this same "
