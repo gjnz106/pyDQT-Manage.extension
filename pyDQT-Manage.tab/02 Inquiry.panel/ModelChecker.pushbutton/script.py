@@ -220,23 +220,35 @@ def _get_survey_point_ns_ew_elev(document):
 
     Reported on a real project: BASEPOINT_NORTHSOUTH_PARAM read off the
     Survey Point's own BasePoint element (IsShared == True) came back
-    0.0, even though the Survey Point's real position - confirmed
-    directly in the Properties palette - was a large, correctly surveyed
-    coordinate (78713552.7mm N/S). BASEPOINT_*_PARAM is meant to work on
-    the Survey Point as well as the Project Base Point, but this shows it
-    cannot be trusted alone.
+    0.0 at one point, even though the Survey Point's real position -
+    confirmed directly in the Properties palette - was a large,
+    correctly surveyed coordinate.
 
-    ProjectLocation.GetProjectPosition() is Autodesk's documented API for
-    this exact purpose: it returns where the model's Internal Origin
-    sits within the active Project Location's shared coordinate system -
-    exactly what the Properties palette shows for the Survey Point - and
-    does not depend on reading a parameter off that specific element, so
-    it's used here as the primary source for Survey Point axes. Project
-    Base Point is unaffected by this (it already reads correctly via
-    BASEPOINT_*_PARAM) and is left on its existing path."""
+    ProjectLocation.GetProjectPosition(point) answers "where does this
+    point, given in the model's own internal coordinates, sit within the
+    active Project Location's shared coordinate system" - it is NOT
+    itself "the Survey Point's position". An earlier version of this
+    function passed XYZ(0, 0, 0) (the Internal Origin), on the mistaken
+    assumption that the Survey Point element always sits there - it
+    doesn't have to, and on the project this was reported against it
+    didn't: that call ended up answering "where is the Internal Origin",
+    which read back identical to the Project Base Point's own N/S and
+    E/W (a different, unrelated element) rather than the Survey Point's
+    true, independently-surveyed coordinate - a ~430mm-and-up silent
+    mismatch, worse than the original 0.0 this function was written to
+    fix. The correct query point is the Survey Point element's own
+    internal .Position - "where does the Survey Point itself sit" -
+    which is exactly what the Properties palette shows for it."""
     try:
+        survey_bp = None
+        for bp in FilteredElementCollector(document).OfClass(BasePoint):
+            if bp.IsShared:
+                survey_bp = bp
+                break
+        if survey_bp is None:
+            return None
         location = document.ActiveProjectLocation
-        position = location.GetProjectPosition(XYZ(0, 0, 0))
+        position = location.GetProjectPosition(survey_bp.Position)
         return position.NorthSouth, position.EastWest, position.Elevation
     except Exception:
         return None
