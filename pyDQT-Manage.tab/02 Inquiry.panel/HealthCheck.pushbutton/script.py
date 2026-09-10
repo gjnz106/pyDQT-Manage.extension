@@ -429,9 +429,38 @@ class ModelHealthAnalyzer:
     def _imported_images(self):
         try:
             # Same collection this suite's Image Manager tool uses for the
-            # same elements - every raster Image placed into the model.
+            # same elements - every raster Image placed into the model -
+            # plus (see Image Manager's own get_images for the live bug
+            # this closes) any image type Revit still tracks as an
+            # external file reference (Insert > Manage Links > Images,
+            # which unifies both "Import" and "Link" raster images into
+            # one list) with no instance placed in any view. A model can
+            # have images Manage Links lists that this collector alone
+            # would silently miss entirely.
             col = FilteredElementCollector(self.doc).OfClass(ImageInstance).WhereElementIsNotElementType()
             elems = list(col)
+            placed_type_ids = set()
+            for e in elems:
+                try:
+                    placed_type_ids.add(e.GetTypeId())
+                except:
+                    pass
+            try:
+                refs = self.doc.GetAllExternalFileReferences()
+                for type_id, efr in refs.items():
+                    try:
+                        if efr.ExternalFileReferenceType != ExternalFileReferenceType.Image:
+                            continue
+                        if type_id in placed_type_ids:
+                            continue
+                        img_type = self.doc.GetElement(type_id)
+                        if img_type is not None:
+                            elems.append(img_type)
+                            placed_type_ids.add(type_id)
+                    except:
+                        continue
+            except:
+                pass
             self.metrics["imported_images"] = len(elems)
             self._store_ids("imported_images", elems)
         except:
