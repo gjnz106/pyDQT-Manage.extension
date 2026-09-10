@@ -792,20 +792,28 @@ class RuleEngine:
         # internal storage - e.g. 78713552.722047 for a Survey Point
         # genuinely placed at 78713552.7 - no surveyor states or measures
         # a coordinate to that precision, so a difference smaller than
-        # 0.1mm is never a real placement error. `actual_mm` in the
-        # message below is still reported at full, unrounded precision -
-        # only the pass/fail decision is rounded, nothing is hidden from
-        # the log. `tolerance` remains an extra allowance on top of this
-        # rounding, not a replacement for it.
+        # 0.1mm is never a real placement error. `tolerance` remains an
+        # extra allowance on top of this rounding, not a replacement for
+        # it.
         diff = abs(round(actual_mm, 1) - round(expected_mm, 1))
+
+        # The message shows `actual_mm` at the same 0.1mm precision the
+        # comparison above just used, not its full, unrounded internal
+        # value - showing e.g. "78713552.722047" next to an expected of
+        # "78713552.7000" reads as a mismatch even on a rule that just
+        # passed (or a fail whose real cause is something other than
+        # this sub-0.1mm noise), because the two numbers visibly differ
+        # at a precision neither the comparison nor any surveyor's stated
+        # coordinate actually carries.
+        actual_display = round(actual_mm, 1)
 
         if diff <= tolerance:
             return RuleResult(rule, "pass",
-                "{} {} = {:.6f} (expected: {})".format(point_name, axis, actual_mm, expected))
+                "{} {} = {:.1f} (expected: {})".format(point_name, axis, actual_display, expected))
         else:
             return RuleResult(rule, "fail",
-                "{} {} = {:.6f} (expected: {}, diff: {:.6f})".format(
-                    point_name, axis, actual_mm, expected, diff))
+                "{} {} = {:.1f} (expected: {}, diff: {:.1f})".format(
+                    point_name, axis, actual_display, expected, diff))
     
     # -----------------------------------------------------------------
     # RULE TYPE: count_check - Check element counts
