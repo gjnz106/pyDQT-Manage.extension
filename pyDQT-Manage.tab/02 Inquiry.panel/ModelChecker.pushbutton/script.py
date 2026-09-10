@@ -779,13 +779,25 @@ class RuleEngine:
         # Units), which on a project set to whole millimetres silently threw
         # away the exact decimal a surveyed coordinate needs, e.g. comparing
         # 78713552.7 as if it were 78713553 and failing by ~0.3 mm even
-        # though the model's actual coordinate was correct. `tolerance`
-        # below is what absorbs genuine sub-thousandth-mm floating-point
-        # noise - the comparison itself must see full precision.
+        # though the model's actual coordinate was correct.
         actual_mm = _length_internal_to_mm(actual_value)
         expected_mm = expected  # User provides this in millimetres already
 
-        diff = abs(actual_mm - expected_mm)
+        # The comparison itself is rounded to a fixed 0.1mm (one decimal
+        # place) - NOT the project's configurable display precision (that
+        # was the bug above), a constant chosen here so the result never
+        # depends on what any particular checkset's `tolerance` happens to
+        # be saved as. A coordinate at this scale (tens of millions of mm)
+        # inherently carries sub-0.1mm floating-point noise in Revit's own
+        # internal storage - e.g. 78713552.722047 for a Survey Point
+        # genuinely placed at 78713552.7 - no surveyor states or measures
+        # a coordinate to that precision, so a difference smaller than
+        # 0.1mm is never a real placement error. `actual_mm` in the
+        # message below is still reported at full, unrounded precision -
+        # only the pass/fail decision is rounded, nothing is hidden from
+        # the log. `tolerance` remains an extra allowance on top of this
+        # rounding, not a replacement for it.
+        diff = abs(round(actual_mm, 1) - round(expected_mm, 1))
 
         if diff <= tolerance:
             return RuleResult(rule, "pass",
