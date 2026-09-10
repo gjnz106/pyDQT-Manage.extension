@@ -70,6 +70,33 @@ def _eid_int(eid):
     except:
         return eid.IntegerValue  # Revit 2024/2025
 
+def _make_element_id(value, errors=None):
+    """Build an ElementId from a plain int - the reverse of _eid_int.
+
+    Every RuleResult stores element ids as plain ints (that is what
+    _eid_int hands back), and turning them back into an ElementId to
+    zoom, select or isolate is a separate round trip whose exact
+    constructor requirements have moved between Revit releases. Tries
+    the bare value first, then explicit Int64 and Int32 boxing, so a
+    change hostile to one strategy still finds another.
+
+    `errors`, when given a list, gets the exception from the last failed
+    attempt."""
+    attempts = (
+        lambda: ElementId(value),
+        lambda: ElementId(System.Int64(value)),
+        lambda: ElementId(System.Int32(value)),
+    )
+    last_err = None
+    for attempt in attempts:
+        try:
+            return attempt()
+        except Exception as ex:
+            last_err = ex
+    if errors is not None and last_err is not None:
+        errors.append(str(last_err))
+    return None
+
 def _get_group_type_id(pg_key):
     """Get ForgeTypeId for parameter group - compatible with Revit 2024-2026+
     pg_key: e.g. 'PG_IFC', 'PG_GEOMETRY', 'PG_FIRE_PROTECTION'
@@ -1561,6 +1588,91 @@ class ExcelReporter:
 
 
 # =====================================================================
+# DETAIL DIALOG (failed/warning elements - Select/Zoom/Isolate)
+# =====================================================================
+DETAIL_XAML = '''
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Failed Elements - DQT"
+        Height="620" Width="880"
+        WindowStartupLocation="CenterScreen"
+        Background="#FEF8E7">
+    <Grid Margin="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <Border Grid.Row="0" Background="#F0CC88" CornerRadius="5" Padding="12,8" Margin="0,0,0,10">
+            <StackPanel>
+                <TextBlock x:Name="txtDetailTitle" FontSize="15" FontWeight="Bold" Foreground="#333"/>
+                <TextBlock x:Name="txtDetailSub" FontSize="10" Foreground="#5D4E37" Margin="0,2,0,0"/>
+            </StackPanel>
+        </Border>
+
+        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,8">
+            <TextBlock Text="Search:" FontSize="11" VerticalAlignment="Center"
+                       Margin="0,0,6,0" Foreground="#888"/>
+            <TextBox x:Name="txtDetailSearch" Width="220" Padding="4,3" FontSize="11"
+                     ToolTip="Filter by id, category, type or name"/>
+            <TextBlock x:Name="txtDetailCount" FontSize="10" Foreground="#888"
+                       VerticalAlignment="Center" Margin="10,0,0,0"/>
+        </StackPanel>
+
+        <Border Grid.Row="2" Background="#F5F0E0" Padding="6,3" CornerRadius="2" Margin="0,0,0,2">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="90"/>
+                    <ColumnDefinition Width="150"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Text="Element ID" FontSize="10" FontWeight="SemiBold" Foreground="#888"/>
+                <TextBlock Grid.Column="1" Text="Category" FontSize="10" FontWeight="SemiBold" Foreground="#888"/>
+                <TextBlock Grid.Column="2" Text="Type" FontSize="10" FontWeight="SemiBold" Foreground="#888"/>
+                <TextBlock Grid.Column="3" Text="Name" FontSize="10" FontWeight="SemiBold" Foreground="#888"/>
+            </Grid>
+        </Border>
+
+        <Border Grid.Row="3" Background="White" BorderBrush="#E0E0E0" BorderThickness="1" CornerRadius="3">
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <StackPanel x:Name="spDetail" Margin="2"/>
+            </ScrollViewer>
+        </Border>
+
+        <Border Grid.Row="4" Background="White" BorderBrush="#D4B87A" BorderThickness="1"
+                CornerRadius="4" Padding="8" Margin="0,10,0,0">
+            <Grid>
+                <TextBlock x:Name="txtDetailHint" FontSize="9" Foreground="#888"
+                           VerticalAlignment="Center" HorizontalAlignment="Left"
+                           Text="Click a row to select and zoom to that element in Revit."/>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                    <Button x:Name="btnDetailSelectAll" Content="Select All in Revit"
+                            Padding="10,5" Margin="2" Background="#F0CC88" FontSize="11"/>
+                    <Button x:Name="btnDetailZoomAll" Content="Zoom To All"
+                            Padding="10,5" Margin="2" Background="White" FontSize="11"/>
+                    <Button x:Name="btnDetailIsolate" Content="Isolate All"
+                            Padding="10,5" Margin="2" Background="White" FontSize="11"/>
+                    <Button x:Name="btnDetailResetIsolate" Content="Reset Isolate"
+                            Padding="10,5" Margin="2" Background="White" FontSize="11"/>
+                    <Button x:Name="btnDetailClose" Content="Close"
+                            Padding="10,5" Margin="2" Background="White" FontSize="11"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <TextBlock Grid.Row="5" Text="Dang Quoc Truong - DQT (c) 2026" FontSize="9"
+                   Foreground="#999" HorizontalAlignment="Center" Margin="0,6,0,0"/>
+    </Grid>
+</Window>
+'''
+
+
+# =====================================================================
 # WPF MAIN WINDOW
 # =====================================================================
 XAML_STR = '''
@@ -2415,9 +2527,12 @@ class ModelCheckerWindow:
                 col2.Width = System.Windows.GridLength(65)
                 col3 = ColumnDefinition()
                 col3.Width = System.Windows.GridLength(1, System.Windows.GridUnitType.Star)
+                col4 = ColumnDefinition()
+                col4.Width = System.Windows.GridLength(70)
                 row_grid.ColumnDefinitions.Add(col1)
                 row_grid.ColumnDefinitions.Add(col2)
                 row_grid.ColumnDefinitions.Add(col3)
+                row_grid.ColumnDefinitions.Add(col4)
                 
                 # Status icon
                 icon_txt = TextBlock()
@@ -2487,7 +2602,30 @@ class ModelCheckerWindow:
                 
                 Grid.SetColumn(info_sp, 2)
                 row_grid.Children.Add(info_sp)
-                
+
+                # Detail button - only when the check kept element ids to
+                # show (see the elements= arg on RuleResult)
+                if result.elements:
+                    det_btn = Button()
+                    det_btn.Content = u"\u2261 Detail"
+                    det_btn.FontSize = 10
+                    det_btn.Padding = System.Windows.Thickness(6, 3, 6, 3)
+                    det_btn.Cursor = System.Windows.Input.Cursors.Hand
+                    det_btn.VerticalAlignment = System.Windows.VerticalAlignment.Center
+                    det_btn.HorizontalAlignment = System.Windows.HorizontalAlignment.Right
+                    det_btn.ToolTip = "View, select, zoom or isolate the elements behind this result"
+                    try:
+                        det_btn.Background = converter.ConvertFromString("#E3F2FD")
+                        det_btn.Foreground = converter.ConvertFromString("#1565C0")
+                        det_btn.BorderBrush = converter.ConvertFromString("#90CAF9")
+                    except:
+                        pass
+                    det_btn.BorderThickness = System.Windows.Thickness(1)
+                    det_btn.Tag = result
+                    det_btn.Click += self._on_detail_btn_click
+                    Grid.SetColumn(det_btn, 3)
+                    row_grid.Children.Add(det_btn)
+
                 row_border.Child = row_grid
                 self.spResults.Children.Add(row_border)
             
@@ -2504,7 +2642,286 @@ class ModelCheckerWindow:
                 "Error", MessageBoxButton.OK, MessageBoxImage.Error)
         finally:
             self.window.Cursor = System.Windows.Input.Cursors.Arrow
-    
+
+    # =================================================================
+    # DETAIL / SELECT / ZOOM / ISOLATE (failed & warning results)
+    # =================================================================
+    def _describe_element(self, eid):
+        """(id, category, type name, name) for one element id.
+
+        Every lookup is guarded on its own: an element that was deleted
+        since the check ran, or one whose .Name throws (some system
+        families do), still gets a row showing what could be read rather
+        than taking the whole dialog down."""
+        info = {"id": str(eid), "cat": "", "type": "", "name": ""}
+        errors = []
+        el = None
+        try:
+            target_id = _make_element_id(int(eid), errors)
+            if target_id is not None:
+                el = doc.GetElement(target_id)
+        except Exception as ex:
+            errors.append(str(ex))
+        if el is None:
+            info["cat"] = "(not found - {})".format(errors[-1]) if errors \
+                else "(not found)"
+            return info
+        try:
+            if el.Category is not None:
+                info["cat"] = el.Category.Name
+        except:
+            pass
+        try:
+            type_id = el.GetTypeId()
+            if type_id is not None and type_id != ElementId.InvalidElementId:
+                el_type = doc.GetElement(type_id)
+                if el_type is not None:
+                    info["type"] = el_type.Name
+        except:
+            pass
+        try:
+            info["name"] = el.Name
+        except:
+            pass
+        return info
+
+    def _minimize_to_show_revit(self, *extra_windows):
+        """Get this window (and any detail dialog) out of the way after a
+        Zoom/Isolate/Reset so the freshly-framed selection is visible."""
+        for w in (self.window,) + extra_windows:
+            try:
+                w.WindowState = System.Windows.WindowState.Minimized
+            except:
+                pass
+
+    def _zoom_to_elements(self, element_ids, minimize=False, extra_windows=()):
+        """Select and frame the given ids in the active view."""
+        try:
+            net_ids = System.Collections.Generic.List[ElementId]()
+            conv_errors = []
+            for eid in element_ids:
+                try:
+                    target_id = _make_element_id(int(eid), conv_errors)
+                except Exception as ex:
+                    target_id = None
+                    conv_errors.append(str(ex))
+                if target_id is not None:
+                    net_ids.Add(target_id)
+            if net_ids.Count == 0:
+                if conv_errors:
+                    msg = "Could not resolve any element id in Revit - {}".format(
+                        conv_errors[-1])
+                    self.txtStatus.Text = msg
+                    System.Windows.MessageBox.Show(msg, "Zoom To Elements",
+                        MessageBoxButton.OK, MessageBoxImage.Error)
+                return
+            uidoc.Selection.SetElementIds(net_ids)
+            uidoc.ShowElements(net_ids)
+            self.txtStatus.Text = "Zoomed to {} element(s).".format(net_ids.Count)
+            if minimize:
+                self._minimize_to_show_revit(*extra_windows)
+        except Exception as e:
+            msg = "Zoom error: {}".format(str(e))
+            self.txtStatus.Text = msg
+            System.Windows.MessageBox.Show(msg, "Zoom To Elements",
+                MessageBoxButton.OK, MessageBoxImage.Error)
+
+    def _select_elements_in_revit(self, element_ids):
+        """Select elements in Revit (no zoom - see _zoom_to_elements)."""
+        try:
+            ids = System.Collections.Generic.List[ElementId]()
+            conv_errors = []
+            for eid in element_ids:
+                try:
+                    target_id = _make_element_id(int(eid), conv_errors)
+                except Exception as ex:
+                    target_id = None
+                    conv_errors.append(str(ex))
+                if target_id is not None:
+                    ids.Add(target_id)
+            if ids.Count > 0:
+                uidoc.Selection.SetElementIds(ids)
+                self.txtStatus.Text = "Selected {} elements in Revit".format(ids.Count)
+            elif conv_errors:
+                msg = "Could not resolve any element id in Revit - {}".format(
+                    conv_errors[-1])
+                self.txtStatus.Text = msg
+                System.Windows.MessageBox.Show(msg, "Select Elements",
+                    MessageBoxButton.OK, MessageBoxImage.Error)
+        except Exception as e:
+            msg = "Select error: {}".format(str(e))
+            self.txtStatus.Text = msg
+            System.Windows.MessageBox.Show(msg, "Select Elements",
+                MessageBoxButton.OK, MessageBoxImage.Error)
+
+    def _isolate_elements(self, element_ids):
+        """Temporarily isolate the given elements in the active view -
+        Reset Isolate undoes it."""
+        net_ids = System.Collections.Generic.List[ElementId]()
+        conv_errors = []
+        for eid in element_ids:
+            try:
+                target_id = _make_element_id(int(eid), conv_errors)
+            except Exception as ex:
+                target_id = None
+                conv_errors.append(str(ex))
+            if target_id is not None:
+                net_ids.Add(target_id)
+        if net_ids.Count == 0:
+            msg = "Could not resolve any element id in Revit - {}".format(
+                conv_errors[-1]) if conv_errors else "No elements to isolate."
+            self.txtStatus.Text = msg
+            System.Windows.MessageBox.Show(msg, "Isolate Elements",
+                MessageBoxButton.OK, MessageBoxImage.Error)
+            return
+        view = doc.ActiveView
+        if view is None:
+            self.txtStatus.Text = "No active view to isolate in."
+            return
+        t = Transaction(doc, "DQT - Isolate Failed Elements")
+        try:
+            t.Start()
+            view.IsolateElementsTemporary(net_ids)
+            t.Commit()
+            uidoc.Selection.SetElementIds(net_ids)
+            self.txtStatus.Text = "Isolated {} element(s) in the active view.".format(
+                net_ids.Count)
+            self._minimize_to_show_revit()
+        except Exception as e:
+            if t.HasStarted() and not t.HasEnded():
+                t.RollBack()
+            msg = "Isolate error: {}".format(str(e))
+            self.txtStatus.Text = msg
+            System.Windows.MessageBox.Show(msg, "Isolate Elements",
+                MessageBoxButton.OK, MessageBoxImage.Error)
+
+    def _reset_isolate(self, sender=None, args=None):
+        """Exit temporary hide/isolate on the active view, if it is active."""
+        view = doc.ActiveView
+        if view is None:
+            return
+        t = None
+        try:
+            if not view.IsInTemporaryViewMode(TemporaryViewMode.TemporaryHideIsolate):
+                self.txtStatus.Text = "Nothing to reset - the view is not isolated."
+                return
+            t = Transaction(doc, "DQT - Reset Temporary Isolate/Hide")
+            t.Start()
+            view.DisableTemporaryViewMode(TemporaryViewMode.TemporaryHideIsolate)
+            t.Commit()
+            self.txtStatus.Text = "Temporary isolate/hide reset."
+            self._minimize_to_show_revit()
+        except Exception as e:
+            if t is not None and t.HasStarted() and not t.HasEnded():
+                t.RollBack()
+            msg = "Reset error: {}".format(str(e))
+            self.txtStatus.Text = msg
+            System.Windows.MessageBox.Show(msg, "Reset Isolate/Hide",
+                MessageBoxButton.OK, MessageBoxImage.Error)
+
+    def _show_detail(self, result):
+        """List the elements behind a failed/warning check result, with
+        per-row click-to-select+zoom and Select All / Zoom To All /
+        Isolate All / Reset Isolate buttons."""
+        try:
+            win = XamlReader.Parse(DETAIL_XAML)
+        except Exception as ex:
+            self.txtStatus.Text = "Could not open detail view: {}".format(ex)
+            return
+
+        ids = list(result.elements)
+        rows = [self._describe_element(eid) for eid in ids]
+
+        sp = win.FindName("spDetail")
+        txt_search = win.FindName("txtDetailSearch")
+        txt_count = win.FindName("txtDetailCount")
+        converter = BrushConverter()
+
+        win.FindName("txtDetailTitle").Text = u"[{}] {}".format(
+            result.rule_id, result.rule_name)
+        win.FindName("txtDetailSub").Text = u"{} \u203A {} element(s) \u2022 {}".format(
+            result.category, len(ids), result.message)
+
+        def render(_sender=None, _args=None):
+            term = (txt_search.Text or "").strip().lower()
+            sp.Children.Clear()
+            shown = 0
+            for info in rows:
+                if term and term not in u"{} {} {} {}".format(
+                        info["id"], info["cat"], info["type"],
+                        info["name"]).lower():
+                    continue
+                shown += 1
+                row = System.Windows.Controls.Border()
+                row.Padding = System.Windows.Thickness(6, 3, 6, 3)
+                row.Margin = System.Windows.Thickness(0, 0, 0, 1)
+                row.Cursor = System.Windows.Input.Cursors.Hand
+                row.Tag = info["id"]
+                row.ToolTip = "Click to select and zoom to this element"
+                try:
+                    row.Background = converter.ConvertFromString(
+                        "#FFFFFF" if shown % 2 else "#FAF7EF")
+                except:
+                    pass
+
+                grid = Grid()
+                for width in (90, 150, -1, -1):
+                    col = ColumnDefinition()
+                    if width > 0:
+                        col.Width = System.Windows.GridLength(width)
+                    else:
+                        col.Width = System.Windows.GridLength(
+                            1, System.Windows.GridUnitType.Star)
+                    grid.ColumnDefinitions.Add(col)
+
+                for index, key in enumerate(("id", "cat", "type", "name")):
+                    cell = TextBlock()
+                    cell.Text = info[key]
+                    cell.FontSize = 10
+                    cell.VerticalAlignment = System.Windows.VerticalAlignment.Center
+                    cell.TextTrimming = System.Windows.TextTrimming.CharacterEllipsis
+                    if index == 0:
+                        cell.FontFamily = System.Windows.Media.FontFamily("Consolas")
+                    Grid.SetColumn(cell, index)
+                    grid.Children.Add(cell)
+
+                row.Child = grid
+                row.MouseLeftButtonDown += on_row_click
+                sp.Children.Add(row)
+
+            if shown == len(rows):
+                txt_count.Text = "{} element(s)".format(shown)
+            else:
+                txt_count.Text = "{} of {} element(s)".format(shown, len(rows))
+
+        def on_row_click(sender, args):
+            self._select_elements_in_revit([sender.Tag])
+            self._zoom_to_elements([sender.Tag])
+
+        txt_search.TextChanged += render
+        win.FindName("btnDetailSelectAll").Click += \
+            lambda s_, a_: self._select_elements_in_revit(ids)
+        win.FindName("btnDetailZoomAll").Click += \
+            lambda s_, a_: self._zoom_to_elements(ids, minimize=True, extra_windows=(win,))
+        win.FindName("btnDetailIsolate").Click += \
+            lambda s_, a_: self._isolate_elements(ids)
+        win.FindName("btnDetailResetIsolate").Click += self._reset_isolate
+        win.FindName("btnDetailClose").Click += lambda s_, a_: win.Close()
+
+        render()
+        # Owned by the checker window so it stays in front of it rather
+        # than getting lost behind Revit.
+        try:
+            win.Owner = self.window
+        except:
+            pass
+        win.ShowDialog()
+
+    def _on_detail_btn_click(self, sender, args):
+        result = sender.Tag
+        if result is not None:
+            self._show_detail(result)
+
     def _reset_results(self):
         """Reset results display"""
         self.current_results = None
@@ -2596,7 +3013,14 @@ class ModelCheckerWindow:
             "  2. Tick the rules to run (Select All / None)\n"
             "  3. Select a rule to see its details and, if it has any, "
             "edit its parameters - Save Parameters keeps the change\n"
-            "  4. Run Check, then Export Excel for the report",
+            "  4. Run Check, then Export Excel for the report\n\n"
+            "DETAIL / SELECT / ZOOM / ISOLATE\n"
+            "  A failed or warning result that lists specific elements "
+            "shows a Detail button - click it to see every element "
+            "(ID, Category, Type, Name), searchable. Click a row to "
+            "select and zoom to that element in Revit, or use Select "
+            "All in Revit / Zoom To All / Isolate All / Reset Isolate "
+            "for the whole list at once.",
             "Model Checker - Help",
             MessageBoxButton.OK, MessageBoxImage.Information)
 
