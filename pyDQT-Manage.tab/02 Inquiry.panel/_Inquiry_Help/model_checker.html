@@ -53,7 +53,25 @@
       <li>Select a rule to see its details and, if it has any, edit its
         parameters - <b>Save Parameters</b> keeps the change.</li>
       <li><b>Run Check</b>, then <b>Export Excel</b> for the report.</li>
+      <li>A failed or warning result that lists specific elements shows a
+        <b>&equiv; Detail</b> button - open it to see, select, zoom to or
+        isolate those elements directly in Revit.</li>
     </ol>
+  </div>
+
+  <div class="card">
+    <h2>Detail / Select / Zoom / Isolate</h2>
+    <p class="lede">
+      Click <b>&equiv; Detail</b> on a result to open a searchable list of
+      every element behind it (ID, Category, Type, Name).
+    </p>
+    <dl class="kv">
+      <dt class="v-dark">Click a row</dt><dd>selects and zooms to that one element in Revit</dd>
+      <dt class="v-dark">Select All in Revit</dt><dd>selects every listed element</dd>
+      <dt class="v-dark">Zoom To All</dt><dd>selects, zooms and minimises the tool so the selection is visible</dd>
+      <dt class="v-dark">Isolate All</dt><dd>temporarily isolates the listed elements in the active view</dd>
+      <dt class="v-dark">Reset Isolate</dt><dd>exits temporary isolate/hide on the active view</dd>
+    </dl>
   </div>
 
   <div class="card">
@@ -62,6 +80,13 @@
       Checksets are JSON, so a checkset built for one project's BEP can be
       exported and imported into another project rather than rebuilt by
       hand.
+    </div>
+    <div class="box fixed">
+      Failed checks such as View/Sheet naming used to only list violating
+      elements by name and ID in plain text, with no way to act on them.
+      Results now carry their element ids through to a Detail dialog so
+      you can select, zoom to or isolate them without hunting for each one
+      by hand.
     </div>
   </div>
 

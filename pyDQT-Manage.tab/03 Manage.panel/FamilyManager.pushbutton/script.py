@@ -1084,11 +1084,11 @@ RENAME_XAML = """
 # Export Options Dialog
 EXPORT_OPTIONS_XAML = """
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-        Title="Export Options" Height="180" Width="450" WindowStartupLocation="CenterOwner" Background="#FEF8E7" ResizeMode="NoResize">
+        Title="Export Options" SizeToContent="Height" Width="450" WindowStartupLocation="CenterOwner" Background="#FEF8E7" ResizeMode="NoResize">
     <Grid Margin="15">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
