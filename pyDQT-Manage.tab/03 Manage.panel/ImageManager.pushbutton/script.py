@@ -2,11 +2,14 @@
 """Image Manager v1.0
 Author: Dang Quoc Truong (DQT)
 
-Lists every raster Image placed into the model (ImageInstance elements)
-with its name, source file path, whether that file can still be found on
-disk, creator, workset, host level and the view it was placed into, so a
-stray, oversized or broken-link image can be found and selected without
-hunting through every view.
+Lists every raster Image in the model - both placed ImageInstance
+elements (with name, source file path, whether that file can still be
+found on disk, creator, workset, host level and the view it was placed
+into) and any image type Revit still tracks as an external file
+reference (Insert > Manage Links > Images) with no instance placed
+anywhere, so the count matches Manage Links instead of silently missing
+loaded-but-unplaced content - so a stray, oversized or broken-link image
+can be found and selected without hunting through every view.
 """
 __title__ = "Image\nManager"
 __author__ = "DQT"
@@ -65,16 +68,13 @@ class ImageItem(object):
         self.element = None
 
 
-def _image_type_name(doc, elem):
-    """The image's display name, tried in the order this codebase's CAD
-    Import Manager already relies on for the equivalent lookup on an
-    ImportInstance's type: Element.Name on the type is the version-stable
-    route, LookupParameter and the raw Id are fallbacks."""
-    img_type = None
-    try:
-        img_type = doc.GetElement(elem.GetTypeId())
-    except:
-        pass
+def _type_name_from_type(img_type, fallback_id):
+    """Shared core of _image_type_name: the display name of an ImageType
+    element itself, tried in the order this codebase's CAD Import Manager
+    already relies on for the equivalent lookup: Element.Name on the type
+    is the version-stable route, LookupParameter and the raw Id are
+    fallbacks. Split out so a caller that already has the ImageType (no
+    placed instance to fetch it from) can reuse the same lookup."""
     if img_type:
         try:
             val = DB.Element.Name.GetValue(img_type)
@@ -96,25 +96,33 @@ def _image_type_name(doc, elem):
         except:
             pass
 
-    return "<Unnamed> (ID {})".format(_eid_int(elem.Id))
+    return "<Unnamed> (ID {})".format(fallback_id)
 
 
-def _image_source_path(doc, elem):
-    """The external raster file this image was placed from, or "" when it
-    cannot be determined. Tried through every route this Revit version
-    might expose it via, oldest API surface last:
+def _image_type_name(doc, elem):
+    """The image's display name, resolved from the ImageInstance's type."""
+    img_type = None
+    try:
+        img_type = doc.GetElement(elem.GetTypeId())
+    except:
+        pass
+    return _type_name_from_type(img_type, _eid_int(elem.Id))
+
+
+def _source_path_from_type(img_type):
+    """Shared core of _image_source_path: the external raster file an
+    ImageType points to, or "" when it cannot be determined. Tried through
+    every route this Revit version might expose it via, oldest API surface
+    last:
       1) ImageType.GetImageTypeSettings().SourcePath - the documented,
          current way to read it.
       2) ImageType.Path - older API some Revit builds still carry.
       3) a LookupParameter literally named "Path"/"Source Path", in case
          a future/older build exposes it that way instead.
     Never raises - an image whose path cannot be determined is reported
-    as "" rather than failing the whole row."""
-    img_type = None
-    try:
-        img_type = doc.GetElement(elem.GetTypeId())
-    except:
-        pass
+    as "" rather than failing the whole row. Split out so a caller that
+    already has the ImageType (no placed instance to fetch it from) can
+    reuse the same lookup."""
     if not img_type:
         return ""
 
@@ -142,6 +150,18 @@ def _image_source_path(doc, elem):
         pass
 
     return ""
+
+
+def _image_source_path(doc, elem):
+    """The external raster file this image was placed from, resolved from
+    the ImageInstance's type. See _source_path_from_type for the lookups
+    tried."""
+    img_type = None
+    try:
+        img_type = doc.GetElement(elem.GetTypeId())
+    except:
+        pass
+    return _source_path_from_type(img_type)
 
 
 def _file_status(path):
@@ -246,6 +266,11 @@ def _get_view_name(doc, elem):
 
 def get_images(doc):
     items = []
+    placed_type_ids = set()
+
+    # Pass 1: images actually placed as an ImageInstance in some view -
+    # the original source, and the only one that can report a creator,
+    # workset, level and owning view.
     collector = FilteredElementCollector(doc).OfClass(ImageInstance) \
         .WhereElementIsNotElementType()
     for elem in collector:
@@ -262,8 +287,62 @@ def get_images(doc):
             item.level = _get_level(doc, elem)
             item.view_name = _get_view_name(doc, elem)
             items.append(item)
+            try:
+                placed_type_ids.add(_eid_int(elem.GetTypeId()))
+            except:
+                pass
         except:
             continue
+
+    # Pass 2: image types Revit itself still tracks as an external file
+    # reference (visible in Insert > Manage Links > Images - which unifies
+    # both "Import" and "Link" raster images into one list) but that have
+    # no ImageInstance placed in any of this project's own views to find
+    # in Pass 1. A live report showed Manage Links listing images (both
+    # Import and Link reference type) that Image Manager reported zero of
+    # - the image type is loaded into the project, Revit is still tracking
+    # its source file, but nothing ever placed an instance of it here (or
+    # the instance that once did has since been deleted, leaving the type
+    # behind). GetAllExternalFileReferences() is the same document-wide
+    # source Manage Links itself reads from, so this closes that gap and
+    # keeps the two dialogs' counts in agreement. These rows have no
+    # instance to report a creator/workset/level/view for - Select, Zoom
+    # and Delete still work through element_id (Delete removes the unused
+    # loaded type, which is exactly the cleanup this gap otherwise hides).
+    try:
+        refs = doc.GetAllExternalFileReferences()
+        for type_id, efr in refs.items():
+            try:
+                if efr.ExternalFileReferenceType != ExternalFileReferenceType.Image:
+                    continue
+                tid = _eid_int(type_id)
+                if tid in placed_type_ids:
+                    continue
+                img_type = doc.GetElement(type_id)
+                if img_type is None:
+                    continue
+                item = ImageItem()
+                item.element = None
+                item.element_id = tid
+                item.name = _type_name_from_type(img_type, tid)
+                path = _source_path_from_type(img_type)
+                if not path:
+                    try:
+                        model_path = efr.GetPath()
+                        if model_path:
+                            path = ModelPathUtils.ConvertModelPathToUserVisiblePath(model_path)
+                    except:
+                        pass
+                item.source_path = path if path else "-"
+                item.status = _file_status(path)
+                item.view_name = "(not placed - loaded only)"
+                items.append(item)
+                placed_type_ids.add(tid)
+            except:
+                continue
+    except:
+        pass
+
     return items
 
 
@@ -555,9 +634,12 @@ class ImageManagerWindow(WPFWindow):
 
         Unlike an unloaded CAD link, an image with a missing source file
         still has a real placeholder in its owning view - the element and
-        its placement exist in the model either way - so every image here
-        can be zoomed to, and there is no "no good view" case to guard
-        against."""
+        its placement exist in the model either way - so a normal placed
+        image can always be zoomed to. The one exception is a row from
+        get_images' second pass (a loaded-but-never-placed image type,
+        listed only so the count matches Manage Links): it has no
+        OwnerViewId to switch to, so this falls through to ShowElements,
+        which itself no-ops harmlessly rather than raising."""
         ids = List[ElementId]()
         for item in items:
             ids.Add(ElementId(item.element_id))

@@ -22,9 +22,11 @@
   <div class="card">
     <h2>What it does</h2>
     <p class="lede">
-      Lists every raster image instance placed in the model and checks its
-      source file against disk right now, flagging any that can no longer
-      be found.
+      Lists every raster image in the model - both instances placed in a
+      view and any image type Revit still tracks as an external file
+      reference with no instance placed anywhere - and checks each source
+      file against disk right now, flagging any that can no longer be
+      found.
     </p>
   </div>
 
@@ -63,6 +65,17 @@
       To fix a Missing image rather than delete it, use Revit's own
       <b>Manage tab &rsaquo; Manage Images</b> to browse to the file's new
       location.
+    </div>
+    <div class="box fixed">
+      The list now matches <b>Insert &rsaquo; Manage Links &rsaquo;
+      Images</b> exactly. A model can have image types Revit is still
+      tracking (Import or Link) with no instance ever placed in any of
+      this project's own views - these used to make the whole list
+      report as empty even when Manage Links showed several. Such a row
+      shows <span class="code">(not placed - loaded only)</span> as its
+      view; Select and Delete still work on it (Delete removes the
+      unused loaded type), Zoom To has nowhere to switch to since there's
+      no placement.
     </div>
   </div>
 
