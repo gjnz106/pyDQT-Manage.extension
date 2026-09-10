@@ -47,7 +47,7 @@
         "point_type": "survey",
         "axis": "NS",
         "expected_value": 0.0,
-        "tolerance": 0.001
+        "tolerance": 0.05
       }
     },
     {
@@ -62,7 +62,7 @@
         "point_type": "survey",
         "axis": "EW",
         "expected_value": 0.0,
-        "tolerance": 0.001
+        "tolerance": 0.05
       }
     },
     {
@@ -77,7 +77,7 @@
         "point_type": "survey",
         "axis": "Elev",
         "expected_value": 0.0,
-        "tolerance": 0.001
+        "tolerance": 0.05
       }
     },
     {
