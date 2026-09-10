@@ -1564,7 +1564,7 @@ XAML_STR = '''
             <Setter Property="BorderBrush" Value="#D4B87A"/>
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="Cursor" Value="Hand"/>
-            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="FontSize" Value="16"/>
         </Style>
         <Style x:Key="BtnSecondary" TargetType="Button">
             <Setter Property="Background" Value="White"/>
@@ -1573,7 +1573,7 @@ XAML_STR = '''
             <Setter Property="BorderBrush" Value="#D4B87A"/>
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="Cursor" Value="Hand"/>
-            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="FontSize" Value="14"/>
         </Style>
         <Style x:Key="BtnDanger" TargetType="Button">
             <Setter Property="Background" Value="#FFCDD2"/>
@@ -1592,7 +1592,7 @@ XAML_STR = '''
             <Setter Property="BorderBrush" Value="#81C784"/>
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="Cursor" Value="Hand"/>
-            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontSize" Value="17"/>
         </Style>
     </Window.Resources>
     
@@ -1614,8 +1614,8 @@ XAML_STR = '''
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
                 <StackPanel Grid.Column="0">
-                    <TextBlock Text="&#x2714; Model Checker v1.0" FontSize="20" FontWeight="Bold" Foreground="#333"/>
-                    <TextBlock Text="by Dang Quoc Truong (DQT) - Rule-based BIM model compliance checker" FontSize="11" Foreground="#666" Margin="0,3,0,0"/>
+                    <TextBlock Text="&#x2714; Model Checker v1.0" FontSize="26" FontWeight="Bold" Foreground="#333"/>
+                    <TextBlock Text="by Dang Quoc Truong (DQT) - Rule-based BIM model compliance checker" FontSize="14" Foreground="#666" Margin="0,3,0,0"/>
                 </StackPanel>
                 <Button x:Name="btnHelp" Grid.Column="1" Content="? Help" Padding="10,4" Background="White"
                         HorizontalAlignment="Right" VerticalAlignment="Center"/>
@@ -1636,8 +1636,8 @@ XAML_STR = '''
                 </Grid.ColumnDefinitions>
                 
                 <TextBlock Grid.Column="0" Text="Checkset:" FontWeight="SemiBold" 
-                           FontSize="12" VerticalAlignment="Center" Margin="0,0,8,0" Foreground="#5D4E37"/>
-                <ComboBox x:Name="cmbCheckset" Grid.Column="1" Padding="8,5" FontSize="11"/>
+                           FontSize="16" VerticalAlignment="Center" Margin="0,0,8,0" Foreground="#5D4E37"/>
+                <ComboBox x:Name="cmbCheckset" Grid.Column="1" Padding="8,5" FontSize="14"/>
                 
                 <Button x:Name="btnNewCheckset" Grid.Column="2" Content="New" 
                         Style="{StaticResource BtnSecondary}" Margin="6,0,0,0"/>
@@ -1664,32 +1664,32 @@ XAML_STR = '''
             
             <Border Grid.Column="0" Style="{StaticResource CardBorder}" Margin="0,0,4,0">
                 <StackPanel HorizontalAlignment="Center">
-                    <TextBlock x:Name="txtTotalRules" Text="0" FontSize="22" FontWeight="Bold" Foreground="#5D4E37" HorizontalAlignment="Center"/>
-                    <TextBlock Text="Total Rules" FontSize="10" Foreground="#999" HorizontalAlignment="Center"/>
+                    <TextBlock x:Name="txtTotalRules" Text="0" FontSize="29" FontWeight="Bold" Foreground="#5D4E37" HorizontalAlignment="Center"/>
+                    <TextBlock Text="Total Rules" FontSize="13" Foreground="#999" HorizontalAlignment="Center"/>
                 </StackPanel>
             </Border>
             <Border Grid.Column="1" Style="{StaticResource CardBorder}" Margin="2,0,2,0" Background="#E8F5E9">
                 <StackPanel HorizontalAlignment="Center">
-                    <TextBlock x:Name="txtPassed" Text="0" FontSize="22" FontWeight="Bold" Foreground="#2E7D32" HorizontalAlignment="Center"/>
-                    <TextBlock Text="Passed" FontSize="10" Foreground="#388E3C" HorizontalAlignment="Center"/>
+                    <TextBlock x:Name="txtPassed" Text="0" FontSize="29" FontWeight="Bold" Foreground="#2E7D32" HorizontalAlignment="Center"/>
+                    <TextBlock Text="Passed" FontSize="13" Foreground="#388E3C" HorizontalAlignment="Center"/>
                 </StackPanel>
             </Border>
             <Border Grid.Column="2" Style="{StaticResource CardBorder}" Margin="2,0,2,0" Background="#FFEBEE">
                 <StackPanel HorizontalAlignment="Center">
-                    <TextBlock x:Name="txtFailed" Text="0" FontSize="22" FontWeight="Bold" Foreground="#C62828" HorizontalAlignment="Center"/>
-                    <TextBlock Text="Failed" FontSize="10" Foreground="#D32F2F" HorizontalAlignment="Center"/>
+                    <TextBlock x:Name="txtFailed" Text="0" FontSize="29" FontWeight="Bold" Foreground="#C62828" HorizontalAlignment="Center"/>
+                    <TextBlock Text="Failed" FontSize="13" Foreground="#D32F2F" HorizontalAlignment="Center"/>
                 </StackPanel>
             </Border>
             <Border Grid.Column="3" Style="{StaticResource CardBorder}" Margin="2,0,2,0" Background="#E3F2FD">
                 <StackPanel HorizontalAlignment="Center">
-                    <TextBlock x:Name="txtInfo" Text="0" FontSize="22" FontWeight="Bold" Foreground="#1565C0" HorizontalAlignment="Center"/>
-                    <TextBlock Text="Info" FontSize="10" Foreground="#1976D2" HorizontalAlignment="Center"/>
+                    <TextBlock x:Name="txtInfo" Text="0" FontSize="29" FontWeight="Bold" Foreground="#1565C0" HorizontalAlignment="Center"/>
+                    <TextBlock Text="Info" FontSize="13" Foreground="#1976D2" HorizontalAlignment="Center"/>
                 </StackPanel>
             </Border>
             <Border Grid.Column="4" Style="{StaticResource CardBorder}" Margin="4,0,0,0" Background="#ECEFF1">
                 <StackPanel HorizontalAlignment="Center">
-                    <TextBlock x:Name="txtSkipped" Text="0" FontSize="22" FontWeight="Bold" Foreground="#546E7A" HorizontalAlignment="Center"/>
-                    <TextBlock Text="Skipped" FontSize="10" Foreground="#78909C" HorizontalAlignment="Center"/>
+                    <TextBlock x:Name="txtSkipped" Text="0" FontSize="29" FontWeight="Bold" Foreground="#546E7A" HorizontalAlignment="Center"/>
+                    <TextBlock Text="Skipped" FontSize="13" Foreground="#78909C" HorizontalAlignment="Center"/>
                 </StackPanel>
             </Border>
         </Grid>
@@ -1710,15 +1710,15 @@ XAML_STR = '''
                         <RowDefinition Height="*"/>
                     </Grid.RowDefinitions>
                     
-                    <TextBlock Grid.Row="0" Text="Rules" FontWeight="Bold" FontSize="13" 
+                    <TextBlock Grid.Row="0" Text="Rules" FontWeight="Bold" FontSize="17" 
                                Foreground="#5D4E37" Margin="0,0,0,6"/>
                     
                     <!-- Select All / None -->
                     <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,6">
                         <Button x:Name="btnSelectAll" Content="Select All" 
-                                Style="{StaticResource BtnSecondary}" Padding="6,3" FontSize="10" Margin="0,0,4,0"/>
+                                Style="{StaticResource BtnSecondary}" Padding="6,3" FontSize="13" Margin="0,0,4,0"/>
                         <Button x:Name="btnSelectNone" Content="Select None" 
-                                Style="{StaticResource BtnSecondary}" Padding="6,3" FontSize="10"/>
+                                Style="{StaticResource BtnSecondary}" Padding="6,3" FontSize="13"/>
                     </StackPanel>
                     
                     <!-- Rule ListBox with checkboxes -->
@@ -1738,7 +1738,7 @@ XAML_STR = '''
                     </Grid.RowDefinitions>
                     
                     <TextBlock Grid.Row="0" x:Name="txtDetailHeader" Text="Select a rule to view details" 
-                               FontWeight="Bold" FontSize="13" Foreground="#5D4E37" Margin="0,0,0,6"/>
+                               FontWeight="Bold" FontSize="17" Foreground="#5D4E37" Margin="0,0,0,6"/>
                     
                     <!-- Results ScrollViewer (shown after running) -->
                     <ScrollViewer x:Name="dgResults" Grid.Row="1"
@@ -1751,14 +1751,14 @@ XAML_STR = '''
                     <ScrollViewer x:Name="pnlRuleDetail" Grid.Row="1" 
                                   VerticalScrollBarVisibility="Auto">
                         <StackPanel x:Name="spRuleDetail" Margin="4">
-                            <TextBlock x:Name="txtRuleId" Text="" FontSize="10" Foreground="#999" Margin="0,0,0,4"/>
-                            <TextBlock x:Name="txtRuleDesc" Text="" FontSize="11" Foreground="#666" 
+                            <TextBlock x:Name="txtRuleId" Text="" FontSize="13" Foreground="#999" Margin="0,0,0,4"/>
+                            <TextBlock x:Name="txtRuleDesc" Text="" FontSize="14" Foreground="#666" 
                                        TextWrapping="Wrap" Margin="0,0,0,8"/>
-                            <TextBlock x:Name="txtRuleType" Text="" FontSize="10" Foreground="#888" Margin="0,0,0,4"/>
-                            <TextBlock x:Name="txtRuleSeverity" Text="" FontSize="10" Margin="0,0,0,8"/>
+                            <TextBlock x:Name="txtRuleType" Text="" FontSize="13" Foreground="#888" Margin="0,0,0,4"/>
+                            <TextBlock x:Name="txtRuleSeverity" Text="" FontSize="13" Margin="0,0,0,8"/>
                             
                             <!-- Parameters editing area -->
-                            <TextBlock Text="Parameters:" FontWeight="SemiBold" FontSize="11" 
+                            <TextBlock Text="Parameters:" FontWeight="SemiBold" FontSize="14" 
                                        Foreground="#5D4E37" Margin="0,4,0,4"/>
                             <Border x:Name="pnlParams" BorderBrush="#E0E0E0" BorderThickness="1" 
                                     CornerRadius="3" Padding="8" Background="#FAFAFA">
@@ -1785,7 +1785,7 @@ XAML_STR = '''
             
             <!-- Status Text -->
             <TextBlock x:Name="txtStatus" Grid.Column="0" Text="Ready. Select a checkset and click Run Check." 
-                       FontSize="11" Foreground="#888" VerticalAlignment="Center"/>
+                       FontSize="14" Foreground="#888" VerticalAlignment="Center"/>
             
             <Button x:Name="btnRunCheck" Grid.Column="1" Content="&#x25B6; Run Check" 
                     Style="{StaticResource BtnSuccess}" Margin="0,0,6,0"/>
@@ -1799,9 +1799,9 @@ XAML_STR = '''
         <Border Grid.Row="5" Background="#F5F0E0" CornerRadius="3" Padding="8,4">
             <Grid>
                 <TextBlock Text="Model Checker v1.0 | Dang Quoc Truong (DQT)" 
-                           FontSize="9" Foreground="#999" HorizontalAlignment="Left"/>
+                           FontSize="12" Foreground="#999" HorizontalAlignment="Left"/>
                 <TextBlock x:Name="txtFooterInfo" Text="" 
-                           FontSize="9" Foreground="#999" HorizontalAlignment="Right"/>
+                           FontSize="12" Foreground="#999" HorizontalAlignment="Right"/>
             </Grid>
         </Border>
     </Grid>
@@ -1965,7 +1965,7 @@ class ModelCheckerWindow:
             
             dot = TextBlock()
             dot.Text = sev_symbols.get(severity, u"\u2B24")
-            dot.FontSize = 8
+            dot.FontSize = 10
             dot.VerticalAlignment = System.Windows.VerticalAlignment.Center
             dot.Margin = System.Windows.Thickness(0, 0, 6, 0)
             try:
@@ -1975,7 +1975,7 @@ class ModelCheckerWindow:
             
             lbl = TextBlock()
             lbl.Text = str(item.DisplayName)
-            lbl.FontSize = 11
+            lbl.FontSize = 14
             lbl.VerticalAlignment = System.Windows.VerticalAlignment.Center
             try:
                 lbl.Foreground = converter.ConvertFromString("#333333")
@@ -2243,7 +2243,7 @@ class ModelCheckerWindow:
             lbl = TextBlock()
             lbl.Text = "{}:".format(key)
             lbl.Width = 150
-            lbl.FontSize = 11
+            lbl.FontSize = 14
             lbl.Foreground = converter.ConvertFromString("#5D4E37")
             lbl.VerticalAlignment = System.Windows.VerticalAlignment.Center
             
@@ -2398,7 +2398,7 @@ class ModelCheckerWindow:
                 # Status icon
                 icon_txt = TextBlock()
                 icon_txt.Text = status_icons.get(result.status, "?")
-                icon_txt.FontSize = 14
+                icon_txt.FontSize = 18
                 icon_txt.FontWeight = System.Windows.FontWeights.Bold
                 icon_txt.VerticalAlignment = System.Windows.VerticalAlignment.Center
                 try:
@@ -2412,7 +2412,7 @@ class ModelCheckerWindow:
                 # Severity badge
                 sev_txt = TextBlock()
                 sev_txt.Text = result.severity.upper()
-                sev_txt.FontSize = 9
+                sev_txt.FontSize = 12
                 sev_txt.FontWeight = System.Windows.FontWeights.SemiBold
                 sev_txt.VerticalAlignment = System.Windows.VerticalAlignment.Center
                 try:
@@ -2428,7 +2428,7 @@ class ModelCheckerWindow:
                 
                 name_txt = TextBlock()
                 name_txt.Text = u"[{}] {}".format(result.rule_id, result.rule_name)
-                name_txt.FontSize = 11
+                name_txt.FontSize = 14
                 name_txt.FontWeight = System.Windows.FontWeights.SemiBold
                 try:
                     name_txt.Foreground = converter.ConvertFromString("#333")
@@ -2438,7 +2438,7 @@ class ModelCheckerWindow:
                 
                 msg_txt = TextBlock()
                 msg_txt.Text = result.message
-                msg_txt.FontSize = 10
+                msg_txt.FontSize = 13
                 msg_txt.TextWrapping = System.Windows.TextWrapping.Wrap
                 try:
                     msg_txt.Foreground = converter.ConvertFromString(
@@ -2453,7 +2453,7 @@ class ModelCheckerWindow:
                     for detail in result.details:
                         det_txt = TextBlock()
                         det_txt.Text = str(detail)
-                        det_txt.FontSize = 9
+                        det_txt.FontSize = 12
                         try:
                             det_txt.Foreground = converter.ConvertFromString("#888")
                         except:
