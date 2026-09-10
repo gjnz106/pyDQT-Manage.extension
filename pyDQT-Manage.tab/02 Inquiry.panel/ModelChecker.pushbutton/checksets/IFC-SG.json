@@ -87,16 +87,16 @@
       "enabled": true
     }, 
     {
-      "description": "Project Base Point E/W should be at origin for clean IFC export", 
-      "name": "Project Base Point - E/W Origin", 
-      "id": "SG_007", 
-      "severity": "warning", 
+      "description": "Project Base Point E/W should be at origin for clean IFC export",
+      "name": "Project Base Point - E/W Origin",
+      "id": "SG_007",
+      "severity": "warning",
       "params": {
-        "point_type": "base", 
-        "axis": "EW", 
-        "expected_value": 1000.0, 
+        "point_type": "base",
+        "axis": "EW",
+        "expected_value": 0.0,
         "tolerance": 0.001
-      }, 
+      },
       "category": "Project Settings", 
       "type": "coordinate_match", 
       "enabled": true
