@@ -187,6 +187,34 @@ def _length_internal_to_mm(value_internal):
         return value_internal * 304.8
 
 
+def _get_survey_point_ns_ew_elev(document):
+    """(NS, EW, Elev) in Revit's internal unit (decimal feet) for the
+    Survey Point, or None on any failure.
+
+    Reported on a real project: BASEPOINT_NORTHSOUTH_PARAM read off the
+    Survey Point's own BasePoint element (IsShared == True) came back
+    0.0, even though the Survey Point's real position - confirmed
+    directly in the Properties palette - was a large, correctly surveyed
+    coordinate (78713552.7mm N/S). BASEPOINT_*_PARAM is meant to work on
+    the Survey Point as well as the Project Base Point, but this shows it
+    cannot be trusted alone.
+
+    ProjectLocation.GetProjectPosition() is Autodesk's documented API for
+    this exact purpose: it returns where the model's Internal Origin
+    sits within the active Project Location's shared coordinate system -
+    exactly what the Properties palette shows for the Survey Point - and
+    does not depend on reading a parameter off that specific element, so
+    it's used here as the primary source for Survey Point axes. Project
+    Base Point is unaffected by this (it already reads correctly via
+    BASEPOINT_*_PARAM) and is left on its existing path."""
+    try:
+        location = document.ActiveProjectLocation
+        position = location.GetProjectPosition(XYZ(0, 0, 0))
+        return position.NorthSouth, position.EastWest, position.Elevation
+    except Exception:
+        return None
+
+
 # =====================================================================
 # REVIT CONTEXT
 # =====================================================================
@@ -659,11 +687,18 @@ class RuleEngine:
         expected = params.get("expected_value", 0.0)
         tolerance = params.get("tolerance", 0.001)
         
-        # Get base/survey points
-        collector = FilteredElementCollector(self.doc).OfClass(BasePoint)
-
         actual_value = None
         point_name = "Survey Point" if point_type == "survey" else "Project Base Point"
+
+        # Survey Point: read via ProjectPosition first (see
+        # _get_survey_point_ns_ew_elev - more reliable than the
+        # BASEPOINT_*_PARAM fallback below, which has been observed to
+        # read back 0 for a Survey Point whose real position was
+        # confirmed non-zero in Properties).
+        if point_type == "survey":
+            survey_pos = _get_survey_point_ns_ew_elev(self.doc)
+            if survey_pos is not None:
+                actual_value = dict(zip(("NS", "EW", "Elev"), survey_pos)).get(axis)
 
         # N/S, E/W and Elevation as shown in the Properties palette come from
         # the BasePoint's own parameters, NOT from bp.Position - Position is the
@@ -673,20 +708,24 @@ class RuleEngine:
         # coordinates in the tens of millions). Reading .Position here was the
         # bug: the check always compared against ~0, so it failed no matter
         # what expected_value was configured, and the reported "actual" never
-        # matched what the user sees in Properties.
-        axis_bip = {
-            "NS": BuiltInParameter.BASEPOINT_NORTHSOUTH_PARAM,
-            "EW": BuiltInParameter.BASEPOINT_EASTWEST_PARAM,
-            "Elev": BuiltInParameter.BASEPOINT_ELEVATION_PARAM,
-        }.get(axis)
+        # matched what the user sees in Properties. Always the path for
+        # Project Base Point; a fallback for Survey Point if ProjectPosition
+        # was unavailable above.
+        if actual_value is None:
+            axis_bip = {
+                "NS": BuiltInParameter.BASEPOINT_NORTHSOUTH_PARAM,
+                "EW": BuiltInParameter.BASEPOINT_EASTWEST_PARAM,
+                "Elev": BuiltInParameter.BASEPOINT_ELEVATION_PARAM,
+            }.get(axis)
 
-        for bp in collector:
-            is_survey = bp.IsShared
-            if (point_type == "survey" and is_survey) or (point_type == "base" and not is_survey):
-                param = bp.get_Parameter(axis_bip) if axis_bip else None
-                if param is not None and param.HasValue:
-                    actual_value = param.AsDouble()
-                break
+            collector = FilteredElementCollector(self.doc).OfClass(BasePoint)
+            for bp in collector:
+                is_survey = bp.IsShared
+                if (point_type == "survey" and is_survey) or (point_type == "base" and not is_survey):
+                    param = bp.get_Parameter(axis_bip) if axis_bip else None
+                    if param is not None and param.HasValue:
+                        actual_value = param.AsDouble()
+                    break
 
         if actual_value is None:
             return RuleResult(rule, "error", "Could not find {}".format(point_name))
