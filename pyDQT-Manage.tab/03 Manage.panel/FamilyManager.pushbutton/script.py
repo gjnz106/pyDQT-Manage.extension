@@ -286,265 +286,6 @@ def format_size(kb):
         return "{} KB".format(kb)
     return "{:.1f} MB".format(kb / 1024.0)
 
-
-def purge_family_document(fam_doc):
-    """Purge ALL unused elements in a family document.
-    Uses multiple strategies to find and delete unused elements.
-    Returns: (success, purged_count, error_message)
-    """
-    if not fam_doc or not fam_doc.IsFamilyDocument:
-        return False, 0, "Not a family document"
-    
-    total_purged = 0
-    
-    try:
-        # Multiple passes - some elements become purgeable after others are deleted
-        max_iterations = 10
-        
-        for iteration in range(max_iterations):
-            purged_this_round = 0
-            
-            # === Strategy 1: Unused Nested Family Types ===
-            try:
-                # Collect used symbol IDs
-                used_symbol_ids = set()
-                for inst in FilteredElementCollector(fam_doc).OfClass(FamilyInstance).WhereElementIsNotElementType():
-                    try:
-                        if inst.Symbol:
-                            used_symbol_ids.add(_eid_int(inst.Symbol.Id))
-                            # Also mark the family as used
-                            if inst.Symbol.Family:
-                                used_symbol_ids.add(_eid_int(inst.Symbol.Family.Id))
-                    except:
-                        pass
-                
-                # Delete unused symbols
-                for fam in FilteredElementCollector(fam_doc).OfClass(Family):
-                    try:
-                        type_ids = fam.GetFamilySymbolIds()
-                        if type_ids:
-                            all_unused = True
-                            for tid in type_ids:
-                                if _eid_int(tid) in used_symbol_ids:
-                                    all_unused = False
-                                    break
-                            
-                            if all_unused:
-                                # Delete entire family if no types are used
-                                try:
-                                    fam_doc.Delete(fam.Id)
-                                    purged_this_round += 1
-                                    continue
-                                except:
-                                    pass
-                            
-                            # Delete individual unused types
-                            for tid in type_ids:
-                                if _eid_int(tid) not in used_symbol_ids:
-                                    try:
-                                        fam_doc.Delete(tid)
-                                        purged_this_round += 1
-                                    except:
-                                        pass
-                    except:
-                        pass
-            except:
-                pass
-            
-            # === Strategy 2: Unused Materials ===
-            try:
-                used_material_ids = set()
-                
-                # Check all elements for material usage
-                for elem in FilteredElementCollector(fam_doc).WhereElementIsNotElementType():
-                    try:
-                        mat_ids = elem.GetMaterialIds(False)
-                        for mid in mat_ids:
-                            used_material_ids.add(_eid_int(mid))
-                        mat_ids = elem.GetMaterialIds(True)  # Paint materials
-                        for mid in mat_ids:
-                            used_material_ids.add(_eid_int(mid))
-                    except:
-                        pass
-                
-                # Check family parameter default values
-                try:
-                    fm = fam_doc.FamilyManager
-                    for param in fm.Parameters:
-                        try:
-                            if param.StorageType == StorageType.ElementId:
-                                for ft in fm.Types:
-                                    try:
-                                        fm.CurrentType = ft
-                                        val = fm.CurrentType.AsElementId(param)
-                                        if val and _eid_int(val) > 0:
-                                            used_material_ids.add(_eid_int(val))
-                                    except:
-                                        pass
-                        except:
-                            pass
-                except:
-                    pass
-                
-                # Delete unused materials
-                for mat in FilteredElementCollector(fam_doc).OfClass(Material):
-                    try:
-                        if _eid_int(mat.Id) not in used_material_ids:
-                            fam_doc.Delete(mat.Id)
-                            purged_this_round += 1
-                    except:
-                        pass
-            except:
-                pass
-            
-            # === Strategy 3: Unused Import Instances (CAD) ===
-            try:
-                for imp in FilteredElementCollector(fam_doc).OfClass(ImportInstance):
-                    try:
-                        fam_doc.Delete(imp.Id)
-                        purged_this_round += 1
-                    except:
-                        pass
-            except:
-                pass
-            
-            # === Strategy 4: Unused CAD Link Types ===
-            try:
-                for cad in FilteredElementCollector(fam_doc).OfClass(CADLinkType):
-                    try:
-                        fam_doc.Delete(cad.Id)
-                        purged_this_round += 1
-                    except:
-                        pass
-            except:
-                pass
-            
-            # === Strategy 5: Unused Image Types ===
-            try:
-                used_image_ids = set()
-                for img in FilteredElementCollector(fam_doc).OfClass(ImageInstance):
-                    try:
-                        used_image_ids.add(_eid_int(img.GetTypeId()))
-                    except:
-                        pass
-                
-                for img_type in FilteredElementCollector(fam_doc).OfClass(ImageType):
-                    try:
-                        if _eid_int(img_type.Id) not in used_image_ids:
-                            fam_doc.Delete(img_type.Id)
-                            purged_this_round += 1
-                    except:
-                        pass
-            except:
-                pass
-            
-            # === Strategy 6: Unused Fill Patterns ===
-            try:
-                # Get default fill pattern IDs that should not be deleted
-                default_patterns = {"Solid fill", "<Solid fill>", "No pattern", "<No pattern>"}
-                
-                for fp in FilteredElementCollector(fam_doc).OfClass(FillPatternElement):
-                    try:
-                        if fp.Name not in default_patterns:
-                            fam_doc.Delete(fp.Id)
-                            purged_this_round += 1
-                    except:
-                        pass
-            except:
-                pass
-            
-            # === Strategy 7: Unused Line Patterns ===
-            try:
-                default_patterns = {"Solid", "<Solid>", "Hidden", "Center", "Dash"}
-                
-                for lp in FilteredElementCollector(fam_doc).OfClass(LinePatternElement):
-                    try:
-                        if lp.Name not in default_patterns:
-                            fam_doc.Delete(lp.Id)
-                            purged_this_round += 1
-                    except:
-                        pass
-            except:
-                pass
-            
-            # === Strategy 8: Unused Group Types ===
-            try:
-                used_group_ids = set()
-                for grp in FilteredElementCollector(fam_doc).OfClass(Group):
-                    try:
-                        used_group_ids.add(_eid_int(grp.GetTypeId()))
-                    except:
-                        pass
-                
-                for grp_type in FilteredElementCollector(fam_doc).OfClass(GroupType):
-                    try:
-                        if _eid_int(grp_type.Id) not in used_group_ids:
-                            fam_doc.Delete(grp_type.Id)
-                            purged_this_round += 1
-                    except:
-                        pass
-            except:
-                pass
-            
-            # === Strategy 9: Unused Views (non-essential) ===
-            try:
-                # Essential views in family editor - DO NOT DELETE
-                essential_views = {
-                    "Ref. Level", "Reference Level",
-                    "Front", "Back", "Left", "Right", "Top", "Bottom",
-                    "View 1", "View 2"
-                }
-                
-                for view in FilteredElementCollector(fam_doc).OfClass(View):
-                    try:
-                        # Skip essential views and templates
-                        if view.IsTemplate:
-                            continue
-                        if view.Name in essential_views:
-                            continue
-                        # Skip if it's a dependent view
-                        if hasattr(view, 'GetPrimaryViewId'):
-                            primary = view.GetPrimaryViewId()
-                            if primary and primary != ElementId.InvalidElementId:
-                                continue
-                        
-                        fam_doc.Delete(view.Id)
-                        purged_this_round += 1
-                    except:
-                        pass
-            except:
-                pass
-            
-            # === Strategy 10: Unused Annotation Symbols / Generic Annotations ===
-            try:
-                used_anno_ids = set()
-                for anno in FilteredElementCollector(fam_doc).OfClass(AnnotationSymbol):
-                    try:
-                        used_anno_ids.add(_eid_int(anno.GetTypeId()))
-                    except:
-                        pass
-                
-                for anno_type in FilteredElementCollector(fam_doc).OfClass(AnnotationSymbolType):
-                    try:
-                        if _eid_int(anno_type.Id) not in used_anno_ids:
-                            fam_doc.Delete(anno_type.Id)
-                            purged_this_round += 1
-                    except:
-                        pass
-            except:
-                pass
-            
-            total_purged += purged_this_round
-            
-            # Stop if nothing was purged this round
-            if purged_this_round == 0:
-                break
-        
-        return True, total_purged, ""
-        
-    except Exception as ex:
-        return False, total_purged, str(ex)
-
 # ============================================================================
 # DATA MODELS
 # ============================================================================
@@ -1343,21 +1084,19 @@ RENAME_XAML = """
 # Export Options Dialog
 EXPORT_OPTIONS_XAML = """
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-        Title="Export Options" Height="220" Width="450" WindowStartupLocation="CenterOwner" Background="#FEF8E7" ResizeMode="NoResize">
+        Title="Export Options" Height="180" Width="450" WindowStartupLocation="CenterOwner" Background="#FEF8E7" ResizeMode="NoResize">
     <Grid Margin="15">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
-        
+
         <TextBlock Text="Export Families" FontSize="14" FontWeight="Bold" Margin="0,0,0,10"/>
-        
+
         <StackPanel Grid.Row="1">
             <TextBlock Name="txtExportInfo" Text="Selected: 0 families" Margin="0,0,0,15"/>
-            
-            <CheckBox Name="chkAutoPurge" Content="Auto purge before export (removes unused nested families, materials, CAD)" Margin="0,0,0,10"/>
-            
+
             <CheckBox Name="chkOverwrite" Content="Overwrite existing files" IsChecked="True"/>
         </StackPanel>
         
@@ -1583,20 +1322,18 @@ class ExportOptionsDialog(WPFWindow):
     def __init__(self, count):
         WPFWindow.__init__(self, EXPORT_OPTIONS_XAML, literal_string=True)
         self.result = False
-        self.auto_purge = False
         self.overwrite = True
-        
+
         self.txtExportInfo.Text = "Selected: {} families".format(count)
-        
+
         self.btnCancel.Click += self.on_cancel
         self.btnExport.Click += self.on_export
-    
+
     def on_cancel(self, sender, args):
         self.result = False
         self.Close()
-    
+
     def on_export(self, sender, args):
-        self.auto_purge = self.chkAutoPurge.IsChecked
         self.overwrite = self.chkOverwrite.IsChecked
         self.result = True
         self.Close()
@@ -2091,9 +1828,8 @@ class FamilyManagerWindow(WPFWindow):
         
         # Export families
         exported = 0
-        purged_total = 0
         errors = []
-        
+
         for item in selected:
             try:
                 # Open family for editing
@@ -2101,21 +1837,7 @@ class FamilyManagerWindow(WPFWindow):
                 if not fam_doc:
                     errors.append("{}: Could not open".format(item.family_name))
                     continue
-                
-                # Auto purge if requested
-                if opt_dlg.auto_purge:
-                    try:
-                        t = Transaction(fam_doc, "Purge Family")
-                        t.Start()
-                        success, purged, err = purge_family_document(fam_doc)
-                        if success:
-                            purged_total += purged
-                            t.Commit()
-                        else:
-                            t.RollBack()
-                    except:
-                        pass
-                
+
                 # Save family
                 safe_name = re.sub(r'[<>:"/\\|?*]', '_', item.family_name)
                 file_path = os.path.join(export_path, "{}.rfa".format(safe_name))
@@ -2136,8 +1858,6 @@ class FamilyManagerWindow(WPFWindow):
         
         # Show results
         msg = "Exported {} of {} families".format(exported, len(selected))
-        if opt_dlg.auto_purge:
-            msg += "\nAuto-purged {} unused elements".format(purged_total)
         if skipped > 0:
             msg += "\nSkipped {} non-Loadable items".format(skipped)
         if errors:

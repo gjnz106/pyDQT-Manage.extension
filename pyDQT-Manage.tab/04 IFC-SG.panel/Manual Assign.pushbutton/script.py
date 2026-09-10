@@ -1127,31 +1127,65 @@ def GetCurrentObjectType(element):
 
 
 def GetElementName(element):
-    """Get element name or type name"""
+    """Get element name or type name.
+
+    Host elements (Wall, Floor, Ceiling, RoofBase, Stairs...) raise
+    InvalidOperationException when their own instance-level .Name is
+    read - Revit simply does not support naming these at the instance,
+    only their type does. This used to be the very next thing tried
+    after SYMBOL_NAME_PARAM (element.Name, on the INSTANCE) came back
+    empty, and that exception was swallowed by the outer try/except -
+    which is exactly why every Wall/Stairs/Floor row showed "Unnamed
+    Element" instead of its type name. SYMBOL_NAME_PARAM only backs the
+    Name of a FamilySymbol (loadable family types) to begin with - it
+    doesn't exist on a system family type like WallType/StairsType/
+    FloorType either, so it never fired for exactly the categories this
+    was reported for. elem_type.Name (the TYPE's own .Name, not the
+    instance's) is the one route that works uniformly across every
+    category, loadable and system family alike, and is tried first."""
     try:
-        # Try to get element name
+        # Answers directly for the few categories that carry a name on
+        # the instance itself (e.g. Views, Levels, Grids) - None/empty
+        # for a Wall/Floor/Stairs instance, falling through below.
         name_param = element.get_Parameter(DB.BuiltInParameter.ELEM_NAME_PARAM)
         if name_param and name_param.HasValue:
             name = name_param.AsString()
             if name:
                 return name
-        
-        # Try to get type name
+    except:
+        pass
+
+    elem_type = None
+    try:
         elem_type_id = element.GetTypeId()
         if elem_type_id != DB.ElementId.InvalidElementId:
             elem_type = doc.GetElement(elem_type_id)
-            if elem_type:
-                type_name = elem_type.get_Parameter(DB.BuiltInParameter.SYMBOL_NAME_PARAM)
-                if type_name and type_name.HasValue:
-                    return type_name.AsString()
-        
-        # Fallback to family and type
-        if hasattr(element, 'Name'):
+    except:
+        elem_type = None
+
+    if elem_type:
+        try:
+            if elem_type.Name:
+                return elem_type.Name
+        except:
+            pass
+        try:
+            type_name = elem_type.get_Parameter(DB.BuiltInParameter.SYMBOL_NAME_PARAM)
+            if type_name and type_name.HasValue:
+                val = type_name.AsString()
+                if val:
+                    return val
+        except:
+            pass
+
+    try:
+        # Last resort - most host elements raise here, caught locally so
+        # it can never wipe out a type name already found above.
+        if hasattr(element, 'Name') and element.Name:
             return element.Name
-            
     except:
         pass
-    
+
     return "Unnamed Element"
 
 
