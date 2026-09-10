@@ -146,16 +146,35 @@ def _bind_param_insert(document, defn, binding, pg_key="PG_IFC"):
     return False
 
 def _length_internal_to_mm(value_internal):
-    """Internal decimal feet as millimetres, matching what the Properties
-    palette shows for Survey Point / Project Base Point coordinates on the
-    millimetre-based BCA/IFC-SG projects this checkset targets. A length
-    parameter's AsDouble() always comes back in Revit's internal unit
-    (decimal feet) regardless of the project's display unit, so comparing
-    it directly against a value the user typed straight off the palette
-    (in millimetres) still didn't match even after reading the right
-    parameter - e.g. 258246.564049 (internal) vs 78713552.7 (palette) for
-    the same Survey Point N/S. Compatible with both the SpecTypeId/
-    UnitTypeId API (Revit 2021+) and the older DisplayUnitType API."""
+    """Internal decimal feet as millimetres, full precision - matching what
+    the Properties palette shows for Survey Point / Project Base Point
+    coordinates on the millimetre-based BCA/IFC-SG projects this checkset
+    targets. A length parameter's AsDouble() always comes back in Revit's
+    internal unit (decimal feet) regardless of the project's display unit,
+    so comparing it directly against a value the user typed straight off
+    the palette (in millimetres) still didn't match even after reading the
+    right parameter - e.g. 258246.564049 (internal) vs 78713552.7 (palette)
+    for the same Survey Point N/S.
+
+    An earlier version of this check routed the converted value through
+    Revit's own UnitFormatUtils.Format() instead, to reproduce the
+    Properties palette's rounding exactly rather than trust a plain
+    conversion. That backfired: Format() rounds to the project's
+    *configured display precision* for Length (Project Units), which on a
+    project set to whole millimetres collapses a real, correctly-entered
+    coordinate like 78713552.7 down to "78713553" before it's ever
+    compared - reporting a false ~0.3 mm-or-worse mismatch against an
+    expected_value that was typed with the actual decimal precision the
+    surveyor provided, on every axis, regardless of how tight or loose
+    tolerance was configured. A plain feet-to-millimetre conversion is
+    mathematically exact (1 ft = 304.8 mm exactly) and, at the scale of a
+    survey-scale coordinate (tens of millions of mm), any residual
+    floating-point noise from the internal double is many orders of
+    magnitude below even the tightest tolerance this checkset uses
+    (0.001 mm) - so unlike Format()'s rounding, it never needs tolerance
+    to paper over precision the check itself threw away. Compatible with
+    both the SpecTypeId/UnitTypeId API (Revit 2021+) and the older
+    DisplayUnitType API."""
     try:
         from Autodesk.Revit.DB import UnitUtils
         try:
@@ -166,44 +185,6 @@ def _length_internal_to_mm(value_internal):
             return UnitUtils.ConvertFromInternalUnits(value_internal, DisplayUnitType.DUT_MILLIMETERS)
     except Exception:
         return value_internal * 304.8
-
-def _coordinate_as_shown_in_revit(document, value_internal):
-    """The coordinate rounded exactly the way the Properties palette shows
-    it, by asking Revit to format the value itself and parsing that same
-    string back to a float - instead of a raw unit conversion.
-
-    A plain feet-to-millimetre conversion is mathematically exact (1 ft =
-    304.8 mm exactly) but the *internal* double Revit stores for a
-    survey-scale coordinate (tens of millions of mm) already carries
-    whatever quantization happened when the point was placed/moved, so
-    converting it back can land a few hundredths of a millimetre off the
-    rounded number the palette displays and the user reads off to type
-    into expected_value - e.g. actual 78713552.722047 vs a palette/
-    expected_value of 78713552.7. Formatting through Revit's own
-    UnitFormatUtils reproduces the palette's rounding exactly, so a
-    correctly-surveyed point compares equal instead of failing by a
-    sub-0.1 mm residue. Falls back to a plain conversion if the formatting
-    API is unavailable."""
-    try:
-        import re
-        units = document.GetUnits()
-        text = None
-        try:
-            from Autodesk.Revit.DB import UnitFormatUtils, SpecTypeId
-            text = UnitFormatUtils.Format(units, SpecTypeId.Length, value_internal, False)
-        except Exception:
-            from Autodesk.Revit.DB import UnitFormatUtils, UnitType
-            text = UnitFormatUtils.Format(units, UnitType.UT_Length, value_internal, False, False)
-        if text:
-            # Drop thousands separators and any trailing unit symbol (e.g.
-            # "78,713,552.7 mm") so only the leading numeric token is parsed.
-            cleaned = text.replace(",", "").strip()
-            match = re.match(r"^-?\d+(\.\d+)?", cleaned)
-            if match:
-                return float(match.group(0))
-    except Exception:
-        pass
-    return _length_internal_to_mm(value_internal)
 
 
 # =====================================================================
@@ -714,12 +695,16 @@ class RuleEngine:
         # the project's display unit - convert to millimetres so it lines up
         # with expected_value, which the user types straight off the
         # Properties palette (this checkset's BCA/IFC-SG projects are always
-        # millimetre-based). A plain unit conversion can still be a hair off
-        # the palette's own rounded number (the internal double already
-        # carries whatever quantization happened when the point was placed),
-        # so ask Revit to format the value itself and read that back -
-        # exactly the number shown on screen, not a re-derived one.
-        actual_mm = _coordinate_as_shown_in_revit(self.doc, actual_value)
+        # millimetre-based). This must be a plain, full-precision unit
+        # conversion, NOT routed through Revit's own display formatting -
+        # that rounds to the project's configured Length precision (Project
+        # Units), which on a project set to whole millimetres silently threw
+        # away the exact decimal a surveyed coordinate needs, e.g. comparing
+        # 78713552.7 as if it were 78713553 and failing by ~0.3 mm even
+        # though the model's actual coordinate was correct. `tolerance`
+        # below is what absorbs genuine sub-thousandth-mm floating-point
+        # noise - the comparison itself must see full precision.
+        actual_mm = _length_internal_to_mm(actual_value)
         expected_mm = expected  # User provides this in millimetres already
 
         diff = abs(actual_mm - expected_mm)
