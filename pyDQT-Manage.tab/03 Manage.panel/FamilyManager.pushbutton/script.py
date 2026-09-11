@@ -1693,15 +1693,21 @@ class FamilyManagerWindow(WPFWindow):
         if _open_help_page("family_manager.html"):
             return
         forms.alert(
-            "Family Manager v2.0\n\n"
+            "Family Manager v3.1\n\n"
             "Tabs:\n"
-            "- Families: View/manage all families\n"
-            "- Type Manager: Manage family types\n"
-            "- Parameters: View/edit parameters\n"
-            "- Health Check: Analyze issues\n\n"
+            "- Families: view/manage all families (Select Unused / Purge "
+            "Unused for loadable families with 0 instances)\n"
+            "- Type Manager: Rename/Duplicate/Delete/Activate a family's "
+            "types, or Select Instances\n"
+            "- Parameters: view/edit/compare parameters across a family's "
+            "types, CSV round-trip\n"
+            "- Naming Check: define per-category naming rules (Prefix/"
+            "Suffix/Contains/Regex) and run them\n\n"
             "Bottom buttons work based on current tab:\n"
-            "- Rename: Families tab or Type Manager\n"
-            "- Delete: Families tab or Type Manager\n"
+            "- Rename/Delete: Families tab or Type Manager only\n"
+            "- Export/Import: save selected Loadable families as .rfa, "
+            "edit them, then Import always overwrites the project's copy\n"
+            "- CSV/Report: export the Families grid; Refresh reloads data\n"
             "- All/Clear: Select/deselect in current grid\n\n"
             "(c) Dang Quoc Truong (DQT)",
             title="Help"
@@ -1791,7 +1797,7 @@ class FamilyManagerWindow(WPFWindow):
             self.update_ui()
     
     def export_families(self, sender, args):
-        """Export loadable families with optional auto purge"""
+        """Export selected Loadable families to .rfa files on disk."""
         if self.dataGrid.SelectedItems.Count == 0:
             forms.alert("Select families first", title="Info")
             return

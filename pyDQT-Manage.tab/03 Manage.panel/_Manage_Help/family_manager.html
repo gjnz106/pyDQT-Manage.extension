@@ -23,29 +23,43 @@
     <h2>What it does</h2>
     <p class="lede">
       A tabbed manager covering loadable families, system families (Walls,
-      Floors, Ceilings, Roofs) and Model Groups in one place, with rename,
-      delete, parameter editing and a health check.
+      Floors, Ceilings, Roofs) and Model Groups in one place: rename,
+      delete, purge unused, edit and compare parameters, check family
+      names against your own naming rules, and round-trip families out to
+      disk for editing and back in.
     </p>
   </div>
 
   <div class="card">
     <h2>Tabs</h2>
     <dl class="kv">
-      <dt class="v-dark">Families</dt><dd>view/manage all families (loadable, system, and groups - filterable by kind)</dd>
-      <dt class="v-dark">Type Manager</dt><dd>manage family types</dd>
-      <dt class="v-dark">Parameters</dt><dd>view/edit parameters</dd>
-      <dt class="v-dark">Health Check</dt><dd>analyze issues across families</dd>
+      <dt class="v-dark">Families</dt><dd>every family (loadable, system, and groups), searchable and filterable by kind and by All/With Issues/Unused; <b>Select Unused</b> / <b>Purge Unused</b> clear out loadable families with zero instances</dd>
+      <dt class="v-dark">Type Manager</dt><dd>pick a family, then Rename / Duplicate / Delete / Activate one of its types, or Select Instances of it in the model</dd>
+      <dt class="v-dark">Parameters</dt><dd>pick a family and type, filter by All/Type Only/Instance Only/Shared, Edit a value, Copy it to other types, CSV round-trip, or Compare values across every type in the family</dd>
+      <dt class="v-dark">Naming Check</dt><dd>define per-category naming rules (name must Prefix/Suffix/Contain/match a Regex pattern), run them, and export the rule set or the results report</dd>
     </dl>
   </div>
 
   <div class="card">
     <h2>Workflow</h2>
     <ol class="steps">
-      <li>Pick a tab, then filter by Loadable/System/Groups as needed.</li>
+      <li>Pick a tab, then filter by Loadable/System/Groups (Families tab)
+        as needed.</li>
       <li><b>Rename</b> and <b>Delete</b> act on the current tab's
-        selection - available from the Families tab or Type Manager.</li>
+        selection - available from the Families tab or Type Manager only.</li>
       <li><b>All</b> / <b>Clear</b> select or deselect every row in the
         current grid.</li>
+      <li><b>Export</b> saves the selected Loadable families as
+        <span class="code">.rfa</span> files to a folder you pick (system
+        families and groups can't be exported) - edit them in Revit, then
+        <b>Import</b> loads the edited files straight back in, always
+        overwriting the project's existing copy.</li>
+      <li><b>CSV</b> / <b>Report</b> export the Families grid to a CSV or
+        an HTML report; <b>Refresh</b> reloads everything from the model.</li>
+      <li>On the Naming Check tab: add one or more rules, <b>Run Naming
+        Check</b>, then <b>Export Report</b> for the violations, or
+        <b>Import/Export Rules</b> to reuse a rule set on another
+        project.</li>
     </ol>
   </div>
 
@@ -53,7 +67,15 @@
     <h2>Good to know</h2>
     <div class="box tip">
       Rename and Delete are only wired up for the Families tab and Type
-      Manager - Parameters and Health Check are for viewing/analysis.
+      Manager - Parameters and Naming Check are for editing values and
+      checking names, not renaming/deleting the family itself.
+    </div>
+    <div class="box tip">
+      <b>Export no longer purges anything on its own.</b> It only asks
+      whether to overwrite an existing file at the destination. To purge
+      unused families first, use <b>Purge Unused</b> on the Families tab
+      (or the dedicated Purge Families tool) before exporting - keeping
+      "export" and "delete" as two separate, deliberate steps.
     </div>
     <div class="box fixed">
       <b>Export &rarr; Purge Families &rarr; Import</b> now reloads every

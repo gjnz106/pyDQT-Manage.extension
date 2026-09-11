@@ -113,6 +113,15 @@
       regular Wall ones. It was reachable only through the bulk-assign
       dropdown before, which lists every entity regardless of category.
     </div>
+    <div class="box fixed">
+      <b>Element Name / Type</b> showed "Unnamed Element" for every
+      Wall, Floor, Ceiling, Roof and Stairs row - Revit does not support
+      reading a host element instance's own <span class="code">Name</span>
+      (it throws), which the lookup silently swallowed before falling
+      through to that hard-coded label. It now reads the element's
+      <b>type</b> name instead (e.g. "Basic Wall: Generic - 200mm"),
+      which works for both system and loadable families.
+    </div>
   </div>
 
   <div class="pagenav">
