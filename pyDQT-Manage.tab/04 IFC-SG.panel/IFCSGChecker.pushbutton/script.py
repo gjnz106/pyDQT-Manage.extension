@@ -1438,13 +1438,16 @@ class IFCSGCheckerWindow:
             "Tick All / None / Invert. Selected rows are filled blue\n"
             "  3. Run Check, then filter the results (All / Failed / Partial / "
             "Passed) or search\n"
-            "  4. Tick result rows (Select All / Un-select / Invert / Tick "
+            "  4. Detail on a failed/partial row lists every element that's "
+            "missing the parameter, searchable, with its own Select/Zoom/"
+            "Isolate All\n"
+            "  5. Tick result rows (Select All / Un-select / Invert / Tick "
             "Failed, or Shift+Click for a range), then:\n"
             "       - Select Ticked in Revit - sets the Revit selection\n"
             "       - Zoom To Ticked - selects and frames them in the view\n"
             "       - Isolate Ticked - temporarily isolates them; Reset "
             "Isolate/Hide brings everything back\n"
-            "  5. Export Excel writes Summary / Detailed / Failed sheets\n\n"
+            "  6. Export Excel writes Summary / Detailed / Failed sheets\n\n"
             "A category the tool cannot collect is marked \"not supported\" "
             "rather than being reported as simply empty.",
             "Parameter Checker - Help",
