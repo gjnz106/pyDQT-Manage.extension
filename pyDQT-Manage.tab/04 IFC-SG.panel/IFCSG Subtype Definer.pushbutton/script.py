@@ -2200,10 +2200,10 @@ class IFCSGSubtypeWindow(object):
 
                 type_ok = False
                 type_obj_missing = False
+                winning_target = None
                 for target_label, target in targets_tried:
                     entity_ok = True
                     pdt_ok = True
-                    obj_ok = True
                     # Collects one line per rejected attempt (parameter
                     # missing, read-only, or the exception Revit raised)
                     # so a failure says WHY, not just which flag is False.
@@ -2216,50 +2216,86 @@ class IFCSGSubtypeWindow(object):
                     pdt_ok = set_ifc_predefined_type(
                         target, pdt_value, use_type, reasons)
 
-                    if is_ud and set_obj and obj_value:
-                        obj_ok = set_ifc_object_type(
-                            target, obj_value, use_type, reasons)
-
-                    # ObjectType does not gate success: the "*" marker
-                    # only means "write USERDEFINED plus this free text
-                    # if there is somewhere to put it" - a model with no
-                    # IfcObjectType-like parameter bound for this category
-                    # still gets the real assignment (Entity + Predefined
-                    # Type = USERDEFINED), it just cannot also carry the
-                    # custom text, which is reported as a warning instead
-                    # of failing the whole row.
                     if entity_ok and pdt_ok:
                         type_ok = True
-                        if not obj_ok:
-                            type_obj_missing = True
-                        # Logging is not allowed to cost a successful
-                        # assignment - a formatting slip here used to
-                        # raise inside this same try block and roll back
-                        # every change already made in this Apply pass.
-                        try:
-                            line = "[OK] {} '{}' -> {} on {} (id:{})".format(
-                                target_label, row.Family + ":" + row.TypeName,
-                                pdt_value, target_label, _eid_int(target.Id))
-                            if not obj_ok:
-                                reason_text = "; ".join(reasons) if reasons \
-                                    else "no parameter accepted the value"
-                                line += (" (WARNING: ObjectType '{}' not "
-                                         "recorded - {})").format(obj_value, reason_text)
-                            debug_lines.append(line)
-                        except:
-                            pass
+                        winning_target = (target_label, target)
                         break  # Success on this target, skip next
                     else:
                         try:
                             reason_text = "; ".join(reasons) if reasons \
                                 else "no parameter accepted the value"
                             debug_lines.append(
-                                "[FAIL] {} '{}' entity={} pdt={} obj={} on {} (id:{}) - {}".format(
+                                "[FAIL] {} '{}' entity={} pdt={} on {} (id:{}) - {}".format(
                                     target_label, row.Family + ":" + row.TypeName,
-                                    entity_ok, pdt_ok, obj_ok, target_label,
+                                    entity_ok, pdt_ok, target_label,
                                     _eid_int(target.Id), reason_text))
                         except:
                             pass
+
+                # ObjectType is tried across EVERY target, independently of
+                # which one Entity/Predefined Type happened to land on - a
+                # shared "IfcObjectType"-style parameter is very often
+                # bound at a different level than the built-in IFC
+                # Predefined Type (e.g. instance-only, while "Apply to
+                # Type" writes Predefined Type on the type). Confining the
+                # ObjectType attempt to the same target that won above
+                # meant a category whose ObjectType parameter lives only
+                # on instances would never get it, even though an
+                # instance was right there in targets_tried and would
+                # have accepted it.
+                obj_ok = True
+                obj_reasons = []
+                obj_note = ""
+                if type_ok and is_ud and set_obj and obj_value:
+                    obj_ok = False
+                    for target_label, target in targets_tried:
+                        r = []
+                        if set_ifc_object_type(target, obj_value, use_type, r):
+                            obj_ok = True
+                            break
+                        obj_reasons.extend(r)
+
+                    # Parameter Loader always creates a new project
+                    # parameter as Instance-scoped, so an ObjectType-style
+                    # parameter typically cannot exist on a Type element
+                    # at all - the loop above then only ever reached
+                    # row._items[0], leaving every OTHER instance of this
+                    # same type without it even though the row reports
+                    # success. Once it is confirmed writable at all, push
+                    # it onto every instance of the type, not just one.
+                    if obj_ok and len(row._items) > 1:
+                        written = 0
+                        for item in row._items:
+                            if set_ifc_object_type(item["elem"], obj_value, use_type):
+                                written += 1
+                        if written < len(row._items):
+                            obj_note = " ({} of {} instances)".format(
+                                written, len(row._items))
+
+                if type_ok:
+                    if not obj_ok:
+                        type_obj_missing = True
+                    # Logging is not allowed to cost a successful
+                    # assignment - a formatting slip here used to
+                    # raise inside this same try block and roll back
+                    # every change already made in this Apply pass.
+                    try:
+                        target_label, target = winning_target
+                        line = "[OK] {} '{}' -> {} on {} (id:{})".format(
+                            target_label, row.Family + ":" + row.TypeName,
+                            pdt_value, target_label, _eid_int(target.Id))
+                        if not obj_ok:
+                            reason_text = "; ".join(obj_reasons) if obj_reasons \
+                                else "no parameter accepted the value"
+                            line += (" (WARNING: ObjectType '{}' not "
+                                     "recorded - {})").format(obj_value, reason_text)
+                        elif obj_note:
+                            line += (" (ObjectType '{}' only recorded on{} - "
+                                     "no parameter on the rest)").format(
+                                         obj_value, obj_note)
+                        debug_lines.append(line)
+                    except:
+                        pass
 
                 if type_ok and type_obj_missing:
                     obj_missing += 1
@@ -2415,7 +2451,18 @@ class IFCSGSubtypeWindow(object):
                             if not set_ifc_predefined_type(target, pdt_value, use_type):
                                 s = False
                         if is_ud and set_obj and obj_value:
-                            set_ifc_object_type(target, obj_value, use_type)
+                            obj_written = set_ifc_object_type(target, obj_value, use_type)
+                            if not obj_written and use_type and row._items:
+                                # A shared "IfcObjectType"-style parameter
+                                # created via Parameter Loader is always
+                                # Instance-scoped, so it can never land on
+                                # the Type element "Apply to Type" targets -
+                                # without this, ObjectType would silently
+                                # never get set for any such category. Every
+                                # instance of the type needs it, not just
+                                # one, or the rest keep no value at all.
+                                for it in row._items:
+                                    set_ifc_object_type(it["elem"], obj_value, use_type)
                         if s:
                             total_ok += 1
                         else:

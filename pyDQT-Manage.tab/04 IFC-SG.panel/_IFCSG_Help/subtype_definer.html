@@ -136,6 +136,19 @@
       ObjectType is skipped, and that is now called out as a warning in
       the result instead of turning the whole row into a failure.
     </div>
+    <div class="box fixed">
+      With <b>Apply to Type</b> checked, <span class="code">ObjectType</span>
+      is no longer silently skipped for a category whose
+      <span class="code">IfcObjectType</span>-style parameter is bound as
+      Instance only - which is every parameter Parameter Loader creates,
+      since it always adds a new project parameter as Instance-scoped.
+      Export to IFC As / IFC Predefined Type land on the Type as before,
+      but ObjectType is now also tried on every instance of that type
+      instead of stopping once the Type target already counted as a
+      success - previously a row could show <b>OK</b> with the right
+      Predefined Type on the Type, while ObjectType stayed blank on every
+      instance because the Type element never had anywhere to put it.
+    </div>
   </div>
 
   <div class="pagenav">
