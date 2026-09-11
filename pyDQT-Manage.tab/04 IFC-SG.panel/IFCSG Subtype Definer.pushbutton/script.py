@@ -2232,6 +2232,29 @@ class IFCSGSubtypeWindow(object):
                         except:
                             pass
 
+                # "Apply to Type" writes Export to IFC As / IFC Predefined
+                # Type only on the Type element - Revit does not mirror
+                # that onto each instance's own copy of the same built-in
+                # parameters, so an instance's Properties panel (what
+                # someone actually checking the result looks at, and
+                # possibly what a downstream checker reads too) kept
+                # showing blank even though the Type-level assignment was
+                # genuinely written and would already export correctly.
+                # Mirror the same values onto every instance too, so the
+                # instance-level fields show the real state directly.
+                pdt_note = ""
+                if type_ok and winning_target[0] == "Type" and row._items:
+                    pdt_written = 0
+                    for item in row._items:
+                        inst = item["elem"]
+                        if also_entity and primary_entity:
+                            set_ifc_export_as(inst, primary_entity, use_type)
+                        if set_ifc_predefined_type(inst, pdt_value, use_type):
+                            pdt_written += 1
+                    if pdt_written < len(row._items):
+                        pdt_note = " ({} of {} instances)".format(
+                            pdt_written, len(row._items))
+
                 # ObjectType is tried across EVERY target, independently of
                 # which one Entity/Predefined Type happened to land on - a
                 # shared "IfcObjectType"-style parameter is very often
@@ -2284,6 +2307,9 @@ class IFCSGSubtypeWindow(object):
                         line = "[OK] {} '{}' -> {} on {} (id:{})".format(
                             target_label, row.Family + ":" + row.TypeName,
                             pdt_value, target_label, _eid_int(target.Id))
+                        if pdt_note:
+                            line += (" (also mirrored to Predefined Type on"
+                                     "{} - none on the rest)").format(pdt_note)
                         if not obj_ok:
                             reason_text = "; ".join(obj_reasons) if obj_reasons \
                                 else "no parameter accepted the value"
@@ -2463,6 +2489,20 @@ class IFCSGSubtypeWindow(object):
                                 # one, or the rest keep no value at all.
                                 for it in row._items:
                                     set_ifc_object_type(it["elem"], obj_value, use_type)
+                        if use_type and row._items:
+                            # Writing Export to IFC As / Predefined Type on
+                            # the Type element does not mirror them onto
+                            # each instance's own copy of those same
+                            # built-in parameters - an instance's own
+                            # Properties panel kept showing blank even
+                            # though the Type-level assignment was genuinely
+                            # written and would already export correctly.
+                            for it in row._items:
+                                inst = it["elem"]
+                                if entity:
+                                    set_ifc_export_as(inst, entity, use_type)
+                                if pdt_value:
+                                    set_ifc_predefined_type(inst, pdt_value, use_type)
                         if s:
                             total_ok += 1
                         else:
