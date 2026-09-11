@@ -1423,72 +1423,119 @@ class RuleEngine:
             return RuleResult(rule, "pass",
                 "No duplicate Marks in {}".format(category_name))
 class ExcelReporter:
-    """Generate Excel compliance report"""
-    
+    """Generate an Excel-compatible compliance report.
+
+    Ghi thẳng một file SpreadsheetML ("Excel XML Spreadsheet 2003", đuôi .xml) —
+    KHÔNG còn dùng Microsoft.Office.Interop.Excel. Bản cũ mở một tiến trình Excel
+    THẬT qua COM (`ExcelInterop.ApplicationClass()`) để gõ từng ô, nghĩa là máy
+    chạy Revit BẮT BUỘC phải có Microsoft Excel cài kèm gói Primary Interop
+    Assemblies (PIA) — thiếu MỘT trong hai, `clr.AddReference(
+    'Microsoft.Office.Interop.Excel')` ném ngay "IOException: Could not add
+    reference to assembly..." trước cả khi kịp mở Excel (đúng lỗi chủ dự án gặp,
+    máy Click-to-Run/Microsoft 365 hiện đại thường KHÔNG tự đăng ký PIA kiểu cũ).
+    SpreadsheetML là XML thuần Excel tự nhận diện qua khai báo
+    `<?mso-application progid="Excel.Sheet"?>` — tự viết bằng string formatting
+    nên xuất file được trên MỌI máy có Revit, kể cả máy không cài Excel; chỉ cần
+    Excel ở máy nào đó SAU NÀY để MỞ file ra xem. Đuôi file đổi từ .xlsx sang .xml
+    (xem `_on_export_excel`) vì đó là đuôi DUY NHẤT Excel mở SpreadsheetML mà
+    KHÔNG hiện cảnh báo "khác định dạng với phần mở rộng" — đặt đuôi .xlsx/.xls
+    cho đúng nội dung XML này thì Excel vẫn mở được nhưng luôn hỏi lại trước.
+    """
+
     def __init__(self, doc):
         self.doc = doc
-    
-    def _rgb_to_ole(self, r, g, b):
-        """Convert RGB to OLE color (avoids System.Drawing dependency)"""
-        return r + (g * 256) + (b * 256 * 256)
-    
+
+    # ------------------------------------------------------------------
+    # XML helpers — không polyfill thư viện ngoài, tự ráp chuỗi vì
+    # SpreadsheetML chỉ cần đúng vài thẻ <Workbook>/<Worksheet>/<Row>/<Cell>.
+    # ------------------------------------------------------------------
+    def _esc(self, value):
+        """Escape & < > cho text XML — bắt buộc, message/tên rule là chữ tự do."""
+        text = u"" if value is None else unicode(value)
+        return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    def _rgb_hex(self, r, g, b):
+        return "#{0:02X}{1:02X}{2:02X}".format(r, g, b)
+
+    def _cell(self, value, style_id=None, merge_across=None, is_number=False):
+        """Một <Cell>. `value` là kiểu Python thường (str/int) — hàm tự escape."""
+        attrs = ""
+        if style_id:
+            attrs += ' ss:StyleID="{}"'.format(style_id)
+        if merge_across:
+            attrs += ' ss:MergeAcross="{}"'.format(merge_across)
+        if is_number:
+            return '<Cell{}><Data ss:Type="Number">{}</Data></Cell>'.format(attrs, value)
+        return '<Cell{}><Data ss:Type="String">{}</Data></Cell>'.format(attrs, self._esc(value))
+
+    def _row(self, cells):
+        return "<Row>{}</Row>".format("".join(cells))
+
+    def _columns_xml(self, widths):
+        return "".join('<Column ss:Width="{}"/>'.format(w) for w in widths)
+
+    def _build_styles(self):
+        """Bộ style DÙNG CHUNG cho cả ba sheet — cùng bảng màu bản Interop cũ,
+        chỉ đổi từ OLE color (số nguyên) sang mã hex mà SpreadsheetML hiểu."""
+        tan = self._rgb_hex(240, 204, 136)        # DQT branding
+        tan_light = self._rgb_hex(254, 248, 231)  # nền tiêu đề khối "RESULTS SUMMARY"
+        red_bg = self._rgb_hex(255, 205, 210)
+        green_txt = self._rgb_hex(46, 125, 50)
+        red_txt = self._rgb_hex(198, 40, 40)
+        gray_txt = self._rgb_hex(128, 128, 128)
+        status_bg = {
+            "pass": self._rgb_hex(200, 230, 201),
+            "fail": self._rgb_hex(255, 205, 210),
+            "warning": self._rgb_hex(255, 236, 179),
+            "info": self._rgb_hex(187, 222, 251),
+            "error": self._rgb_hex(255, 171, 145),
+            "skipped": self._rgb_hex(224, 224, 224),
+        }
+        parts = ['<Styles>']
+        parts.append('<Style ss:ID="sTitle"><Font ss:Size="16" ss:Bold="1"/>'
+                      '<Interior ss:Color="{}" ss:Pattern="Solid"/></Style>'.format(tan))
+        parts.append('<Style ss:ID="sSection"><Font ss:Size="12" ss:Bold="1"/>'
+                      '<Interior ss:Color="{}" ss:Pattern="Solid"/></Style>'.format(tan_light))
+        parts.append('<Style ss:ID="sLabel"><Font ss:Bold="1"/></Style>')
+        parts.append('<Style ss:ID="sGreenBold"><Font ss:Bold="1" ss:Color="{}"/></Style>'.format(green_txt))
+        parts.append('<Style ss:ID="sRedBold"><Font ss:Bold="1" ss:Color="{}"/></Style>'.format(red_txt))
+        parts.append('<Style ss:ID="sGreen"><Font ss:Color="{}"/></Style>'.format(green_txt))
+        parts.append('<Style ss:ID="sHeaderTan"><Font ss:Bold="1"/>'
+                      '<Interior ss:Color="{}" ss:Pattern="Solid"/></Style>'.format(tan))
+        parts.append('<Style ss:ID="sHeaderRed"><Font ss:Bold="1"/>'
+                      '<Interior ss:Color="{}" ss:Pattern="Solid"/></Style>'.format(red_bg))
+        parts.append('<Style ss:ID="sDetailSub"><Font ss:Size="9" ss:Color="{}"/></Style>'.format(gray_txt))
+        for status_key, color in status_bg.items():
+            parts.append('<Style ss:ID="sStatus_{}"><Interior ss:Color="{}" ss:Pattern="Solid"/></Style>'
+                          .format(status_key, color))
+        parts.append('</Styles>')
+        return "".join(parts)
+
     def generate_report(self, checkset, results, filepath):
-        """Generate a full Excel report"""
-        try:
-            clr.AddReference('Microsoft.Office.Interop.Excel')
-            from Microsoft.Office.Interop import Excel as ExcelInterop
-            excel_app = ExcelInterop.ApplicationClass()
-            excel_app.Visible = False
-            excel_app.DisplayAlerts = False
-            
-            wb = excel_app.Workbooks.Add()
-            
-            # --- Sheet 1: Summary ---
-            ws_summary = wb.Sheets[1]
-            ws_summary.Name = "Summary"
-            self._write_summary(ws_summary, checkset, results)
-            
-            # --- Sheet 2: Detailed Results ---
-            ws_details = wb.Sheets.Add(After=wb.Sheets[wb.Sheets.Count])
-            ws_details.Name = "Detailed Results"
-            self._write_details(ws_details, results)
-            
-            # --- Sheet 3: Failed Items ---
-            ws_failed = wb.Sheets.Add(After=wb.Sheets[wb.Sheets.Count])
-            ws_failed.Name = "Failed Items"
-            self._write_failed(ws_failed, results)
-            
-            wb.SaveAs(filepath)
-            wb.Close()
-            excel_app.Quit()
-            
-            # Release COM objects
-            System.Runtime.InteropServices.Marshal.ReleaseComObject(excel_app)
-            
-            return True
-        except Exception as e:
-            try:
-                wb.Close(False)
-                excel_app.Quit()
-                System.Runtime.InteropServices.Marshal.ReleaseComObject(excel_app)
-            except:
-                pass
-            raise e
-    
-    def _write_summary(self, ws, checkset, results):
-        """Write summary sheet"""
-        # Title
-        ws.Cells[1, 1].Value2 = "MODEL CHECKER REPORT"
-        ws.Cells[1, 1].Font.Size = 16
-        ws.Cells[1, 1].Font.Bold = True
-        ws.Range["A1:D1"].Merge()
-        
-        # DQT branding
-        header_range = ws.Range["A1:D1"]
-        header_range.Interior.Color = self._rgb_to_ole(240, 204, 136)
-        
-        # Project info
-        row = 3
+        """Ghi báo cáo đầy đủ ra `filepath` dưới dạng SpreadsheetML."""
+        xml = (
+            u'<?xml version="1.0" encoding="UTF-8"?>\n'
+            u'<?mso-application progid="Excel.Sheet"?>\n'
+            u'<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"\n'
+            u' xmlns:o="urn:schemas-microsoft-com:office:office"\n'
+            u' xmlns:x="urn:schemas-microsoft-com:office:excel"\n'
+            u' xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"\n'
+            u' xmlns:html="http://www.w3.org/TR/REC-html40">\n'
+            + self._build_styles()
+            + self._sheet_summary(checkset, results)
+            + self._sheet_details(results)
+            + self._sheet_failed(results)
+            + u'</Workbook>'
+        )
+        with codecs.open(filepath, 'w', 'utf-8') as f:
+            f.write(xml)
+        return True
+
+    def _sheet_summary(self, checkset, results):
+        """Sheet "Summary" — tiêu đề + thông tin project + thống kê pass/fail."""
+        rows = [self._row([self._cell("MODEL CHECKER REPORT", "sTitle", merge_across=3)]),
+                self._row([])]  # dòng 2 để trống, giữ đúng bố cục bản cũ (info bắt đầu ở dòng 3)
+
         info = [
             ("Project Name", self.doc.ProjectInformation.Name or "N/A"),
             ("File Path", self.doc.PathName or "Not saved"),
@@ -1499,124 +1546,107 @@ class ExcelReporter:
                 self.doc.Application.VersionNumber,
                 self.doc.Application.VersionBuild)),
         ]
-        
         for label, value in info:
-            ws.Cells[row, 1].Value2 = label
-            ws.Cells[row, 1].Font.Bold = True
-            ws.Cells[row, 2].Value2 = value
-            row += 1
-        
-        # Statistics
-        row += 1
+            rows.append(self._row([self._cell(label, "sLabel"), self._cell(value)]))
+
+        rows.append(self._row([]))  # dòng trống trước khối thống kê
+
         total = len(results)
         passed = len([r for r in results if r.status == "pass"])
         failed = len([r for r in results if r.status == "fail"])
-        warnings = len([r for r in results if r.status == "warning"])
         info_count = len([r for r in results if r.status == "info"])
         errors = len([r for r in results if r.status == "error"])
         skipped = len([r for r in results if r.status == "skipped"])
-        
-        ws.Cells[row, 1].Value2 = "RESULTS SUMMARY"
-        ws.Cells[row, 1].Font.Size = 12
-        ws.Cells[row, 1].Font.Bold = True
-        ws.Range[ws.Cells[row, 1], ws.Cells[row, 4]].Interior.Color = \
-            self._rgb_to_ole(254, 248, 231)
-        row += 1
-        
+
+        # Bản cũ TÔ MÀU cả 4 cột A:D nhưng KHÔNG gộp ô — 4 <Cell> cùng style,
+        # chỉ ô đầu có chữ, mới đúng hình dạng gốc (khác dòng tiêu đề có gộp).
+        rows.append(self._row([
+            self._cell("RESULTS SUMMARY", "sSection"),
+            self._cell("", "sSection"),
+            self._cell("", "sSection"),
+            self._cell("", "sSection"),
+        ]))
+
         stats = [
-            ("Total Rules", total),
-            ("Passed", passed),
-            ("Failed", failed),
-            ("Info", info_count),
-            ("Errors", errors),
-            ("Skipped", skipped),
+            ("Total Rules", total, None),
+            ("Passed", passed, "sGreenBold"),
+            ("Failed", failed, "sRedBold"),
+            ("Info", info_count, None),
+            ("Errors", errors, None),
+            ("Skipped", skipped, None),
         ]
-        
-        for label, value in stats:
-            ws.Cells[row, 1].Value2 = label
-            ws.Cells[row, 1].Font.Bold = True
-            ws.Cells[row, 2].Value2 = value
-            
-            # Color code
-            if label == "Passed":
-                ws.Cells[row, 2].Font.Color = self._rgb_to_ole(46, 125, 50)
-            elif label == "Failed":
-                ws.Cells[row, 2].Font.Color = self._rgb_to_ole(198, 40, 40)
-            row += 1
-        
-        # Auto-fit
-        ws.Columns["A:D"].AutoFit()
-    
-    def _write_details(self, ws, results):
-        """Write detailed results sheet"""
+        for label, value, value_style in stats:
+            rows.append(self._row([
+                self._cell(label, "sLabel"),
+                self._cell(value, value_style, is_number=True),
+            ]))
+
+        return (
+            u'<Worksheet ss:Name="Summary"><Table>'
+            + self._columns_xml([150, 300, 80, 80])
+            + u"".join(rows)
+            + u'</Table></Worksheet>'
+        )
+
+    def _sheet_details(self, results):
+        """Sheet "Detailed Results" — một dòng mỗi rule, chi tiết phụ (nếu có)
+        xuống dòng riêng ngay bên dưới, y hệt bố cục sub-row của bản cũ."""
         headers = ["Rule ID", "Rule Name", "Category", "Severity", "Status", "Message"]
-        
-        # Header row
-        for i, h in enumerate(headers, 1):
-            ws.Cells[1, i].Value2 = h
-            ws.Cells[1, i].Font.Bold = True
-            ws.Cells[1, i].Interior.Color = self._rgb_to_ole(240, 204, 136)
-        
-        # Data rows
-        row = 2
+        rows = [self._row([self._cell(h, "sHeaderTan") for h in headers])]
+
+        status_style = {
+            "pass": "sStatus_pass", "fail": "sStatus_fail", "warning": "sStatus_warning",
+            "info": "sStatus_info", "error": "sStatus_error", "skipped": "sStatus_skipped",
+        }
         for r in results:
-            ws.Cells[row, 1].Value2 = r.rule_id
-            ws.Cells[row, 2].Value2 = r.rule_name
-            ws.Cells[row, 3].Value2 = r.category
-            ws.Cells[row, 4].Value2 = r.severity.upper()
-            ws.Cells[row, 5].Value2 = r.status.upper()
-            ws.Cells[row, 6].Value2 = r.message
-            
-            # Color code status
-            status_colors = {
-                "pass": self._rgb_to_ole(200, 230, 201),
-                "fail": self._rgb_to_ole(255, 205, 210),
-                "warning": self._rgb_to_ole(255, 236, 179),
-                "info": self._rgb_to_ole(187, 222, 251),
-                "error": self._rgb_to_ole(255, 171, 145),
-                "skipped": self._rgb_to_ole(224, 224, 224),
-            }
-            
-            color = status_colors.get(r.status, self._rgb_to_ole(255, 255, 255))
-            ws.Cells[row, 5].Interior.Color = color
-            
-            # Write details as sub-rows
-            if r.details:
-                for detail in r.details:
-                    row += 1
-                    ws.Cells[row, 6].Value2 = detail
-                    ws.Cells[row, 6].Font.Color = self._rgb_to_ole(128, 128, 128)
-                    ws.Cells[row, 6].Font.Size = 9
-            
-            row += 1
-        
-        ws.Columns["A:F"].AutoFit()
-    
-    def _write_failed(self, ws, results):
-        """Write failed items sheet"""
+            rows.append(self._row([
+                self._cell(r.rule_id),
+                self._cell(r.rule_name),
+                self._cell(r.category),
+                self._cell(r.severity.upper()),
+                self._cell(r.status.upper(), status_style.get(r.status)),
+                self._cell(r.message),
+            ]))
+            for detail in r.details:
+                rows.append(self._row([
+                    self._cell(""), self._cell(""), self._cell(""), self._cell(""), self._cell(""),
+                    self._cell(detail, "sDetailSub"),
+                ]))
+
+        return (
+            u'<Worksheet ss:Name="Detailed Results"><Table>'
+            + self._columns_xml([70, 180, 110, 80, 80, 320])
+            + u"".join(rows)
+            + u'</Table></Worksheet>'
+        )
+
+    def _sheet_failed(self, results):
+        """Sheet "Failed Items" — chỉ liệt kê rule có status 'fail'."""
         headers = ["Rule ID", "Rule Name", "Severity", "Message", "Element IDs"]
-        
-        for i, h in enumerate(headers, 1):
-            ws.Cells[1, i].Value2 = h
-            ws.Cells[1, i].Font.Bold = True
-            ws.Cells[1, i].Interior.Color = self._rgb_to_ole(255, 205, 210)
-        
-        row = 2
-        for r in results:
-            if r.status == "fail":
-                ws.Cells[row, 1].Value2 = r.rule_id
-                ws.Cells[row, 2].Value2 = r.rule_name
-                ws.Cells[row, 3].Value2 = r.severity.upper()
-                ws.Cells[row, 4].Value2 = r.message
-                ws.Cells[row, 5].Value2 = ", ".join(str(e) for e in r.elements) if r.elements else "N/A"
-                row += 1
-        
-        if row == 2:
-            ws.Cells[2, 1].Value2 = "No failed items - All checks passed!"
-            ws.Range["A2:E2"].Merge()
-            ws.Cells[2, 1].Font.Color = self._rgb_to_ole(46, 125, 50)
-        
-        ws.Columns["A:E"].AutoFit()
+        rows = [self._row([self._cell(h, "sHeaderRed") for h in headers])]
+
+        failed = [r for r in results if r.status == "fail"]
+        for r in failed:
+            elements = ", ".join(str(e) for e in r.elements) if r.elements else "N/A"
+            rows.append(self._row([
+                self._cell(r.rule_id),
+                self._cell(r.rule_name),
+                self._cell(r.severity.upper()),
+                self._cell(r.message),
+                self._cell(elements),
+            ]))
+
+        if not failed:
+            rows.append(self._row([
+                self._cell("No failed items - All checks passed!", "sGreen", merge_across=4)
+            ]))
+
+        return (
+            u'<Worksheet ss:Name="Failed Items"><Table>'
+            + self._columns_xml([70, 180, 80, 320, 200])
+            + u"".join(rows)
+            + u'</Table></Worksheet>'
+        )
 
 
 # =====================================================================
@@ -2971,18 +3001,23 @@ class ModelCheckerWindow:
     # EXPORT EXCEL
     # =================================================================
     def _on_export_excel(self, sender, args):
-        """Export results to Excel"""
+        """Export results to an Excel-readable report"""
         if not self.current_results or not self.current_checkset:
             return
-        
+
         from System.Windows.Forms import SaveFileDialog, DialogResult
-        
+
         dlg = SaveFileDialog()
-        dlg.Filter = "Excel Files (*.xlsx)|*.xlsx"
+        # .xml, không phải .xlsx: `ExcelReporter` ghi SpreadsheetML (XML) chứ
+        # không còn dựng file .xlsx thật qua Excel COM — xem doc-comment
+        # `ExcelReporter`. Excel mở .xml có khai báo progid="Excel.Sheet" trực
+        # tiếp mà KHÔNG cảnh báo "khác định dạng"; đặt đuôi .xlsx cho đúng nội
+        # dung này thì Excel vẫn mở được nhưng luôn hỏi lại trước.
+        dlg.Filter = "Excel XML Spreadsheet (*.xml)|*.xml"
         project_name = doc.ProjectInformation.Name or "Untitled"
         checkset_name = str(self.cmbCheckset.SelectedItem or "default")
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        dlg.FileName = "ModelCheck_{}_{}_{}".format(project_name, checkset_name, timestamp)
+        dlg.FileName = "ModelCheck_{}_{}_{}.xml".format(project_name, checkset_name, timestamp)
         dlg.Title = "Export Check Report"
         
         # Default to reports directory
