@@ -312,6 +312,11 @@ def _set_dimension_field(dt, field, value):
     try:
         if field == "text_font":
             param.Set(text)
+        elif field == "text_size":
+            if not param.SetValueString(text):
+                return "error", (
+                    "'{}' is not a valid text size - type a number in the "
+                    "project's units (e.g. 2.5)".format(text))
         elif field == "width_factor":
             if not param.SetValueString(text):
                 try:
@@ -733,7 +738,7 @@ BATCH_EDIT_XAML = """
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Batch Edit - DQT"
-        Width="480" Height="330"
+        Width="480" Height="380"
         WindowStartupLocation="CenterScreen"
         Background="#FEF8E7" ResizeMode="NoResize">
     <Grid Margin="15">
@@ -745,12 +750,16 @@ BATCH_EDIT_XAML = """
         </Grid.RowDefinitions>
 
         <Border Grid.Row="0" Background="#F0CC88" CornerRadius="5" Padding="12,8" Margin="0,0,0,10">
-            <TextBlock Text="Batch Edit Text Font / Width Factor" FontSize="16" FontWeight="Bold"/>
+            <TextBlock Text="Batch Edit Text Size / Font / Width Factor" FontSize="16" FontWeight="Bold"/>
         </Border>
 
         <TextBlock Grid.Row="1" x:Name="txtInfo" Text="" FontSize="12" Foreground="#5D4E37" Margin="0,0,0,15"/>
 
         <StackPanel Grid.Row="2">
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,15">
+                <CheckBox x:Name="chkSize" Content="Set Text Size to:" VerticalAlignment="Center" Width="150"/>
+                <TextBox x:Name="txtSize" Width="230" Height="26" Padding="4,2" IsEnabled="False" VerticalContentAlignment="Center"/>
+            </StackPanel>
             <StackPanel Orientation="Horizontal" Margin="0,0,0,15">
                 <CheckBox x:Name="chkFont" Content="Set Text Font to:" VerticalAlignment="Center" Width="150"/>
                 <ComboBox x:Name="cmbFont" Width="230" Height="26" IsEditable="True" IsEnabled="False"/>
@@ -759,7 +768,7 @@ BATCH_EDIT_XAML = """
                 <CheckBox x:Name="chkWidth" Content="Set Width Factor to:" VerticalAlignment="Center" Width="150"/>
                 <TextBox x:Name="txtWidth" Width="230" Height="26" Padding="4,2" IsEnabled="False" VerticalContentAlignment="Center"/>
             </StackPanel>
-            <TextBlock Text="A type with no Text Font / Width Factor parameter (not every dimension style has one) is skipped, not failed." FontSize="9" Foreground="#888" TextWrapping="Wrap" Margin="0,15,0,0"/>
+            <TextBlock Text="A type with no Text Size / Text Font / Width Factor parameter (not every dimension style has one) is skipped, not failed." FontSize="9" Foreground="#888" TextWrapping="Wrap" Margin="0,15,0,0"/>
         </StackPanel>
 
         <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,15,0,0">
@@ -790,12 +799,20 @@ class BatchEditDialog(WPFWindow):
         for font in fonts:
             self.cmbFont.Items.Add(font)
 
+        self.chkSize.Checked += self._on_size_checked
+        self.chkSize.Unchecked += self._on_size_unchecked
         self.chkFont.Checked += self._on_font_checked
         self.chkFont.Unchecked += self._on_font_unchecked
         self.chkWidth.Checked += self._on_width_checked
         self.chkWidth.Unchecked += self._on_width_unchecked
         self.btnApply.Click += self.on_apply
         self.btnCancel.Click += lambda s, e: self.Close()
+
+    def _on_size_checked(self, s, e):
+        self.txtSize.IsEnabled = True
+
+    def _on_size_unchecked(self, s, e):
+        self.txtSize.IsEnabled = False
 
     def _on_font_checked(self, s, e):
         self.cmbFont.IsEnabled = True
@@ -811,6 +828,14 @@ class BatchEditDialog(WPFWindow):
 
     def on_apply(self, sender, args):
         updates = {}
+        if self.chkSize.IsChecked:
+            size_text = (self.txtSize.Text or "").strip()
+            if not size_text:
+                forms.alert("Enter a Text Size, or untick 'Set Text Size to'.",
+                            title="DQT - Batch Edit")
+                return
+            updates["text_size"] = size_text
+
         if self.chkFont.IsChecked:
             font_text = (self.cmbFont.Text or "").strip()
             if not font_text:
@@ -971,7 +996,7 @@ MAIN_XAML = """
                     <Button x:Name="btnDetail" Content="Detail" Padding="10,5" Margin="2" Background="#F0CC88" FontWeight="SemiBold"/>
                     <Button x:Name="btnRename" Content="Rename" Padding="10,5" Margin="2" Background="White"/>
                     <Button x:Name="btnBatchRename" Content="Batch Rename" Padding="10,5" Margin="2" Background="White"/>
-                    <Button x:Name="btnBatchEdit" Content="Batch Edit Font/Width..." Padding="10,5" Margin="2" Background="White"/>
+                    <Button x:Name="btnBatchEdit" Content="Batch Edit..." Padding="10,5" Margin="2" Background="White"/>
                     <Button x:Name="btnDeleteType" Content="Delete Type" Padding="10,5" Margin="2" Background="#FFCDD2"/>
                     <Button x:Name="btnExportCSV" Content="Export CSV" Padding="10,5" Margin="2" Background="White"/>
                     <Button x:Name="btnClose" Content="Close" Padding="10,5" Margin="2" Background="White"/>
@@ -1032,7 +1057,7 @@ class DimensionManagerWindow(WPFWindow):
             "- Double-click Text Size / Text Font / Width Factor to edit in place; Enter commits it.\n"
             "- Detail shows every instance of the selected type and which view it's in.\n"
             "- Select in Model / Zoom To act on the ticked rows; Rename / Batch Rename / Delete Type edit the type itself.\n"
-            "- Batch Edit Font/Width... sets Text Font and/or Width Factor on every "
+            "- Batch Edit... sets Text Size, Text Font and/or Width Factor on every "
             "selected type at once, instead of one cell at a time.\n\n"
             "Dang Quoc Truong - DQT (c) 2026",
             "Help", MessageBoxButton.OK, MessageBoxImage.Information)

@@ -197,6 +197,62 @@ def apply_text_type_edit(item, field, value):
         return False, str(ex)
 
 
+def _set_text_type_field(text_type, field, value):
+    """Write one field on one TextNoteType, WITHOUT opening its own
+    transaction - the batch editor wraps every selected type in a single
+    transaction instead of one per cell, the way apply_text_type_edit
+    (used by the inline double-click-to-edit cell) does. Same validation
+    as that function; kept separate rather than shared so the working
+    inline edit path is not touched by the batch feature.
+
+    Returns (status, message): status is "ok", "skip" (this type has no
+    such parameter - not expected for a built-in Text parameter, but
+    kept for parity with the other managers' batch editors), or "error"
+    (a real problem: bad value, read-only parameter, or an exception)."""
+    bip = EDITABLE_FIELDS.get(field)
+    if bip is None:
+        return "error", "unknown field '{}'".format(field)
+
+    param = text_type.get_Parameter(bip)
+    if param is None:
+        return "skip", "this type has no {} parameter".format(field)
+    if param.IsReadOnly:
+        return "error", "{} is read-only on this type".format(field)
+
+    try:
+        if field in ("Bold", "Italic"):
+            param.Set(1 if value else 0)
+
+        elif field == "Font":
+            text = str(value).strip()
+            if not text:
+                return "error", "font name cannot be empty"
+            param.Set(text)
+
+        elif field == "TextSize":
+            text = str(value).strip()
+            if not text:
+                return "error", "text size cannot be empty"
+            if not param.SetValueString(text):
+                return "error", (
+                    "'{}' is not a valid text size - type a number in the "
+                    "project's units (e.g. 2.5)".format(text))
+
+        elif field == "WidthFactor":
+            text = str(value).strip()
+            if not text:
+                return "error", "width factor cannot be empty"
+            if not param.SetValueString(text):
+                try:
+                    param.Set(float(text))
+                except ValueError:
+                    return "error", "'{}' is not a number".format(text)
+
+        return "ok", None
+    except Exception as ex:
+        return "error", str(ex)
+
+
 class TextNoteTypeItem(object):
     """Wrapper class for Text Note Type - simple data holder"""
     
@@ -1174,6 +1230,262 @@ class BatchRenameDialog(Window):
 
 
 # ============================================================================
+# BATCH EDIT DIALOG
+# ============================================================================
+
+class BatchEditPropertiesDialog(Window):
+    """Set Text Size / Font / Bold / Italic / Width Factor on every
+    selected TextNoteType at once, in a single transaction - the
+    double-click-to-edit grid cells only ever touch one type at a time,
+    same limitation Dimension Manager's own Batch Edit dialog solves."""
+
+    def __init__(self, items, parent_window):
+        self.items = items
+        self.parent_window = parent_window
+
+        self.chk_size = None
+        self.txt_size = None
+        self.chk_font = None
+        self.cmb_font = None
+        self.chk_bold = None
+        self.cmb_bold = None
+        self.chk_italic = None
+        self.cmb_italic = None
+        self.chk_width = None
+        self.txt_width = None
+
+        self._build_ui()
+
+    def _build_ui(self):
+        self.Title = "Batch Edit Text Note Types"
+        self.Width = 440
+        self.Height = 430
+        self.WindowStartupLocation = System.Windows.WindowStartupLocation.CenterScreen
+        self.Background = Config.hex_to_brush(Config.BACKGROUND_COLOR)
+        self.ResizeMode = System.Windows.ResizeMode.NoResize
+
+        main_grid = Grid()
+        main_grid.Margin = Thickness(15)
+        main_grid.RowDefinitions.Add(RowDefinition(Height=GridLength(1, GridUnitType.Auto)))
+        main_grid.RowDefinitions.Add(RowDefinition(Height=GridLength(1, GridUnitType.Auto)))
+        main_grid.RowDefinitions.Add(RowDefinition(Height=GridLength(1, GridUnitType.Star)))
+        main_grid.RowDefinitions.Add(RowDefinition(Height=GridLength(1, GridUnitType.Auto)))
+
+        header = self._create_header()
+        Grid.SetRow(header, 0)
+        main_grid.Children.Add(header)
+
+        info = TextBlock()
+        info.Text = "{} type(s) selected.".format(len(self.items))
+        info.FontSize = 12
+        info.Foreground = Config.hex_to_brush(Config.TEXT_LIGHT)
+        info.Margin = Thickness(0, 0, 0, 10)
+        Grid.SetRow(info, 1)
+        main_grid.Children.Add(info)
+
+        fields_panel = self._create_fields()
+        Grid.SetRow(fields_panel, 2)
+        main_grid.Children.Add(fields_panel)
+
+        buttons = self._create_buttons()
+        Grid.SetRow(buttons, 3)
+        main_grid.Children.Add(buttons)
+
+        self.Content = main_grid
+
+    def _create_header(self):
+        border = Border()
+        border.Background = Config.hex_to_brush(Config.PRIMARY_COLOR)
+        border.CornerRadius = System.Windows.CornerRadius(4)
+        border.Padding = Thickness(10, 8, 10, 8)
+        border.Margin = Thickness(0, 0, 0, 10)
+
+        title = TextBlock()
+        title.Text = "Batch Edit"
+        title.FontSize = 16
+        title.FontWeight = FontWeights.Bold
+
+        border.Child = title
+        return border
+
+    def _add_field_row(self, panel, checkbox, control, on_toggle):
+        row = StackPanel()
+        row.Orientation = Orientation.Horizontal
+        row.Margin = Thickness(0, 0, 0, 12)
+        checkbox.VerticalAlignment = VerticalAlignment.Center
+        checkbox.Width = 150
+        checkbox.Checked += on_toggle
+        checkbox.Unchecked += on_toggle
+        row.Children.Add(checkbox)
+        control.Width = 220
+        control.Height = 26
+        control.IsEnabled = False
+        row.Children.Add(control)
+        panel.Children.Add(row)
+
+    def _create_fields(self):
+        panel = StackPanel()
+
+        self.chk_size = CheckBox()
+        self.chk_size.Content = "Set Text Size to:"
+        self.txt_size = TextBox()
+        self.txt_size.VerticalContentAlignment = VerticalAlignment.Center
+        self._add_field_row(panel, self.chk_size, self.txt_size,
+                             lambda s, e: setattr(self.txt_size, "IsEnabled", self.chk_size.IsChecked))
+
+        self.chk_font = CheckBox()
+        self.chk_font.Content = "Set Font to:"
+        self.cmb_font = ComboBox()
+        self.cmb_font.IsEditable = True
+        fonts = sorted(set(i.font for i in self.items if i.font and i.font != "Unknown"))
+        for f in fonts:
+            self.cmb_font.Items.Add(f)
+        self._add_field_row(panel, self.chk_font, self.cmb_font,
+                             lambda s, e: setattr(self.cmb_font, "IsEnabled", self.chk_font.IsChecked))
+
+        self.chk_bold = CheckBox()
+        self.chk_bold.Content = "Set Bold to:"
+        self.cmb_bold = ComboBox()
+        self.cmb_bold.Items.Add("Yes")
+        self.cmb_bold.Items.Add("No")
+        self.cmb_bold.SelectedIndex = 0
+        self._add_field_row(panel, self.chk_bold, self.cmb_bold,
+                             lambda s, e: setattr(self.cmb_bold, "IsEnabled", self.chk_bold.IsChecked))
+
+        self.chk_italic = CheckBox()
+        self.chk_italic.Content = "Set Italic to:"
+        self.cmb_italic = ComboBox()
+        self.cmb_italic.Items.Add("Yes")
+        self.cmb_italic.Items.Add("No")
+        self.cmb_italic.SelectedIndex = 1
+        self._add_field_row(panel, self.chk_italic, self.cmb_italic,
+                             lambda s, e: setattr(self.cmb_italic, "IsEnabled", self.chk_italic.IsChecked))
+
+        self.chk_width = CheckBox()
+        self.chk_width.Content = "Set Width Factor to:"
+        self.txt_width = TextBox()
+        self.txt_width.VerticalContentAlignment = VerticalAlignment.Center
+        self._add_field_row(panel, self.chk_width, self.txt_width,
+                             lambda s, e: setattr(self.txt_width, "IsEnabled", self.chk_width.IsChecked))
+
+        note = TextBlock()
+        note.Text = "A type with no matching parameter is skipped, not failed."
+        note.FontSize = 9
+        note.Foreground = Config.hex_to_brush(Config.TEXT_LIGHT)
+        note.TextWrapping = System.Windows.TextWrapping.Wrap
+        note.Margin = Thickness(0, 6, 0, 0)
+        panel.Children.Add(note)
+
+        return panel
+
+    def _create_buttons(self):
+        panel = StackPanel()
+        panel.Orientation = Orientation.Horizontal
+        panel.HorizontalAlignment = HorizontalAlignment.Right
+
+        apply_btn = Button()
+        apply_btn.Content = "Apply"
+        apply_btn.Width = 100
+        apply_btn.Height = 32
+        apply_btn.Margin = Thickness(0, 0, 8, 0)
+        apply_btn.Background = Config.hex_to_brush(Config.SUCCESS_COLOR)
+        apply_btn.Foreground = Config.hex_to_brush(Config.WHITE)
+        apply_btn.Click += self._on_apply
+        panel.Children.Add(apply_btn)
+
+        cancel_btn = Button()
+        cancel_btn.Content = "Cancel"
+        cancel_btn.Width = 90
+        cancel_btn.Height = 32
+        cancel_btn.Click += lambda s, e: self.Close()
+        panel.Children.Add(cancel_btn)
+
+        return panel
+
+    def _on_apply(self, sender, args):
+        updates = {}
+        if self.chk_size.IsChecked:
+            text = (self.txt_size.Text or "").strip()
+            if not text:
+                MessageBox.Show("Enter a Text Size, or untick 'Set Text Size to'.",
+                              "Batch Edit", MessageBoxButton.OK, MessageBoxImage.Warning)
+                return
+            updates["TextSize"] = text
+
+        if self.chk_font.IsChecked:
+            text = (self.cmb_font.Text or "").strip()
+            if not text:
+                MessageBox.Show("Enter a Font, or untick 'Set Font to'.",
+                              "Batch Edit", MessageBoxButton.OK, MessageBoxImage.Warning)
+                return
+            updates["Font"] = text
+
+        if self.chk_bold.IsChecked:
+            updates["Bold"] = (self.cmb_bold.SelectedItem == "Yes")
+
+        if self.chk_italic.IsChecked:
+            updates["Italic"] = (self.cmb_italic.SelectedItem == "Yes")
+
+        if self.chk_width.IsChecked:
+            text = (self.txt_width.Text or "").strip()
+            if not text:
+                MessageBox.Show("Enter a Width Factor, or untick 'Set Width Factor to'.",
+                              "Batch Edit", MessageBoxButton.OK, MessageBoxImage.Warning)
+                return
+            updates["WidthFactor"] = text
+
+        if not updates:
+            MessageBox.Show("Tick at least one field to set.", "Batch Edit",
+                          MessageBoxButton.OK, MessageBoxImage.Warning)
+            return
+
+        success = 0
+        skipped = 0
+        failures = []
+
+        t = DB.Transaction(doc, "DQT - Batch Edit Text Note Types")
+        t.Start()
+        try:
+            for item in self.items:
+                item_ok = False
+                item_failed = False
+                for field, value in updates.items():
+                    status, err = _set_text_type_field(item.text_type, field, value)
+                    if status == "ok":
+                        item_ok = True
+                    elif status == "error":
+                        item_failed = True
+                        failures.append("{}: {}".format(item.name, err))
+                    # status == "skip": no such parameter on this type -
+                    # not a failure, just doesn't apply here.
+                if item_failed:
+                    continue
+                if item_ok:
+                    success += 1
+                else:
+                    skipped += 1
+
+            t.Commit()
+        except Exception as ex:
+            t.RollBack()
+            MessageBox.Show("Error: {}".format(str(ex)), "Error",
+                          MessageBoxButton.OK, MessageBoxImage.Error)
+            return
+
+        message = "Updated {} of {} type(s).".format(success, len(self.items))
+        if skipped:
+            message += "\n{} skipped (no matching parameter on that type).".format(skipped)
+        if failures:
+            lines = failures[:8]
+            more = "" if len(failures) <= 8 else "\n... and {} more".format(len(failures) - 8)
+            message += "\n\nFailed:\n" + "\n".join(lines) + more
+        MessageBox.Show(message, "Batch Edit", MessageBoxButton.OK, MessageBoxImage.Information)
+
+        self.Close()
+        self.parent_window._load_data()
+
+
+# ============================================================================
 # WHERE USED DIALOG
 # ============================================================================
 
@@ -1443,6 +1755,10 @@ class TextNoteTypeManagerWindow(Window):
         MessageBox.Show(
             "Text Note Type Manager\n\n"
             "- Search filters types by name; tick rows (or Select All) to act on them.\n"
+            "- Double-click a cell to edit Text Size / Font / Width Factor, tick "
+            "Bold / Italic, on one type at a time.\n"
+            "- Batch Edit... sets Text Size / Font / Bold / Italic / Width Factor "
+            "on every ticked type at once, instead of one cell at a time.\n"
             "- Rename / Batch Rename / Duplicate / Delete apply to the ticked rows.\n"
             "- IN USE / UNUSED counts come from TextNote instances in the model.\n\n"
             "Dang Quoc Truong - DQT (c) 2026",
@@ -1749,7 +2065,11 @@ class TextNoteTypeManagerWindow(Window):
         btn_batch = self._create_button("Batch Rename", primary)
         btn_batch.Click += self._on_batch_rename
         center_panel.Children.Add(btn_batch)
-        
+
+        btn_batch_edit = self._create_button("Batch Edit...", white)
+        btn_batch_edit.Click += self._on_batch_edit
+        center_panel.Children.Add(btn_batch_edit)
+
         btn_duplicate = self._create_button("Duplicate", orange, white_fg=True)
         btn_duplicate.Click += self._on_duplicate
         center_panel.Children.Add(btn_duplicate)
@@ -1793,8 +2113,9 @@ class TextNoteTypeManagerWindow(Window):
         grid.Margin = Thickness(0, 8, 0, 0)
         
         tips = TextBlock()
-        tips.Text = ("Double-click a cell to edit Text Size / Font / Width Factor, "
-                     "tick Bold / Italic | Use Batch Rename for multiple types")
+        tips.Text = ("Double-click a cell to edit one type, or select several and use "
+                     "Batch Edit... to set Text Size / Font / Bold / Italic / Width "
+                     "Factor on all of them at once | Batch Rename for names")
         tips.FontSize = 10
         tips.Foreground = Config.hex_to_brush(Config.TEXT_LIGHT)
         grid.Children.Add(tips)
@@ -2101,7 +2422,18 @@ class TextNoteTypeManagerWindow(Window):
         
         dialog = BatchRenameDialog(selected, self)
         dialog.ShowDialog()
-    
+
+    def _on_batch_edit(self, sender, args):
+        selected = self._get_selected_items()
+
+        if not selected:
+            MessageBox.Show("Please select at least one type to batch edit!",
+                          "Warning", MessageBoxButton.OK, MessageBoxImage.Warning)
+            return
+
+        dialog = BatchEditPropertiesDialog(selected, self)
+        dialog.ShowDialog()
+
     def _on_duplicate(self, sender, args):
         selected = self._get_selected_items()
         
