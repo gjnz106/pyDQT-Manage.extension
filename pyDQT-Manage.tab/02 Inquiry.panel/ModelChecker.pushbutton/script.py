@@ -1425,32 +1425,39 @@ class RuleEngine:
 class ExcelReporter:
     """Generate an Excel-compatible compliance report.
 
-    Ghi thẳng một file SpreadsheetML ("Excel XML Spreadsheet 2003", đuôi .xml) —
-    KHÔNG còn dùng Microsoft.Office.Interop.Excel. Bản cũ mở một tiến trình Excel
-    THẬT qua COM (`ExcelInterop.ApplicationClass()`) để gõ từng ô, nghĩa là máy
-    chạy Revit BẮT BUỘC phải có Microsoft Excel cài kèm gói Primary Interop
-    Assemblies (PIA) — thiếu MỘT trong hai, `clr.AddReference(
-    'Microsoft.Office.Interop.Excel')` ném ngay "IOException: Could not add
-    reference to assembly..." trước cả khi kịp mở Excel (đúng lỗi chủ dự án gặp,
-    máy Click-to-Run/Microsoft 365 hiện đại thường KHÔNG tự đăng ký PIA kiểu cũ).
-    SpreadsheetML là XML thuần Excel tự nhận diện qua khai báo
-    `<?mso-application progid="Excel.Sheet"?>` — tự viết bằng string formatting
-    nên xuất file được trên MỌI máy có Revit, kể cả máy không cài Excel; chỉ cần
-    Excel ở máy nào đó SAU NÀY để MỞ file ra xem. Đuôi file đổi từ .xlsx sang .xml
-    (xem `_on_export_excel`) vì đó là đuôi DUY NHẤT Excel mở SpreadsheetML mà
-    KHÔNG hiện cảnh báo "khác định dạng với phần mở rộng" — đặt đuôi .xlsx/.xls
-    cho đúng nội dung XML này thì Excel vẫn mở được nhưng luôn hỏi lại trước.
+    Writes a SpreadsheetML file directly ("Excel XML Spreadsheet 2003",
+    .xml extension) — no longer uses Microsoft.Office.Interop.Excel. The
+    old version opened a REAL Excel process over COM
+    (`ExcelInterop.ApplicationClass()`) to type into each cell, which
+    means the machine running Revit MUST have Microsoft Excel installed
+    together with the Primary Interop Assemblies (PIA) - missing either
+    ONE of those, `clr.AddReference('Microsoft.Office.Interop.Excel')`
+    throws "IOException: Could not add reference to assembly..."
+    immediately, before Excel even gets a chance to open (exactly the
+    error the project owner hit - modern Click-to-Run/Microsoft 365
+    installs usually don't register the old-style PIA automatically).
+    SpreadsheetML is plain XML that Excel recognises through the
+    `<?mso-application progid="Excel.Sheet"?>` declaration - hand-built
+    with string formatting here, so the file can be exported from ANY
+    machine with Revit, even one with no Excel installed at all; Excel
+    is only needed on whichever machine opens the file LATER to view
+    it. The file extension changed from .xlsx to .xml (see
+    `_on_export_excel`) because that is the ONLY extension Excel opens
+    SpreadsheetML with WITHOUT showing a "doesn't match the file
+    extension" warning - naming this same XML content .xlsx/.xls still
+    lets Excel open it, but it always asks to confirm first.
     """
 
     def __init__(self, doc):
         self.doc = doc
 
     # ------------------------------------------------------------------
-    # XML helpers — không polyfill thư viện ngoài, tự ráp chuỗi vì
-    # SpreadsheetML chỉ cần đúng vài thẻ <Workbook>/<Worksheet>/<Row>/<Cell>.
+    # XML helpers - no external library needed here, hand-assembled
+    # instead since SpreadsheetML only needs a handful of correct
+    # <Workbook>/<Worksheet>/<Row>/<Cell> tags.
     # ------------------------------------------------------------------
     def _esc(self, value):
-        """Escape & < > cho text XML — bắt buộc, message/tên rule là chữ tự do."""
+        """Escape & < > for XML text - required since a message/rule name is free-form text."""
         text = u"" if value is None else unicode(value)
         return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
@@ -1458,7 +1465,7 @@ class ExcelReporter:
         return "#{0:02X}{1:02X}{2:02X}".format(r, g, b)
 
     def _cell(self, value, style_id=None, merge_across=None, is_number=False):
-        """Một <Cell>. `value` là kiểu Python thường (str/int) — hàm tự escape."""
+        """One <Cell>. `value` is a plain Python type (str/int) - this function escapes it."""
         attrs = ""
         if style_id:
             attrs += ' ss:StyleID="{}"'.format(style_id)
@@ -1475,10 +1482,11 @@ class ExcelReporter:
         return "".join('<Column ss:Width="{}"/>'.format(w) for w in widths)
 
     def _build_styles(self):
-        """Bộ style DÙNG CHUNG cho cả ba sheet — cùng bảng màu bản Interop cũ,
-        chỉ đổi từ OLE color (số nguyên) sang mã hex mà SpreadsheetML hiểu."""
+        """Style set SHARED across all three sheets - same colour palette
+        as the old Interop version, just converted from OLE colour (an
+        integer) to the hex code SpreadsheetML understands."""
         tan = self._rgb_hex(240, 204, 136)        # DQT branding
-        tan_light = self._rgb_hex(254, 248, 231)  # nền tiêu đề khối "RESULTS SUMMARY"
+        tan_light = self._rgb_hex(254, 248, 231)  # header background for the "RESULTS SUMMARY" block
         red_bg = self._rgb_hex(255, 205, 210)
         green_txt = self._rgb_hex(46, 125, 50)
         red_txt = self._rgb_hex(198, 40, 40)
@@ -1512,7 +1520,7 @@ class ExcelReporter:
         return "".join(parts)
 
     def generate_report(self, checkset, results, filepath):
-        """Ghi báo cáo đầy đủ ra `filepath` dưới dạng SpreadsheetML."""
+        """Write the full report to `filepath` as SpreadsheetML."""
         xml = (
             u'<?xml version="1.0" encoding="UTF-8"?>\n'
             u'<?mso-application progid="Excel.Sheet"?>\n'
@@ -1532,9 +1540,9 @@ class ExcelReporter:
         return True
 
     def _sheet_summary(self, checkset, results):
-        """Sheet "Summary" — tiêu đề + thông tin project + thống kê pass/fail."""
+        """Sheet "Summary" - title + project info + pass/fail statistics."""
         rows = [self._row([self._cell("MODEL CHECKER REPORT", "sTitle", merge_across=3)]),
-                self._row([])]  # dòng 2 để trống, giữ đúng bố cục bản cũ (info bắt đầu ở dòng 3)
+                self._row([])]  # row 2 left blank, matching the old layout (info starts on row 3)
 
         info = [
             ("Project Name", self.doc.ProjectInformation.Name or "N/A"),
@@ -1549,7 +1557,7 @@ class ExcelReporter:
         for label, value in info:
             rows.append(self._row([self._cell(label, "sLabel"), self._cell(value)]))
 
-        rows.append(self._row([]))  # dòng trống trước khối thống kê
+        rows.append(self._row([]))  # blank row before the statistics block
 
         total = len(results)
         passed = len([r for r in results if r.status == "pass"])
@@ -1558,8 +1566,10 @@ class ExcelReporter:
         errors = len([r for r in results if r.status == "error"])
         skipped = len([r for r in results if r.status == "skipped"])
 
-        # Bản cũ TÔ MÀU cả 4 cột A:D nhưng KHÔNG gộp ô — 4 <Cell> cùng style,
-        # chỉ ô đầu có chữ, mới đúng hình dạng gốc (khác dòng tiêu đề có gộp).
+        # The old version COLOURED all 4 columns A:D but did NOT merge the
+        # cells - 4 <Cell> elements sharing one style, only the first
+        # carrying text, to match the original shape exactly (unlike the
+        # title row above, which does merge).
         rows.append(self._row([
             self._cell("RESULTS SUMMARY", "sSection"),
             self._cell("", "sSection"),
@@ -1589,8 +1599,9 @@ class ExcelReporter:
         )
 
     def _sheet_details(self, results):
-        """Sheet "Detailed Results" — một dòng mỗi rule, chi tiết phụ (nếu có)
-        xuống dòng riêng ngay bên dưới, y hệt bố cục sub-row của bản cũ."""
+        """Sheet "Detailed Results" - one row per rule, with any extra
+        detail lines directly beneath it, matching the old version's
+        sub-row layout exactly."""
         headers = ["Rule ID", "Rule Name", "Category", "Severity", "Status", "Message"]
         rows = [self._row([self._cell(h, "sHeaderTan") for h in headers])]
 
@@ -1621,7 +1632,7 @@ class ExcelReporter:
         )
 
     def _sheet_failed(self, results):
-        """Sheet "Failed Items" — chỉ liệt kê rule có status 'fail'."""
+        """Sheet "Failed Items" - lists only rules with status 'fail'."""
         headers = ["Rule ID", "Rule Name", "Severity", "Message", "Element IDs"]
         rows = [self._row([self._cell(h, "sHeaderRed") for h in headers])]
 
@@ -3008,11 +3019,12 @@ class ModelCheckerWindow:
         from System.Windows.Forms import SaveFileDialog, DialogResult
 
         dlg = SaveFileDialog()
-        # .xml, không phải .xlsx: `ExcelReporter` ghi SpreadsheetML (XML) chứ
-        # không còn dựng file .xlsx thật qua Excel COM — xem doc-comment
-        # `ExcelReporter`. Excel mở .xml có khai báo progid="Excel.Sheet" trực
-        # tiếp mà KHÔNG cảnh báo "khác định dạng"; đặt đuôi .xlsx cho đúng nội
-        # dung này thì Excel vẫn mở được nhưng luôn hỏi lại trước.
+        # .xml, not .xlsx: `ExcelReporter` writes SpreadsheetML (XML), no
+        # longer building a real .xlsx file through Excel COM - see the
+        # `ExcelReporter` doc-comment. Excel opens a .xml file declaring
+        # progid="Excel.Sheet" directly WITHOUT a "doesn't match the
+        # extension" warning; naming this same content .xlsx still lets
+        # Excel open it, but it always asks to confirm first.
         dlg.Filter = "Excel XML Spreadsheet (*.xml)|*.xml"
         project_name = doc.ProjectInformation.Name or "Untitled"
         checkset_name = str(self.cmbCheckset.SelectedItem or "default")
