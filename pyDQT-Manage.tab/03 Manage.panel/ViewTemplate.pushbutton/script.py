@@ -126,14 +126,10 @@ class ViewTemplateItem(INotifyPropertyChanged):
         except:
             self._view_type = "Unknown"
         
-        # Get scale
-        try:
-            scale_param = view_template.get_Parameter(DB.BuiltInParameter.VIEW_SCALE_PULLDOWN_METRIC)
-            if scale_param and scale_param.HasValue:
-                self._scale = scale_param.AsValueString()
-            else:
-                self._scale = "N/A"
-        except:
+        # Get scale - _view_scale_str resolves a Custom scale to its real
+        # ratio (view.Scale) instead of the literal word "Custom".
+        self._scale = _view_scale_str(view_template)
+        if self._scale == "-":
             self._scale = "N/A"
         
         self._usage_count = 0
@@ -278,22 +274,34 @@ class ViewInstanceDetail(object):
 
 def _view_scale_str(view):
     """Best-effort scale label ("1:100") - "-" for views with no
-    meaningful scale (schedules, some 3D/legend views set to Fit)."""
+    meaningful scale (schedules, some 3D/legend views set to Fit).
+
+    The View Scale pulldown parameter returns the literal word "Custom"
+    for a custom-scaled view instead of its actual ratio - that ratio
+    only lives in the separate numeric Scale property (Properties palette
+    calls it "Scale Value"), so Custom is treated as "no usable label
+    yet" and the numeric Scale is read instead."""
+    pulldown_val = None
     try:
         param = view.get_Parameter(DB.BuiltInParameter.VIEW_SCALE_PULLDOWN_METRIC)
         if param and param.HasValue:
             val = param.AsValueString()
             if val:
-                return val
+                pulldown_val = val
     except:
         pass
+
+    if pulldown_val and pulldown_val.strip().lower() != "custom":
+        return pulldown_val
+
     try:
         scale = view.Scale
         if scale and scale > 0:
             return "1:{}".format(scale)
     except:
         pass
-    return "-"
+
+    return pulldown_val or "-"
 
 
 def _schedule_sheet_id(ssi):
