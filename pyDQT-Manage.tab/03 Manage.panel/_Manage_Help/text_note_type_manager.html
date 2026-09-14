@@ -33,6 +33,12 @@
     <ol class="steps">
       <li>Search filters types by name; tick rows (or Select All) to act on
         them.</li>
+      <li>Double-click <b>Text Size</b> / <b>Font</b> / <b>Width Factor</b>
+        to edit one type in place, or tick <b>Bold</b> / <b>Italic</b>
+        directly in the grid.</li>
+      <li><b>Batch Edit...</b> sets Text Size, Font, Bold, Italic and/or
+        Width Factor on every ticked type at once, instead of one cell at
+        a time.</li>
       <li><b>Rename</b> / <b>Batch Rename</b> / <b>Duplicate</b> /
         <b>Delete</b> apply to the ticked rows.</li>
     </ol>
@@ -44,6 +50,13 @@
       IN USE / UNUSED counts come from TextNote instances in the model, not
       from the type list alone - a type can look unused here even if it's
       referenced by a schedule or tag that doesn't place a TextNote.
+    </div>
+    <div class="box fixed">
+      <b>Batch Edit...</b> is new - tick several types, tick which of Text
+      Size / Font / Bold / Italic / Width Factor to change and to what, and
+      Apply sets all of them in one transaction. A type missing one of the
+      ticked parameters is skipped for that field only, not treated as a
+      failure.
     </div>
   </div>
 

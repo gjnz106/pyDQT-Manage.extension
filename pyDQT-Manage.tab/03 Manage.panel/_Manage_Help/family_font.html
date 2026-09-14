@@ -44,6 +44,8 @@
       <li>Pick a <b>Target Font</b> (and optionally tick <b>Also set Width
         Factor</b>), and, after scanning, an <b>Only replace current
         font</b> filter to narrow the change.</li>
+      <li>Optionally <b>Ctrl/Shift-click specific rows</b> in the preview
+        list to narrow Apply down to just those families.</li>
       <li><b>Apply Font Change</b> opens, edits and reloads each family in
         the background.</li>
     </ol>
@@ -64,6 +66,14 @@
       Every step is logged to <code>%USERPROFILE%/DQT_FamilyFont.log</code>,
       so a run that stops partway can be diagnosed from the last line
       written.
+    </div>
+    <div class="box fixed">
+      Selecting specific rows in the preview list before <b>Apply Font
+      Change</b> now actually narrows the change to just those families -
+      Apply used to always cover every family in the ticked categories
+      regardless of which rows were highlighted, since the row selection
+      was never read. With nothing selected in the list, Apply still
+      covers every family in the ticked categories, same as before.
     </div>
   </div>
 

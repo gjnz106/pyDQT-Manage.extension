@@ -381,9 +381,10 @@ class CategoryRow(object):
 
 
 class FamilyRow(object):
-    def __init__(self, name, category):
+    def __init__(self, name, category, eid=None):
         self.name = name
         self.category = category
+        self.eid = eid  # links back to the scanned target for Apply
         self.types_desc = "-"
         self.fonts_found = "-"
         self.widths_found = "-"
@@ -698,7 +699,7 @@ class FamilyFontWindow(WPFWindow):
 
         for i, t in enumerate(targets):
             print("  [{}/{}] {}".format(i + 1, len(targets), t["name"]))
-            row = FamilyRow(t["name"], t["category"])
+            row = FamilyRow(t["name"], t["category"], eid=t["eid"])
             if not t["editable"]:
                 row.status = "skipped: not editable"
                 self.family_rows.Add(row)
@@ -747,7 +748,8 @@ class FamilyFontWindow(WPFWindow):
                               for k in sorted(kinds_seen))
         self.txtSummary.Text = (
             "Scanned {} family(ies): {} font-bearing type(s){}, {} distinct "
-            "font(s) found{}.".format(
+            "font(s) found{}. Ctrl/Shift-click rows above to Apply to only "
+            "those families.".format(
                 len(targets), total_types,
                 " ({})".format(kind_note) if kind_note else "",
                 len(fonts_seen),
@@ -770,9 +772,25 @@ class FamilyFontWindow(WPFWindow):
                         title="DQT - Family Font Manager")
             return
 
-        targets = self._selected_targets()
+        # Rows highlighted in the preview grid (after Scan) narrow Apply
+        # down to exactly those families - Ctrl/Shift-click to pick a few
+        # out of a scan instead of untangling category ticks and the
+        # current-font filter to exclude everything else. With nothing
+        # highlighted there, Apply still covers every family in the
+        # ticked categories, same as before this existed.
+        selected_rows = list(self.dataGridFamilies.SelectedItems)
+        if selected_rows:
+            selected_eids = set(r.eid for r in selected_rows if r.eid is not None)
+            targets = [t for t in self.family_rows_all if t["eid"] in selected_eids]
+            scope_desc = "{} selected family(ies) in the list".format(len(targets))
+        else:
+            targets = self._selected_targets()
+            scope_desc = "{} family(ies) in {} selected category(ies)".format(
+                len(targets), len(self._selected_categories()))
+
         if not targets:
-            forms.alert("No categories selected - tick at least one category first.",
+            forms.alert("No categories selected - tick at least one category first, "
+                        "or select specific families in the list.",
                         title="DQT - Family Font Manager")
             return
 
@@ -789,15 +807,14 @@ class FamilyFontWindow(WPFWindow):
         filter_note = (' (only types currently using "{}")'.format(current_filter)
                        if current_filter else "")
         msg = (
-            "{} across {} family(ies) in {} selected category(ies){}.\n\n"
+            "{} across {}{}.\n\n"
             "This covers Text Note Types AND the Label types used by tags, "
             "title blocks and section heads.\n\n"
             "Each family is briefly opened and reloaded in the background - "
             "Revit's screen may flicker between families, this needs no "
             "interaction.\n\n"
             "SAVE the model before continuing.\n\nProceed?"
-        ).format(" and ".join(changes), len(targets),
-                 len(self._selected_categories()), filter_note)
+        ).format(" and ".join(changes), scope_desc, filter_note)
 
         if not forms.alert(msg, title="DQT - Family Font Manager", ok=True, cancel=True):
             return
@@ -820,6 +837,9 @@ class FamilyFontWindow(WPFWindow):
             "Label types used by tags, title blocks and section heads.\n"
             "- Pick a Target Font (and optionally a Width Factor) and, after scanning, "
             "an Only replace current font filter to narrow the change.\n"
+            "- Ctrl/Shift-click specific rows in the list to apply only to those "
+            "families - with nothing selected there, Apply covers every family in "
+            "the ticked categories instead.\n"
             "- Apply Font Change opens, edits and reloads each family in the background - "
             "save the model first.\n\n"
             "Dang Quoc Truong - DQT (c) 2026",
