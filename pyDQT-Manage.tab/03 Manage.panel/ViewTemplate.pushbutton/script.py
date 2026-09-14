@@ -126,11 +126,11 @@ class ViewTemplateItem(INotifyPropertyChanged):
         except:
             self._view_type = "Unknown"
         
-        # Get scale - _view_scale_str resolves a Custom scale to its real
-        # ratio (view.Scale) instead of the literal word "Custom".
-        self._scale = _view_scale_str(view_template)
-        if self._scale == "-":
-            self._scale = "N/A"
+        # Get scale - "Varies" when the template doesn't actually control
+        # View Scale (see _template_scale_str), otherwise the real ratio
+        # (_view_scale_str resolves a Custom scale instead of showing the
+        # literal word "Custom").
+        self._scale = _template_scale_str(view_template)
         
         self._usage_count = 0
         self._usage_percentage = 0.0
@@ -302,6 +302,35 @@ def _view_scale_str(view):
         pass
 
     return pulldown_val or "-"
+
+
+def _template_scale_str(view_template):
+    """The Scale label for a View Template's own row on the main grid.
+
+    A template only forces the same scale on every view using it when
+    View Scale is one of its actually-controlled ("included") parameters
+    - GetNonControlledTemplateParameterIds() lists the ones that are NOT
+    controlled, i.e. left up to each view. When View Scale is in that
+    list, the template's own Scale property is just whatever it happens
+    to be set to (often stale) and every view can differ, so "Varies" is
+    the honest label instead of one misleading number."""
+    try:
+        scale_param = view_template.get_Parameter(DB.BuiltInParameter.VIEW_SCALE_PULLDOWN_METRIC)
+    except:
+        scale_param = None
+    if scale_param is None:
+        return "N/A"
+
+    try:
+        param_id_int = _eid_int(scale_param.Id)
+        for pid in view_template.GetNonControlledTemplateParameterIds():
+            if _eid_int(pid) == param_id_int:
+                return "Varies"
+    except:
+        pass
+
+    scale_str = _view_scale_str(view_template)
+    return scale_str if scale_str != "-" else "N/A"
 
 
 def _schedule_sheet_id(ssi):
@@ -1410,7 +1439,10 @@ class ViewTemplateManagerWindow(Window):
             "- IN USE / UNUSED counts come from how many views each template is applied to.\n"
             "- Select one template and click Detail (or double-click its row) to see\n"
             "  exactly which views use it - View Name / View Type / Scale / Sheet - and\n"
-            "  open any of them straight from that list.\n\n"
+            "  open any of them straight from that list.\n"
+            "- A template's own Scale column shows \"Varies\" when it doesn't actually\n"
+            "  control View Scale - each view using it can be a different scale, which\n"
+            "  Detail will show per view.\n\n"
             "Dang Quoc Truong - DQT (c) 2026",
             "Help", MessageBoxButton.OK, MessageBoxImage.Information)
     

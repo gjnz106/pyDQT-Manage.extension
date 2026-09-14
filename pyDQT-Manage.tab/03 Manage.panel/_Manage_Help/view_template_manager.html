@@ -68,6 +68,15 @@
       calls "Scale Value", falling back to the word "Custom" only if a
       view has no numeric scale to read.
     </div>
+    <div class="box fixed">
+      A template's own Scale column on the main grid used to show a
+      single number even when the template doesn't actually control View
+      Scale - in that case each view using it can be a completely
+      different scale, and the number shown was just whatever the
+      template's own (often stale) Scale property happened to be. It now
+      shows <b>Varies</b> whenever View Scale isn't one of the template's
+      controlled parameters; open Detail to see each view's real scale.
+    </div>
   </div>
 
   <div class="pagenav">
