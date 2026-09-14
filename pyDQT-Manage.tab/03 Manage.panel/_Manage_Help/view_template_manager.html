@@ -35,6 +35,10 @@
         type.</li>
       <li><b>Rename</b> / <b>Batch Rename</b> / <b>Duplicate</b> /
         <b>Delete</b> apply to the selected rows.</li>
+      <li>Select one template and click <b>Detail</b> (or double-click its
+        row) to see exactly which views use it - View Name, View Type,
+        Scale and Sheet - and double-click a view there (or <b>Open
+        View</b>) to switch to it.</li>
     </ol>
   </div>
 
@@ -44,6 +48,17 @@
       Deleting a template that's still applied to views resets those views
       to no template rather than failing - check the In Use count first if
       that matters for the project.
+    </div>
+    <div class="box tip">
+      The Detail dialog's Sheet column covers both ordinary viewports and
+      schedules placed on a sheet; a view shows "Not on Sheet" when it
+      isn't placed anywhere yet.
+    </div>
+    <div class="box fixed">
+      The Usage / Usage % columns only ever showed a count - there was no
+      way to see which views were actually using a template without
+      searching the model by hand. Detail now lists them directly, with a
+      one-click way to open any of them.
     </div>
   </div>
 

@@ -41,6 +41,7 @@ import os
 from pyrevit import revit, DB, forms
 
 doc = revit.doc
+uidoc = revit.uidoc
 
 
 def _open_help_page(html_filename):
@@ -256,6 +257,132 @@ def calculate_viewtemplate_usage(doc, template_items):
         print("Error calculating view template usage: {}".format(str(ex)))
     
     return total_views_with_template
+
+
+# ============================================================================
+# DETAIL: VIEWS USING THIS TEMPLATE
+# ============================================================================
+
+class ViewInstanceDetail(object):
+    """One row in the Detail dialog - a single view that has the selected
+    View Template applied, with the four columns the user actually wants
+    to see (Usage / Usage % on the main grid is only ever a count)."""
+
+    def __init__(self):
+        self.view_name = "-"
+        self.view_type = "-"
+        self.scale = "-"
+        self.sheet = "-"
+        self.element_id = None  # the View's own ElementId, for Open View
+
+
+def _view_scale_str(view):
+    """Best-effort scale label ("1:100") - "-" for views with no
+    meaningful scale (schedules, some 3D/legend views set to Fit)."""
+    try:
+        param = view.get_Parameter(DB.BuiltInParameter.VIEW_SCALE_PULLDOWN_METRIC)
+        if param and param.HasValue:
+            val = param.AsValueString()
+            if val:
+                return val
+    except:
+        pass
+    try:
+        scale = view.Scale
+        if scale and scale > 0:
+            return "1:{}".format(scale)
+    except:
+        pass
+    return "-"
+
+
+def _schedule_sheet_id(ssi):
+    """A ScheduleSheetInstance's own sheet - tried under both property
+    names Revit has used, defensively, same as this file's other
+    cross-version lookups (see _eid_int)."""
+    for attr in ("OwnerViewId", "SheetId"):
+        try:
+            val = getattr(ssi, attr)
+            if val:
+                return val
+        except:
+            pass
+    return None
+
+
+def _build_view_to_sheet_map(doc):
+    """Map a view's ElementId (int) -> the ViewSheet it is placed on.
+    Ordinary views/legends are placed via a Viewport; schedules use a
+    separate ScheduleSheetInstance element instead, so both element
+    types are collected here."""
+    mapping = {}
+    try:
+        for vp in DB.FilteredElementCollector(doc).OfClass(DB.Viewport):
+            try:
+                sheet = doc.GetElement(vp.SheetId)
+                if sheet:
+                    mapping[_eid_int(vp.ViewId)] = sheet
+            except:
+                pass
+    except:
+        pass
+    try:
+        for ssi in DB.FilteredElementCollector(doc).OfClass(DB.ScheduleSheetInstance):
+            try:
+                sheet_id = _schedule_sheet_id(ssi)
+                sheet = doc.GetElement(sheet_id) if sheet_id else None
+                if sheet:
+                    mapping[_eid_int(ssi.ScheduleId)] = sheet
+            except:
+                pass
+    except:
+        pass
+    return mapping
+
+
+def _gather_views_for_template(doc, template_id_int):
+    """Every non-template view whose ViewTemplateId matches the given
+    template, sorted by name - the exact list the Detail dialog shows."""
+    view_to_sheet = _build_view_to_sheet_map(doc)
+    rows = []
+    try:
+        collector = DB.FilteredElementCollector(doc).OfClass(DB.View)
+        for view in collector:
+            try:
+                if view.IsTemplate:
+                    continue
+                template_id = view.ViewTemplateId
+                if template_id is None:
+                    continue
+                if _eid_int(template_id) != template_id_int:
+                    continue
+
+                row = ViewInstanceDetail()
+                row.view_name = view.Name
+                try:
+                    row.view_type = str(view.ViewType)
+                except:
+                    row.view_type = "Unknown"
+                row.scale = _view_scale_str(view)
+
+                sheet = view_to_sheet.get(_eid_int(view.Id))
+                if sheet is not None:
+                    try:
+                        row.sheet = "{} - {}".format(sheet.SheetNumber, sheet.Name)
+                    except:
+                        row.sheet = "Placed on Sheet"
+                else:
+                    row.sheet = "Not on Sheet"
+
+                row.element_id = view.Id
+                rows.append(row)
+            except:
+                pass
+    except Exception as ex:
+        print("Error gathering views for template: {}".format(str(ex)))
+
+    rows.sort(key=lambda r: r.view_name)
+    return rows
 
 
 # ============================================================================
@@ -1001,6 +1128,168 @@ class BatchRenameDialog(Window):
 
 
 # ============================================================================
+# DETAIL DIALOG
+# ============================================================================
+
+class ViewTemplateDetailDialog(Window):
+    """Every view using the selected View Template - View Name / View
+    Type / Scale / Sheet. Double-click a row (or Open View) switches the
+    active view to it, the same drill-in this suite's other Detail
+    dialogs already offer for their own kind of "usage"."""
+
+    def __init__(self, template_item, rows, uidoc):
+        self.template_item = template_item
+        self.rows = rows
+        self.uidoc = uidoc
+        self.data_grid = None
+
+        self._build_ui()
+
+    def _build_ui(self):
+        self.Title = "View Template Detail"
+        self.Width = 720
+        self.Height = 520
+        self.WindowStartupLocation = System.Windows.WindowStartupLocation.CenterScreen
+        self.Background = _hex_to_brush(Config.BACKGROUND_COLOR)
+
+        main_grid = WPFGrid()
+        main_grid.Margin = Thickness(15)
+        main_grid.RowDefinitions.Add(RowDefinition(Height=GridLength(1, GridUnitType.Auto)))
+        main_grid.RowDefinitions.Add(RowDefinition(Height=GridLength(1, GridUnitType.Star)))
+        main_grid.RowDefinitions.Add(RowDefinition(Height=GridLength(1, GridUnitType.Auto)))
+
+        header = self._create_header()
+        WPFGrid.SetRow(header, 0)
+        main_grid.Children.Add(header)
+
+        self.data_grid = self._create_datagrid()
+        WPFGrid.SetRow(self.data_grid, 1)
+        main_grid.Children.Add(self.data_grid)
+
+        buttons = self._create_buttons()
+        WPFGrid.SetRow(buttons, 2)
+        main_grid.Children.Add(buttons)
+
+        self.Content = main_grid
+
+    def _create_header(self):
+        border = Border()
+        border.Background = _hex_to_brush(Config.PRIMARY_COLOR)
+        border.CornerRadius = System.Windows.CornerRadius(4)
+        border.Padding = Thickness(10, 8, 10, 8)
+        border.Margin = Thickness(0, 0, 0, 10)
+
+        panel = StackPanel()
+
+        title = TextBlock()
+        title.Text = "Detail - {}".format(self.template_item.name)
+        title.FontSize = 15
+        title.FontWeight = FontWeights.Bold
+        panel.Children.Add(title)
+
+        subtitle = TextBlock()
+        subtitle.Text = ("{} view(s) use this template. Double-click a row, "
+                          "or select one and Open View.".format(len(self.rows)))
+        subtitle.FontSize = 10
+        subtitle.Foreground = _hex_to_brush(Config.TEXT_DARK)
+        subtitle.Margin = Thickness(0, 2, 0, 0)
+        subtitle.TextWrapping = System.Windows.TextWrapping.Wrap
+        panel.Children.Add(subtitle)
+
+        border.Child = panel
+        return border
+
+    def _create_datagrid(self):
+        grid = DataGrid()
+        grid.AutoGenerateColumns = False
+        grid.IsReadOnly = True
+        grid.SelectionMode = System.Windows.Controls.DataGridSelectionMode.Extended
+        grid.SelectionUnit = System.Windows.Controls.DataGridSelectionUnit.FullRow
+        grid.CanUserSortColumns = True
+        grid.Background = _hex_to_brush(Config.WHITE)
+        grid.BorderBrush = _hex_to_brush(Config.BORDER_COLOR)
+        grid.GridLinesVisibility = System.Windows.Controls.DataGridGridLinesVisibility.Horizontal
+        grid.HorizontalGridLinesBrush = _hex_to_brush(Config.GRID_LINE_COLOR)
+        grid.RowBackground = _hex_to_brush(Config.WHITE)
+        grid.AlternatingRowBackground = _hex_to_brush(Config.ROW_ALT_COLOR)
+        grid.Margin = Thickness(0, 0, 0, 10)
+
+        col_view = DataGridTextColumn()
+        col_view.Header = "View Name"
+        col_view.Binding = Binding("view_name")
+        col_view.Width = DataGridLength(280)
+        grid.Columns.Add(col_view)
+
+        col_type = DataGridTextColumn()
+        col_type.Header = "View Type"
+        col_type.Binding = Binding("view_type")
+        col_type.Width = DataGridLength(110)
+        grid.Columns.Add(col_type)
+
+        col_scale = DataGridTextColumn()
+        col_scale.Header = "Scale"
+        col_scale.Binding = Binding("scale")
+        col_scale.Width = DataGridLength(80)
+        grid.Columns.Add(col_scale)
+
+        col_sheet = DataGridTextColumn()
+        col_sheet.Header = "Sheet"
+        col_sheet.Binding = Binding("sheet")
+        col_sheet.Width = DataGridLength(200)
+        grid.Columns.Add(col_sheet)
+
+        grid.ItemsSource = ObservableCollection[object](self.rows)
+        grid.MouseDoubleClick += self._on_double_click
+
+        return grid
+
+    def _create_buttons(self):
+        panel = StackPanel()
+        panel.Orientation = Orientation.Horizontal
+        panel.HorizontalAlignment = HorizontalAlignment.Right
+
+        btn_open = Button()
+        btn_open.Content = "Open View"
+        btn_open.Padding = Thickness(10, 5, 10, 5)
+        btn_open.Margin = Thickness(0, 0, 8, 0)
+        btn_open.Background = _hex_to_brush(Config.PRIMARY_COLOR)
+        btn_open.Click += self._on_open_view
+        panel.Children.Add(btn_open)
+
+        btn_close = Button()
+        btn_close.Content = "Close"
+        btn_close.Padding = Thickness(15, 5, 15, 5)
+        btn_close.Background = _hex_to_brush(Config.WHITE)
+        btn_close.Click += lambda s, e: self.Close()
+        panel.Children.Add(btn_close)
+
+        return panel
+
+    def _open_view(self, row):
+        if row is None or row.element_id is None:
+            return
+        view = doc.GetElement(row.element_id)
+        if view is None:
+            return
+        try:
+            self.uidoc.RequestViewChange(view)
+        except Exception as ex:
+            MessageBox.Show("Could not open this view:\n\n{}".format(str(ex)),
+                          "Error", MessageBoxButton.OK, MessageBoxImage.Error)
+
+    def _on_double_click(self, sender, args):
+        self._open_view(self.data_grid.SelectedItem)
+
+    def _on_open_view(self, sender, args):
+        selected = list(self.data_grid.SelectedItems)
+        if len(selected) != 1:
+            MessageBox.Show("Select exactly one view to open.",
+                          "Detail", MessageBoxButton.OK, MessageBoxImage.Warning)
+            return
+        self._open_view(selected[0])
+
+
+# ============================================================================
 # MAIN WINDOW
 # ============================================================================
 
@@ -1076,7 +1365,7 @@ class ViewTemplateManagerWindow(Window):
         panel = StackPanel()
 
         title = TextBlock()
-        title.Text = "View Template Manager v1.1"
+        title.Text = "View Template Manager v1.2"
         title.FontSize = 17
         title.FontWeight = FontWeights.Bold
         panel.Children.Add(title)
@@ -1110,7 +1399,10 @@ class ViewTemplateManagerWindow(Window):
             "View Template Manager\n\n"
             "- Search filters by name; use the dropdown to narrow by view type.\n"
             "- Rename / Batch Rename / Duplicate / Delete apply to the selected rows.\n"
-            "- IN USE / UNUSED counts come from how many views each template is applied to.\n\n"
+            "- IN USE / UNUSED counts come from how many views each template is applied to.\n"
+            "- Select one template and click Detail (or double-click its row) to see\n"
+            "  exactly which views use it - View Name / View Type / Scale / Sheet - and\n"
+            "  open any of them straight from that list.\n\n"
             "Dang Quoc Truong - DQT (c) 2026",
             "Help", MessageBoxButton.OK, MessageBoxImage.Information)
     
@@ -1341,7 +1633,8 @@ class ViewTemplateManagerWindow(Window):
         grid.Columns.Add(col_id)
         
         grid.SelectionChanged += self._on_selection_changed
-        
+        grid.MouseDoubleClick += self._on_datagrid_double_click
+
         return grid
     
     def _create_action_buttons(self):
@@ -1358,7 +1651,11 @@ class ViewTemplateManagerWindow(Window):
         center_panel = StackPanel()
         center_panel.Orientation = Orientation.Horizontal
         center_panel.HorizontalAlignment = HorizontalAlignment.Center
-        
+
+        btn_detail = self._create_button("Detail", Config.PRIMARY_COLOR)
+        btn_detail.Click += self._on_detail
+        center_panel.Children.Add(btn_detail)
+
         btn_rename = self._create_button("Rename", Config.PRIMARY_COLOR)
         btn_rename.Click += self._on_rename
         center_panel.Children.Add(btn_rename)
@@ -1406,7 +1703,9 @@ class ViewTemplateManagerWindow(Window):
         grid.Margin = Thickness(0, 8, 0, 0)
         
         tips = TextBlock()
-        tips.Text = "Ctrl+Click / Shift+Click to select multiple | Only UNUSED templates can be deleted | Use Batch Rename for multiple templates"
+        tips.Text = ("Ctrl+Click / Shift+Click to select multiple | Only UNUSED templates can be deleted | "
+                     "Use Batch Rename for multiple templates | Select one and click Detail (or double-click "
+                     "its row) to see which views use it and open one")
         tips.FontSize = 10
         tips.Foreground = _hex_to_brush(Config.TEXT_LIGHT)
         grid.Children.Add(tips)
@@ -1571,6 +1870,31 @@ class ViewTemplateManagerWindow(Window):
         self._load_data()
         MessageBox.Show("Data refreshed!", "Info", MessageBoxButton.OK, MessageBoxImage.Information)
     
+    def _on_detail(self, sender, args):
+        selected = self._get_selected_items()
+
+        if not selected:
+            MessageBox.Show("Please select one template to see its Detail!",
+                          "Warning", MessageBoxButton.OK, MessageBoxImage.Warning)
+            return
+
+        if len(selected) > 1:
+            MessageBox.Show("Please select only ONE template to see its Detail!",
+                          "Warning", MessageBoxButton.OK, MessageBoxImage.Warning)
+            return
+
+        self._show_detail(selected[0])
+
+    def _show_detail(self, item):
+        rows = _gather_views_for_template(doc, item.id)
+        dialog = ViewTemplateDetailDialog(item, rows, uidoc)
+        dialog.ShowDialog()
+
+    def _on_datagrid_double_click(self, sender, args):
+        if self.data_grid.SelectedItems.Count != 1:
+            return
+        self._show_detail(self.data_grid.SelectedItem)
+
     def _on_rename(self, sender, args):
         selected = self._get_selected_items()
         
