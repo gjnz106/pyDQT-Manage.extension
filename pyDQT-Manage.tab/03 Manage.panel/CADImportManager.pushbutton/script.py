@@ -20,6 +20,7 @@ from pyrevit.forms import WPFWindow
 from pyrevit.compat import get_elementid_value_func
 from Autodesk.Revit.DB import *
 from System.Collections.Generic import List
+from System.Windows import Visibility
 import codecs
 import datetime
 
@@ -256,6 +257,32 @@ def get_cad_imports(doc):
     return items
 
 
+def _get_closed_worksets(doc):
+    """Names of user worksets that are NOT open in this session.
+
+    This is the actual answer to "ACC Insight finds a CAD import this
+    tool doesn't": Insight's Model Analytics reads the .rvt file itself
+    server-side and always sees every workset, but a live Revit/pyRevit
+    session never loads a closed workset's elements into the document at
+    all - FilteredElementCollector has nothing to find there, no matter
+    how this tool queries it. Reopening the model with every workset open
+    is the only way to make those elements visible here too. Returns an
+    empty list for a non-workshared model (nothing to be closed)."""
+    if not doc.IsWorkshared:
+        return []
+    closed = []
+    try:
+        for ws in FilteredWorksetCollector(doc).OfKind(WorksetKind.UserWorkset):
+            try:
+                if not ws.IsOpen:
+                    closed.append(ws.Name)
+            except:
+                continue
+    except:
+        pass
+    return sorted(closed)
+
+
 # ============================================================================
 # XAML
 # ============================================================================
@@ -263,11 +290,12 @@ MAIN_XAML = """
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="CAD Import Manager - DQT"
-        Height="650" Width="1190"
+        Height="680" Width="1190"
         WindowStartupLocation="CenterScreen"
         Background="#FEF8E7">
     <Grid Margin="12">
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
@@ -287,8 +315,14 @@ MAIN_XAML = """
             </Grid>
         </Border>
 
+        <!-- Closed-worksets warning - hidden unless this session actually has some closed -->
+        <Border x:Name="warningBanner" Grid.Row="1" Background="#FFF3CD" BorderBrush="#E5B85C" BorderThickness="1"
+                CornerRadius="4" Padding="10,6" Margin="0,0,0,10" Visibility="Collapsed">
+            <TextBlock x:Name="txtWarning" FontSize="10" Foreground="#5D4E37" TextWrapping="Wrap"/>
+        </Border>
+
         <!-- Summary cards -->
-        <Grid Grid.Row="1" Margin="0,0,0,10">
+        <Grid Grid.Row="2" Margin="0,0,0,10">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="*"/>
@@ -310,7 +344,7 @@ MAIN_XAML = """
         </Grid>
 
         <!-- Content -->
-        <Grid Grid.Row="2">
+        <Grid Grid.Row="3">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="170"/>
                 <ColumnDefinition Width="*"/>
@@ -352,7 +386,7 @@ MAIN_XAML = """
         </Grid>
 
         <!-- Action Buttons -->
-        <Border Grid.Row="3" Background="White" BorderBrush="#D4B87A" BorderThickness="1" CornerRadius="4" Padding="8" Margin="0,10,0,0">
+        <Border Grid.Row="4" Background="White" BorderBrush="#D4B87A" BorderThickness="1" CornerRadius="4" Padding="8" Margin="0,10,0,0">
             <Grid>
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Left">
                     <Button x:Name="btnSelectAll" Content="Select All" Padding="10,5" Margin="2" Background="White"/>
@@ -370,7 +404,7 @@ MAIN_XAML = """
         </Border>
 
         <!-- Footer -->
-        <Border Grid.Row="4" Background="#F0CC88" CornerRadius="3" Padding="8,5" Margin="0,8,0,0">
+        <Border Grid.Row="5" Background="#F0CC88" CornerRadius="3" Padding="8,5" Margin="0,8,0,0">
             <TextBlock Text="Dang Quoc Truong - DQT (c) 2026" FontSize="10" FontWeight="SemiBold" HorizontalAlignment="Center" Foreground="#5D4E37"/>
         </Border>
     </Grid>
@@ -388,6 +422,7 @@ class CADImportManagerWindow(WPFWindow):
         self.uidoc = revit.uidoc
         self.items = []
         self.filtered = []
+        self.closed_worksets = []
 
         self.txtSearch.TextChanged += self.on_filter
         self.cmbFilter.SelectionChanged += self.on_filter
@@ -410,12 +445,34 @@ class CADImportManagerWindow(WPFWindow):
     def load_data(self):
         self.items = get_cad_imports(self.doc)
         self.filtered = list(self.items)
+        self.closed_worksets = _get_closed_worksets(self.doc)
+
+    def _update_warning_banner(self):
+        """Explains the #1 cause of "this tool doesn't find a CAD import
+        that ACC's Model Analytics does": elements on a workset this
+        session hasn't opened are invisible to every in-session tool, not
+        just this one - see _get_closed_worksets."""
+        if not self.closed_worksets:
+            self.warningBanner.Visibility = Visibility.Collapsed
+            return
+        names = self.closed_worksets[:6]
+        more = "" if len(self.closed_worksets) <= 6 else \
+            " and {} more".format(len(self.closed_worksets) - 6)
+        self.txtWarning.Text = (
+            "{} workset(s) are closed in this session - {}{}. CAD Imports/Links "
+            "on a closed workset are not loaded at all, so they cannot show up "
+            "below, even though ACC's Model Analytics (which reads the whole "
+            "file server-side) will still find them. Reopen the model with all "
+            "worksets open to see the complete list here too.".format(
+                len(self.closed_worksets), ", ".join(names), more))
+        self.warningBanner.Visibility = Visibility.Visible
 
     def update_ui(self):
         self.txtTotal.Text = str(len(self.items))
         self.txtImports.Text = str(len([i for i in self.items if i.link_type.startswith("Import")]))
         self.txtLinks.Text = str(len([i for i in self.items if i.link_type.startswith("Link")]))
         self.txtSelected.Text = "0"
+        self._update_warning_banner()
         self.update_grid()
 
     def update_grid(self):
@@ -501,6 +558,7 @@ class CADImportManagerWindow(WPFWindow):
         self.txtTotal.Text = str(len(self.items))
         self.txtImports.Text = str(len([i for i in self.items if i.link_type.startswith("Import")]))
         self.txtLinks.Text = str(len([i for i in self.items if i.link_type.startswith("Link")]))
+        self._update_warning_banner()
 
     def select_in_model(self, s, e):
         if self.dataGrid.SelectedItems.Count == 0:
@@ -695,7 +753,17 @@ class CADImportManagerWindow(WPFWindow):
             "to select + zoom to that file.\n"
             "  Select in Model / Zoom To act on the checked rows.\n"
             "  Export CSV saves the visible list.\n"
-            "  Delete removes the selected CAD elements from the model.",
+            "  Delete removes the selected CAD elements from the model.\n\n"
+            "WHY A CAD IMPORT MIGHT BE MISSING HERE\n"
+            "  This tool can only see elements this Revit session has "
+            "actually loaded. A CAD import/link on a workset you closed "
+            "when opening the model is invisible to it - and to every "
+            "other in-session tool - even though ACC's Model Analytics "
+            "(Insight) still finds it, since that reads the whole file "
+            "server-side regardless of any user's open-workset choice. "
+            "The orange banner above the stat cards names which "
+            "worksets are closed when that's the case; reopen the model "
+            "with all worksets open to see the complete list.",
             title="CAD Import Manager - Help")
 
 
