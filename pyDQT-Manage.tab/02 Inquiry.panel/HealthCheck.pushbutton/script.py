@@ -62,6 +62,7 @@ from Autodesk.Revit.DB import *
 from Autodesk.Revit.UI import *
 from Autodesk.Revit.UI.Selection import *
 from pyrevit import script
+from dqt_cad_utils import is_cad_link, get_unused_cad_types
 
 WPFGrid = WPFControls.Grid
 
@@ -133,7 +134,7 @@ METRIC_THRESHOLDS = OrderedDict([
     ("cad_imports", {
         "label": "CAD Imports",
         "thresholds": [0, 2, 5, 7, 10],
-        "tooltip": "Imported CAD (not linked). Bloats file size significantly.",
+        "tooltip": "Imported CAD (not linked), plus CAD types left with no instances. Bloats file size significantly, and orphaned types keep being reported by ACC Model Analytics.",
         "unit": "",
         "selectable": True,
         "weight": 5
@@ -373,15 +374,29 @@ class ModelHealthAnalyzer:
             self.metrics["warnings"] = 0
 
     def _cad_imports(self):
+        """Embedded CAD: placed import instances PLUS orphaned CAD types.
+
+        A CAD type left with zero instances still sits in the file and is
+        still reported by ACC's Model Analytics (which counts CAD at the
+        TYPE level), so leaving it out made this metric read 0 for models
+        that demonstrably still carried imported CAD. Classification goes
+        through the shared dqt_cad_utils.is_cad_link rather than raw
+        ImportInstance.IsLinked, which is missing on some Revit 2026
+        builds - and was being swallowed by a bare except, silently
+        dropping the element from BOTH this metric and CAD Links."""
         try:
             col = FilteredElementCollector(self.doc).OfClass(ImportInstance).WhereElementIsNotElementType()
             elems = []
             for inst in col:
                 try:
-                    if not inst.IsLinked:
+                    if not is_cad_link(self.doc, inst):
                         elems.append(inst)
                 except:
                     pass
+            try:
+                elems.extend(get_unused_cad_types(self.doc))
+            except:
+                pass
             self.metrics["cad_imports"] = len(elems)
             self._store_ids("cad_imports", elems)
         except:
@@ -417,7 +432,7 @@ class ModelHealthAnalyzer:
             elems = []
             for inst in col:
                 try:
-                    if inst.IsLinked:
+                    if is_cad_link(self.doc, inst):
                         elems.append(inst)
                 except:
                     pass
@@ -608,7 +623,7 @@ def get_status_text(key, value):
 RECOMMENDATIONS = {
     "file_size_mb": "Purge unused families, remove imported CAD files, audit model.",
     "warnings": "Review and resolve warnings. Start with most frequent types.",
-    "cad_imports": "Delete imported CAD. Use linked CAD instead.",
+    "cad_imports": "Delete imported CAD and purge CAD types left with no instances (CAD Import Manager > Purge Unused Types). Use linked CAD instead.",
     "in_place_families": "Convert In-Place to loadable families.",
     "rvt_links": "Review if all RVT links are necessary. Unload unused.",
     "cad_links": "Minimize CAD links. Convert to native Revit elements.",

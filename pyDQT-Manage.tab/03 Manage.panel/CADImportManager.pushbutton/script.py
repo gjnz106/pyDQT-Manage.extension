@@ -26,6 +26,7 @@ from pyrevit.compat import get_elementid_value_func
 from Autodesk.Revit.DB import *
 from System.Collections.Generic import List
 from System.Windows import Visibility
+from dqt_cad_utils import is_cad_link, get_unused_cad_types
 import codecs
 import datetime
 
@@ -129,63 +130,13 @@ def _cad_type_type_name(doc, cad_type):
     return "<Unnamed> (ID {})".format(_eid_int(cad_type.Id))
 
 
-def _cad_type_of(doc, elem):
-    """The CADLinkType behind an ImportInstance, or None."""
-    try:
-        return doc.GetElement(elem.GetTypeId())
-    except:
-        return None
-
-
 def _is_linked(doc, elem):
     """True for a CAD Link, False for a CAD Import (embedded geometry).
 
-    Asked in order of how definitive each answer is:
-
-    1) Element.IsExternalFileReference() on the CAD type. A Link keeps an
-       external .dwg on disk and reports True; a true Import embedded the
-       geometry at import time and has no external file, so it reports
-       False. This is the documented, version-stable way to ask, and it
-       is asked first precisely because (2) is not reliable everywhere.
-    2) ImportInstance.IsLinked, when (1) is unavailable - the instance
-       level property, which this suite's CadtoWall tool found missing on
-       some Revit 2026 builds.
-    3) An external file reference that actually resolves to a path.
-
-    The previous version started at (2) and treated ANY non-null return
-    from GetExternalFileReference() as "Link". On a build where (2) is
-    missing, that classified every CAD file in the model as a Link and
-    left the IMPORTS card permanently at 0 - including for models where
-    ACC's Model Analytics reports genuine imports. A reference object
-    carrying no usable path is not a link."""
-    cad_type = _cad_type_of(doc, elem)
-
-    if cad_type is not None:
-        try:
-            return bool(cad_type.IsExternalFileReference())
-        except:
-            pass
-
-    try:
-        return bool(elem.IsLinked)
-    except:
-        pass
-
-    if cad_type is not None:
-        try:
-            efr = cad_type.GetExternalFileReference()
-        except:
-            efr = None
-        if efr is not None:
-            try:
-                path = efr.GetAbsolutePath()
-                if path is not None and path.Empty:
-                    return False
-            except:
-                pass
-            return True
-
-    return False
+    Thin wrapper over the shared dqt_cad_utils.is_cad_link so this tool
+    and Model Health Check can never disagree about what counts as an
+    import - they used to, each with its own copy of the check."""
+    return is_cad_link(doc, elem)
 
 
 def _get_created_by(doc, elem):
@@ -352,40 +303,14 @@ def _get_closed_worksets(doc):
 
 
 def _get_unused_cad_types(doc):
-    """CADLinkType ("Import Symbol") types with zero placed instances left.
+    """CAD types ("Import Symbol") with zero placed instances left.
 
-    Deleting every instance of a CAD import (one at a time, or via this
-    tool's own Delete) does NOT delete the Type itself - Revit never
-    auto-purges a Type just because its instance count reaches zero,
-    exactly like a WallType or FamilySymbol left behind after its last
-    instance is gone. Since ACC's Model Analytics reports CAD imports at
-    the TYPE level (confirmed by comparing FilteredElementCollector
-    output against the Element IDs ACC reports - they resolve to
-    CADLinkType, not ImportInstance), an orphaned Type like this keeps
-    showing up there indefinitely even though the model has zero
-    instances of it. This is what "Purge Unused Types" cleans up."""
-    used_type_ids = set()
-    try:
-        for inst in FilteredElementCollector(doc).OfClass(ImportInstance) \
-                .WhereElementIsNotElementType():
-            try:
-                used_type_ids.add(_eid_int(inst.GetTypeId()))
-            except:
-                continue
-    except:
-        pass
-
-    unused = []
-    try:
-        for cad_type in FilteredElementCollector(doc).OfClass(CADLinkType):
-            try:
-                if _eid_int(cad_type.Id) not in used_type_ids:
-                    unused.append(cad_type)
-            except:
-                continue
-    except:
-        pass
-    return unused
+    Thin wrapper over the shared dqt_cad_utils.get_unused_cad_types, which
+    also sweeps all element types by class name rather than trusting
+    OfClass(CADLinkType) alone - a CAD type carrying no Category has been
+    seen to slip past that filter, and those are exactly the orphans ACC's
+    Model Analytics keeps reporting after every instance is gone."""
+    return get_unused_cad_types(doc)
 
 
 # ============================================================================
