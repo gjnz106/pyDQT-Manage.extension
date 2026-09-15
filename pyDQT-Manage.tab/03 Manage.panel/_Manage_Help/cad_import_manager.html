@@ -69,6 +69,18 @@
       the selection (or use Zoom To first) before deleting CAD content other
       people may depend on.
     </div>
+    <div class="box fixed">
+      <b>A CAD import shows up in ACC's Model Analytics (Insight) but not
+      here?</b> This tool can only see what the current Revit session has
+      actually loaded. A CAD import/link sitting on a workset you closed
+      when opening the model is invisible to it - and to every other
+      in-session tool - even though Insight still finds it, since that
+      reads the whole .rvt file server-side regardless of any user's
+      open-workset choice. An orange banner appears above the stat cards
+      naming exactly which worksets are closed whenever that's the case;
+      reopen the model with all worksets open to see the complete list
+      here too.
+    </div>
   </div>
 
   <div class="pagenav">
