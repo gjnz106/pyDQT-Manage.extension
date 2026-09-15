@@ -40,9 +40,18 @@
   </div>
 
   <div class="card">
+    <h2>Columns worth knowing</h2>
+    <dl class="kv">
+      <dt class="v-dark">ID</dt><dd>the placed instance's own Element ID</dd>
+      <dt class="v-dark">Type ID</dt><dd>the CAD Type's Element ID, shared by every instance of that file - <b>this is the ID ACC's Model Analytics reports</b>, so paste it into Search to find that file's instances here</dd>
+      <dt class="v-dark">Type</dt><dd>Import (geometry embedded in the model) vs Link (external .dwg still on disk)</dd>
+    </dl>
+  </div>
+
+  <div class="card">
     <h2>Filters</h2>
     <dl class="kv">
-      <dt class="v-dark">Search</dt><dd>matches name, creator, workset or view</dd>
+      <dt class="v-dark">Search</dt><dd>matches name, creator, workset, view, ID or Type ID</dd>
       <dt class="v-dark">Type</dt><dd>All / Import only / Link only</dd>
     </dl>
   </div>
@@ -95,6 +104,24 @@
       exactly what ACC is reporting on, it keeps showing up there
       indefinitely. Run <b>Purge Unused Types</b> here, then Sync/upload a
       new version and wait for ACC to reprocess it.
+    </div>
+    <div class="box tip">
+      <b>Unused Types reads 0 but ACC still lists the file?</b> Then the
+      file is genuinely still in the model. Match ACC's Element ID against
+      the <b>Type ID</b> column (or paste it into Search) to see its
+      remaining instances - delete those and the Type is purged along
+      with them.
+    </div>
+    <div class="box fixed">
+      Every CAD file used to be labelled <b>Link</b>, leaving the Imports
+      card permanently at 0 even in models with genuine imports. The
+      Import/Link check started from <code>ImportInstance.IsLinked</code>,
+      which is missing on some Revit 2026 builds, and then treated any
+      non-null external file reference as proof of a link. It now asks
+      <code>IsExternalFileReference()</code> on the CAD type first - the
+      documented, version-stable answer - and only falls back to the
+      older checks, requiring a reference that actually resolves to a
+      path before calling something a link.
     </div>
   </div>
 
