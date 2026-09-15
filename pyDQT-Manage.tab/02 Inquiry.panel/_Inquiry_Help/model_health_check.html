@@ -82,6 +82,21 @@
       value (not a number, or out of ascending order) blocks the whole
       save rather than silently accepting the other 11.
     </div>
+    <div class="box fixed">
+      <b>CAD Imports counted 0 in models that still had imported CAD.</b>
+      Two causes, both fixed. The Import/Link test read
+      <span class="code">ImportInstance.IsLinked</span> directly, which is
+      missing on some Revit 2026 builds - and the bare
+      <span class="code">except</span> around it silently dropped the
+      element from <i>both</i> CAD Imports and CAD Links rather than
+      flagging it. It now goes through the same shared check CAD Import
+      Manager uses, so the two tools cannot disagree. The metric also now
+      counts CAD types left with <i>no instances</i>: Revit never
+      auto-deletes a type when its last instance goes, and ACC's Model
+      Analytics reports CAD at the type level, so those orphans stayed
+      invisible here while ACC kept reporting them. Clear them with
+      <b>Purge Unused Types</b> in CAD Import Manager.
+    </div>
   </div>
 
   <div class="pagenav">
