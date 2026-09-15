@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""CAD Import Manager v1.1
+"""CAD Import Manager v1.2
 Author: Dang Quoc Truong (DQT)
 
 Lists every CAD file imported or linked into the model (ImportInstance
@@ -60,6 +60,7 @@ def _eid_int(eid):
 class CADImportItem(object):
     def __init__(self):
         self.element_id = 0
+        self.type_id = 0              # the CADLinkType's own Id - what ACC reports
         self.name = "<Unnamed>"
         self.link_type = "Import"     # "Import" or "Link"
         self.created_by = "-"
@@ -128,22 +129,62 @@ def _cad_type_type_name(doc, cad_type):
     return "<Unnamed> (ID {})".format(_eid_int(cad_type.Id))
 
 
-def _is_linked(doc, elem):
-    """True for a CAD Link, False for a CAD Import.
+def _cad_type_of(doc, elem):
+    """The CADLinkType behind an ImportInstance, or None."""
+    try:
+        return doc.GetElement(elem.GetTypeId())
+    except:
+        return None
 
-    IsLinked was reported missing on some Revit 2026 builds by this same
-    suite's CadtoWall tool, so fall back to reading the type's external file
-    reference, which is present either way."""
+
+def _is_linked(doc, elem):
+    """True for a CAD Link, False for a CAD Import (embedded geometry).
+
+    Asked in order of how definitive each answer is:
+
+    1) Element.IsExternalFileReference() on the CAD type. A Link keeps an
+       external .dwg on disk and reports True; a true Import embedded the
+       geometry at import time and has no external file, so it reports
+       False. This is the documented, version-stable way to ask, and it
+       is asked first precisely because (2) is not reliable everywhere.
+    2) ImportInstance.IsLinked, when (1) is unavailable - the instance
+       level property, which this suite's CadtoWall tool found missing on
+       some Revit 2026 builds.
+    3) An external file reference that actually resolves to a path.
+
+    The previous version started at (2) and treated ANY non-null return
+    from GetExternalFileReference() as "Link". On a build where (2) is
+    missing, that classified every CAD file in the model as a Link and
+    left the IMPORTS card permanently at 0 - including for models where
+    ACC's Model Analytics reports genuine imports. A reference object
+    carrying no usable path is not a link."""
+    cad_type = _cad_type_of(doc, elem)
+
+    if cad_type is not None:
+        try:
+            return bool(cad_type.IsExternalFileReference())
+        except:
+            pass
+
     try:
         return bool(elem.IsLinked)
     except:
         pass
-    try:
-        cad_type = doc.GetElement(elem.GetTypeId())
-        if cad_type and cad_type.GetExternalFileReference():
+
+    if cad_type is not None:
+        try:
+            efr = cad_type.GetExternalFileReference()
+        except:
+            efr = None
+        if efr is not None:
+            try:
+                path = efr.GetAbsolutePath()
+                if path is not None and path.Empty:
+                    return False
+            except:
+                pass
             return True
-    except:
-        pass
+
     return False
 
 
@@ -269,6 +310,7 @@ def get_cad_imports(doc):
             item = CADImportItem()
             item.element = elem
             item.element_id = _eid_int(elem.Id)
+            item.type_id = _eid_int(elem.GetTypeId())
             item.name = _cad_type_name(doc, elem)
             is_linked = _is_linked(doc, elem)
             item.link_type = ("Link" if is_linked else "Import") \
@@ -421,14 +463,14 @@ MAIN_XAML = """
             <Border Grid.Column="0" Background="White" BorderBrush="#D4B87A" BorderThickness="1" CornerRadius="4" Padding="8" Margin="0,0,8,0">
                 <StackPanel>
                     <TextBlock Text="SEARCH" FontSize="9" FontWeight="SemiBold" Margin="0,0,0,4"/>
-                    <TextBox x:Name="txtSearch" Padding="6,4" Margin="0,0,0,10" ToolTip="Name, creator, workset or view"/>
+                    <TextBox x:Name="txtSearch" Padding="6,4" Margin="0,0,0,10" ToolTip="Name, creator, workset, view, ID or Type ID"/>
                     <TextBlock Text="TYPE" FontSize="9" FontWeight="SemiBold" Margin="0,0,0,4"/>
                     <ComboBox x:Name="cmbFilter" Padding="6,4" Margin="0,0,0,10" SelectedIndex="0">
                         <ComboBoxItem Content="All"/>
                         <ComboBoxItem Content="Import only"/>
                         <ComboBoxItem Content="Link only"/>
                     </ComboBox>
-                    <TextBlock Text="Double-click ID to copy it. Double-click elsewhere on a row to select + zoom to that file." FontSize="9" Foreground="#888" TextWrapping="Wrap" Margin="0,6,0,0"/>
+                    <TextBlock Text="Double-click ID or Type ID to copy it. Double-click elsewhere on a row to select + zoom to that file. Type ID is the Element ID ACC's Model Analytics reports - paste it into Search to find its instances." FontSize="9" Foreground="#888" TextWrapping="Wrap" Margin="0,6,0,0"/>
                 </StackPanel>
             </Border>
 
@@ -442,6 +484,7 @@ MAIN_XAML = """
                       RowBackground="White" AlternatingRowBackground="#FFFDF5">
                 <DataGrid.Columns>
                     <DataGridTextColumn x:Name="colId" Header="ID" Binding="{Binding element_id}" Width="70" SortMemberPath="element_id"/>
+                    <DataGridTextColumn x:Name="colTypeId" Header="Type ID" Binding="{Binding type_id}" Width="70" SortMemberPath="type_id"/>
                     <DataGridTextColumn Header="File Name" Binding="{Binding name}" Width="*" SortMemberPath="name"/>
                     <DataGridTextColumn Header="Type" Binding="{Binding link_type}" Width="70" SortMemberPath="link_type"/>
                     <DataGridTextColumn Header="Created By" Binding="{Binding created_by}" Width="120" SortMemberPath="created_by"/>
@@ -562,9 +605,9 @@ class CADImportManagerWindow(WPFWindow):
                 continue
             if fi == 2 and not item.link_type.startswith("Link"):
                 continue
-            if search and search not in "{} {} {} {}".format(
+            if search and search not in "{} {} {} {} {} {}".format(
                     item.name, item.created_by, item.workset,
-                    item.view_name).lower():
+                    item.view_name, item.element_id, item.type_id).lower():
                 continue
             self.filtered.append(item)
         self.update_grid()
@@ -595,8 +638,8 @@ class CADImportManagerWindow(WPFWindow):
                 return None
         return node
 
-    def _copy_id(self, item):
-        text = str(item.element_id)
+    def _copy_to_clipboard(self, text):
+        text = str(text)
         try:
             from System.Windows import Clipboard
             Clipboard.SetText(text)
@@ -613,9 +656,13 @@ class CADImportManagerWindow(WPFWindow):
             return
         item = self.dataGrid.SelectedItem
         cell = self._cell_under(e.OriginalSource)
-        if cell is not None and cell.Column is self.colId:
-            self._copy_id(item)
-            return
+        if cell is not None:
+            if cell.Column is self.colId:
+                self._copy_to_clipboard(item.element_id)
+                return
+            if cell.Column is self.colTypeId:
+                self._copy_to_clipboard(item.type_id)
+                return
         self._navigate_and_select([item])
 
     def select_all(self, s, e):
@@ -739,10 +786,11 @@ class CADImportManagerWindow(WPFWindow):
         if dlg.ShowDialog() == DialogResult.OK:
             try:
                 with codecs.open(dlg.FileName, 'w', 'utf-8-sig') as f:
-                    f.write("ID,File Name,Type,Created By,Workset,View,Level\n")
+                    f.write("ID,Type ID,File Name,Type,Created By,Workset,View,Level\n")
                     for item in current_items:
-                        f.write('{},"{}",{},{},{},"{}",{}\n'.format(
-                            item.element_id, item.name.replace('"', '""'),
+                        f.write('{},{},"{}",{},{},{},"{}",{}\n'.format(
+                            item.element_id, item.type_id,
+                            item.name.replace('"', '""'),
                             item.link_type, item.created_by, item.workset,
                             item.view_name.replace('"', '""'), item.level))
                 forms.alert("Exported {} row(s).".format(len(current_items)),
@@ -912,10 +960,16 @@ class CADImportManagerWindow(WPFWindow):
             "  LINKS         - linked files\n"
             "  SELECTED      - rows currently selected in the grid\n"
             "  UNUSED TYPES  - CAD Import/Link Types with zero instances left\n\n"
+            "COLUMNS\n"
+            "  ID      - the placed instance's own Element ID\n"
+            "  Type ID - the CAD Type's Element ID, shared by every\n"
+            "            instance of that file. This is the ID ACC's\n"
+            "            Model Analytics reports, so paste it into\n"
+            "            Search to find that file's instances here.\n\n"
             "WORKFLOW\n"
-            "  Search / Type filter narrow the list.\n"
-            "  Double-click ID to copy it; double-click elsewhere on a row "
-            "to select + zoom to that file.\n"
+            "  Search matches name, creator, workset, view, ID or Type ID.\n"
+            "  Double-click ID or Type ID to copy it; double-click "
+            "elsewhere on a row to select + zoom to that file.\n"
             "  Select in Model / Zoom To act on the checked rows.\n"
             "  Export CSV saves the visible list.\n"
             "  Delete removes the selected CAD elements from the model - "
@@ -943,7 +997,11 @@ class CADImportManagerWindow(WPFWindow):
             "count reaches zero - so an orphaned Type keeps showing up "
             "in ACC until it, not just its instances, is deleted. Use "
             "Purge Unused Types here, then Sync/upload a new version and "
-            "wait for ACC to reprocess it.",
+            "wait for ACC to reprocess it.\n"
+            "  If UNUSED TYPES reads 0 and ACC still lists the file, the "
+            "file is genuinely still in the model: match ACC's Element ID "
+            "against the Type ID column to see its remaining instances, "
+            "delete those, and the Type is purged with them.",
             title="CAD Import Manager - Help")
 
 
