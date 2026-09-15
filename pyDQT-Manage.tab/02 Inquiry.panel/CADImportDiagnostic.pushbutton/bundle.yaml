@@ -1,2 +1,0 @@
-title: "CAD Import\nDiagnostic"
-tooltip: "TEMPORARY - read-only diagnostic. Compares FilteredElementCollector results to find exactly why a real CAD import can be missing from CAD Import Manager / Model Health Check. Makes no change to the model."

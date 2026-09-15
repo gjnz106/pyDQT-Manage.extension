@@ -35,6 +35,7 @@
       <dt class="v-green">Imports</dt><dd>files imported directly into the model</dd>
       <dt class="v-gold">Links</dt><dd>files linked (not imported) into the model</dd>
       <dt class="v-dark">Selected</dt><dd>rows currently ticked in the grid</dd>
+      <dt class="v-red">Unused Types</dt><dd>CAD Import/Link Types with zero instances left - orphans safe to purge</dd>
     </dl>
   </div>
 
@@ -53,8 +54,12 @@
       <li><b>Select in Model</b> or <b>Zoom To</b> to jump to the ticked
         CAD file(s) in Revit.</li>
       <li><b>Export CSV</b> to save the current (filtered) list.</li>
-      <li><b>Delete</b> removes the ticked CAD import/link; <b>Close</b>
-        exits the tool.</li>
+      <li><b>Delete</b> removes the ticked CAD import/link - any Type left
+        with zero instances afterward is purged automatically in the same
+        step.</li>
+      <li><b>Purge Unused Types</b> finds and deletes every CAD Type with
+        zero instances left, including ones left over from before this
+        feature existed; <b>Close</b> exits the tool.</li>
     </ol>
   </div>
 
@@ -80,6 +85,16 @@
       naming exactly which worksets are closed whenever that's the case;
       reopen the model with all worksets open to see the complete list
       here too.
+    </div>
+    <div class="box fixed">
+      <b>Deleted every instance, but ACC still reports the CAD import as
+      present?</b> ACC's Model Analytics reports CAD imports at the
+      <i>Type</i> level (one entry per unique CAD file), not per instance.
+      Revit never auto-deletes a Type just because its instance count
+      reaches zero - it lingers as an unused Type, and since that's
+      exactly what ACC is reporting on, it keeps showing up there
+      indefinitely. Run <b>Purge Unused Types</b> here, then Sync/upload a
+      new version and wait for ACC to reprocess it.
     </div>
   </div>
 

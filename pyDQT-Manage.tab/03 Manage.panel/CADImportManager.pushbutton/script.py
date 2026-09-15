@@ -1,11 +1,16 @@
 # -*- coding: utf-8 -*-
-"""CAD Import Manager v1.0
+"""CAD Import Manager v1.1
 Author: Dang Quoc Truong (DQT)
 
 Lists every CAD file imported or linked into the model (ImportInstance
 elements) with its file name, link type, creator, workset, host level and
 the view it was placed into, so a stray or oversized CAD file can be found
 and selected without hunting through every view.
+
+Also finds and purges "unused" CAD Import/Link Types - a Type left with
+zero instances after its last placement is deleted, which Revit never
+auto-deletes on its own, and which ACC's Model Analytics (Insight) keeps
+reporting as present since it reports CAD imports at the Type level.
 """
 __title__ = "CAD Import\nManager"
 __author__ = "DQT"
@@ -100,6 +105,27 @@ def _cad_type_name(doc, elem):
             pass
 
     return "<Unnamed> (ID {})".format(_eid_int(elem.Id))
+
+
+def _cad_type_type_name(doc, cad_type):
+    """The CAD file name for a CADLinkType itself (not an instance) - same
+    fallback order as _cad_type_name, applied directly since there is no
+    further TypeId to chase from a type."""
+    try:
+        p = cad_type.LookupParameter("Name")
+        if p and p.HasValue:
+            val = p.AsString()
+            if val:
+                return val
+    except:
+        pass
+    try:
+        val = DB.Element.Name.GetValue(cad_type)
+        if val:
+            return val
+    except:
+        pass
+    return "<Unnamed> (ID {})".format(_eid_int(cad_type.Id))
 
 
 def _is_linked(doc, elem):
@@ -283,6 +309,43 @@ def _get_closed_worksets(doc):
     return sorted(closed)
 
 
+def _get_unused_cad_types(doc):
+    """CADLinkType ("Import Symbol") types with zero placed instances left.
+
+    Deleting every instance of a CAD import (one at a time, or via this
+    tool's own Delete) does NOT delete the Type itself - Revit never
+    auto-purges a Type just because its instance count reaches zero,
+    exactly like a WallType or FamilySymbol left behind after its last
+    instance is gone. Since ACC's Model Analytics reports CAD imports at
+    the TYPE level (confirmed by comparing FilteredElementCollector
+    output against the Element IDs ACC reports - they resolve to
+    CADLinkType, not ImportInstance), an orphaned Type like this keeps
+    showing up there indefinitely even though the model has zero
+    instances of it. This is what "Purge Unused Types" cleans up."""
+    used_type_ids = set()
+    try:
+        for inst in FilteredElementCollector(doc).OfClass(ImportInstance) \
+                .WhereElementIsNotElementType():
+            try:
+                used_type_ids.add(_eid_int(inst.GetTypeId()))
+            except:
+                continue
+    except:
+        pass
+
+    unused = []
+    try:
+        for cad_type in FilteredElementCollector(doc).OfClass(CADLinkType):
+            try:
+                if _eid_int(cad_type.Id) not in used_type_ids:
+                    unused.append(cad_type)
+            except:
+                continue
+    except:
+        pass
+    return unused
+
+
 # ============================================================================
 # XAML
 # ============================================================================
@@ -328,6 +391,7 @@ MAIN_XAML = """
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
             <Border Grid.Column="0" Background="White" BorderBrush="#D4B87A" BorderThickness="1" CornerRadius="4" Padding="10,6" Margin="0,0,4,0">
                 <StackPanel><TextBlock Text="TOTAL" FontSize="9" Foreground="#666"/><TextBlock x:Name="txtTotal" Text="0" FontSize="22" FontWeight="Bold"/></StackPanel>
@@ -338,8 +402,11 @@ MAIN_XAML = """
             <Border Grid.Column="2" Background="White" BorderBrush="#D4B87A" BorderThickness="1" CornerRadius="4" Padding="10,6" Margin="4,0">
                 <StackPanel><TextBlock Text="LINKS" FontSize="9" Foreground="#666"/><TextBlock x:Name="txtLinks" Text="0" FontSize="22" FontWeight="Bold" Foreground="#E5B85C"/></StackPanel>
             </Border>
-            <Border Grid.Column="3" Background="White" BorderBrush="#D4B87A" BorderThickness="1" CornerRadius="4" Padding="10,6" Margin="4,0,0,0">
+            <Border Grid.Column="3" Background="White" BorderBrush="#D4B87A" BorderThickness="1" CornerRadius="4" Padding="10,6" Margin="4,0">
                 <StackPanel><TextBlock Text="SELECTED" FontSize="9" Foreground="#666"/><TextBlock x:Name="txtSelected" Text="0" FontSize="22" FontWeight="Bold" Foreground="#5D4E37"/></StackPanel>
+            </Border>
+            <Border Grid.Column="4" Background="White" BorderBrush="#D4B87A" BorderThickness="1" CornerRadius="4" Padding="10,6" Margin="4,0,0,0">
+                <StackPanel><TextBlock Text="UNUSED TYPES" FontSize="9" Foreground="#666"/><TextBlock x:Name="txtUnusedTypes" Text="0" FontSize="22" FontWeight="Bold" Foreground="#FF6B6B"/></StackPanel>
             </Border>
         </Grid>
 
@@ -397,6 +464,7 @@ MAIN_XAML = """
                     <Button x:Name="btnSelectInModel" Content="Select in Model" Padding="10,5" Margin="2" Background="#F0CC88"/>
                     <Button x:Name="btnZoom" Content="Zoom To" Padding="10,5" Margin="2" Background="#F0CC88"/>
                     <Button x:Name="btnExportCSV" Content="Export CSV" Padding="10,5" Margin="2" Background="White"/>
+                    <Button x:Name="btnPurgeTypes" Content="Purge Unused Types" Padding="10,5" Margin="2" Background="White"/>
                     <Button x:Name="btnDelete" Content="Delete" Padding="10,5" Margin="2" Background="#FF6B6B" Foreground="White"/>
                     <Button x:Name="btnClose" Content="Close" Padding="10,5" Margin="2" Background="White"/>
                 </StackPanel>
@@ -423,6 +491,7 @@ class CADImportManagerWindow(WPFWindow):
         self.items = []
         self.filtered = []
         self.closed_worksets = []
+        self.unused_types = []
 
         self.txtSearch.TextChanged += self.on_filter
         self.cmbFilter.SelectionChanged += self.on_filter
@@ -435,6 +504,7 @@ class CADImportManagerWindow(WPFWindow):
         self.btnSelectInModel.Click += self.select_in_model
         self.btnZoom.Click += self.zoom_to
         self.btnExportCSV.Click += self.export_csv
+        self.btnPurgeTypes.Click += self.purge_unused_types
         self.btnDelete.Click += self.delete_selected
         self.btnClose.Click += self.close_window
         self.btnHelp.Click += self.on_help
@@ -446,6 +516,7 @@ class CADImportManagerWindow(WPFWindow):
         self.items = get_cad_imports(self.doc)
         self.filtered = list(self.items)
         self.closed_worksets = _get_closed_worksets(self.doc)
+        self.unused_types = _get_unused_cad_types(self.doc)
 
     def _update_warning_banner(self):
         """Explains the #1 cause of "this tool doesn't find a CAD import
@@ -472,6 +543,7 @@ class CADImportManagerWindow(WPFWindow):
         self.txtImports.Text = str(len([i for i in self.items if i.link_type.startswith("Import")]))
         self.txtLinks.Text = str(len([i for i in self.items if i.link_type.startswith("Link")]))
         self.txtSelected.Text = "0"
+        self.txtUnusedTypes.Text = str(len(self.unused_types))
         self._update_warning_banner()
         self.update_grid()
 
@@ -558,6 +630,7 @@ class CADImportManagerWindow(WPFWindow):
         self.txtTotal.Text = str(len(self.items))
         self.txtImports.Text = str(len([i for i in self.items if i.link_type.startswith("Import")]))
         self.txtLinks.Text = str(len([i for i in self.items if i.link_type.startswith("Link")]))
+        self.txtUnusedTypes.Text = str(len(self.unused_types))
         self._update_warning_banner()
 
     def select_in_model(self, s, e):
@@ -677,6 +750,61 @@ class CADImportManagerWindow(WPFWindow):
             except Exception as ex:
                 forms.alert(str(ex), title="DQT - CAD Import Manager")
 
+    def purge_unused_types(self, s, e):
+        """Delete every CADLinkType with zero remaining instances - the
+        orphans _get_unused_cad_types finds, left behind by deleting
+        instances one at a time instead of via "Select All Instances"
+        on the Type itself. This is the direct fix for "I deleted every
+        instance but ACC's Model Analytics still reports this CAD
+        import" - Insight reports at the Type level, so the orphaned
+        Type has to go too, not just its instances."""
+        unused = _get_unused_cad_types(self.doc)
+        if not unused:
+            forms.alert(
+                "No unused CAD types found - every CAD Import/Link type "
+                "in this model still has at least one instance.",
+                title="DQT - CAD Import Manager")
+            return
+
+        names = [_cad_type_type_name(self.doc, t) for t in unused]
+        lines = names[:10]
+        more = "" if len(names) <= 10 else "\n... and {} more".format(len(names) - 10)
+        msg = (
+            "Found {} unused CAD type(s) - each still exists as an "
+            "orphaned Type with zero instances left in the model. This is "
+            "exactly why ACC's Model Analytics can keep reporting a CAD "
+            "import as present even after every instance was deleted - it "
+            "reports at the Type level, and Revit never auto-deletes a "
+            "Type just because its instance count reaches zero.\n\n"
+            "Delete them now?\n\n{}{}").format(len(unused), "\n".join(lines), more)
+
+        if not forms.alert(msg, title="DQT - CAD Import Manager: Purge Unused Types",
+                           yes=True, no=True):
+            return
+
+        deleted = 0
+        failed = []
+        try:
+            with revit.Transaction("DQT - Purge Unused CAD Types"):
+                for cad_type in unused:
+                    try:
+                        self.doc.Delete(cad_type.Id)
+                        deleted += 1
+                    except Exception as ex:
+                        failed.append("{} - {}".format(
+                            _cad_type_type_name(self.doc, cad_type), ex))
+        except Exception as ex:
+            failed.append("transaction failed: {}".format(ex))
+
+        result = "Purged {} of {} unused CAD type(s).".format(deleted, len(unused))
+        if failed:
+            lines2 = failed[:8]
+            more2 = "" if len(failed) <= 8 else "\n... and {} more".format(len(failed) - 8)
+            result += "\n\nCould not delete:\n{}{}".format("\n".join(lines2), more2)
+        forms.alert(result, title="DQT - CAD Import Manager")
+
+        self.refresh(s, e)
+
     def delete_selected(self, s, e):
         if self.dataGrid.SelectedItems.Count == 0:
             forms.alert("Select at least one CAD file first.", title="DQT - CAD Import Manager")
@@ -689,15 +817,20 @@ class CADImportManagerWindow(WPFWindow):
 
         msg = ("Delete {} CAD file(s) from this model?\n\n"
                "{} Import(s), {} Link(s)\n\n"
+               "Any Type left with zero instances afterward is purged "
+               "automatically in the same step, so nothing orphaned is "
+               "left behind for ACC's Model Analytics to keep reporting.\n\n"
                "This removes them from the model - Undo (Ctrl+Z) restores "
                "them right after if needed.").format(count, imports_n, links_n)
         if not forms.alert(msg, title="DQT - CAD Import Manager: Confirm Delete",
                            yes=True, no=True):
             return
 
-        deleted, failed = self._delete_items(selected)
+        deleted, failed, purged_types = self._delete_items(selected)
 
         result = "Deleted {} of {} CAD file(s).".format(deleted, count)
+        if purged_types:
+            result += "\nAlso purged {} Type(s) left with zero instances.".format(purged_types)
         if failed:
             lines = failed[:8]
             more = "" if len(failed) <= 8 else "\n... and {} more".format(len(failed) - 8)
@@ -707,28 +840,59 @@ class CADImportManagerWindow(WPFWindow):
         self.refresh(s, e)
 
     def _delete_items(self, items):
-        """Delete these CAD import elements in one transaction. Returns
-        (deleted_count, failure_descriptions).
+        """Delete these CAD import elements in one transaction, then purge
+        any Type left with zero instances as a direct result. Returns
+        (deleted_count, failure_descriptions, purged_type_count).
 
-        Each element is deleted individually inside the same transaction,
+        Each instance is deleted individually inside the same transaction,
         rather than as one batch, so a single element Revit refuses to
         delete (a pinned one, say) does not stop the rest from going -
         matching how the rest of this suite treats a bad element as a
-        per-item failure, not a reason to abandon the whole operation."""
+        per-item failure, not a reason to abandon the whole operation.
+        The Type each deleted instance belonged to is tracked before the
+        delete, then checked afterward - a Type only gets removed here if
+        NONE of its instances survive, so a Type still used by an
+        instance the user did not select is left untouched."""
         deleted = 0
         failed = []
+        purged_types = 0
         try:
             with revit.Transaction("DQT - Delete CAD Import(s)"):
+                type_ids_touched = set()
                 for item in items:
+                    try:
+                        type_ids_touched.add(_eid_int(item.element.GetTypeId()))
+                    except:
+                        pass
                     try:
                         self.doc.Delete(ElementId(item.element_id))
                         deleted += 1
                     except Exception as ex:
                         failed.append("{} (ID {}) - {}".format(
                             item.name, item.element_id, ex))
+
+                if type_ids_touched:
+                    still_used = set()
+                    try:
+                        for inst in FilteredElementCollector(self.doc).OfClass(ImportInstance) \
+                                .WhereElementIsNotElementType():
+                            try:
+                                still_used.add(_eid_int(inst.GetTypeId()))
+                            except:
+                                continue
+                    except:
+                        pass
+                    for tid in type_ids_touched:
+                        if tid in still_used:
+                            continue
+                        try:
+                            self.doc.Delete(ElementId(tid))
+                            purged_types += 1
+                        except:
+                            pass
         except Exception as ex:
             failed.append("transaction failed: {}".format(ex))
-        return deleted, failed
+        return deleted, failed, purged_types
 
     def close_window(self, s, e):
         self.Close()
@@ -743,17 +907,24 @@ class CADImportManagerWindow(WPFWindow):
             "into - so a stray or oversized CAD file can be found without "
             "hunting through every view.\n\n"
             "STAT CARDS\n"
-            "  TOTAL     - CAD ImportInstance elements found\n"
-            "  IMPORTS   - imported (not linked) files\n"
-            "  LINKS     - linked files\n"
-            "  SELECTED  - rows currently selected in the grid\n\n"
+            "  TOTAL         - CAD ImportInstance elements found\n"
+            "  IMPORTS       - imported (not linked) files\n"
+            "  LINKS         - linked files\n"
+            "  SELECTED      - rows currently selected in the grid\n"
+            "  UNUSED TYPES  - CAD Import/Link Types with zero instances left\n\n"
             "WORKFLOW\n"
             "  Search / Type filter narrow the list.\n"
             "  Double-click ID to copy it; double-click elsewhere on a row "
             "to select + zoom to that file.\n"
             "  Select in Model / Zoom To act on the checked rows.\n"
             "  Export CSV saves the visible list.\n"
-            "  Delete removes the selected CAD elements from the model.\n\n"
+            "  Delete removes the selected CAD elements from the model - "
+            "any Type left with zero instances afterward is purged "
+            "automatically in the same step.\n"
+            "  Purge Unused Types finds and deletes every CAD Type with "
+            "zero instances left, even ones this tool did not just delete "
+            "(e.g. left over from deleting instances one at a time before "
+            "this feature existed).\n\n"
             "WHY A CAD IMPORT MIGHT BE MISSING HERE\n"
             "  This tool can only see elements this Revit session has "
             "actually loaded. A CAD import/link on a workset you closed "
@@ -763,7 +934,16 @@ class CADImportManagerWindow(WPFWindow):
             "server-side regardless of any user's open-workset choice. "
             "The orange banner above the stat cards names which "
             "worksets are closed when that's the case; reopen the model "
-            "with all worksets open to see the complete list.",
+            "with all worksets open to see the complete list.\n\n"
+            "WHY ACC STILL REPORTS A CAD IMPORT YOU ALREADY DELETED\n"
+            "  ACC's Model Analytics reports CAD imports at the TYPE "
+            "level (one entry per unique CAD file), not per instance. "
+            "Deleting every instance does not delete the Type itself - "
+            "Revit never auto-purges a Type just because its instance "
+            "count reaches zero - so an orphaned Type keeps showing up "
+            "in ACC until it, not just its instances, is deleted. Use "
+            "Purge Unused Types here, then Sync/upload a new version and "
+            "wait for ACC to reprocess it.",
             title="CAD Import Manager - Help")
 
 
