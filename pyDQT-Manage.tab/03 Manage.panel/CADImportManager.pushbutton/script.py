@@ -26,7 +26,8 @@ from pyrevit.compat import get_elementid_value_func
 from Autodesk.Revit.DB import *
 from System.Collections.Generic import List
 from System.Windows import Visibility
-from dqt_cad_utils import is_cad_link, get_unused_cad_types
+from dqt_cad_utils import (is_cad_link, get_unused_cad_types,
+                            get_instances_of_type, make_element_id)
 import codecs
 import datetime
 
@@ -832,17 +833,75 @@ class CADImportManagerWindow(WPFWindow):
         try:
             with revit.Transaction("DQT - Delete CAD Import(s)"):
                 type_ids_touched = set()
+                stuck = {}          # type_id -> [items Revit refused]
                 for item in items:
+                    tid = None
                     try:
-                        type_ids_touched.add(_eid_int(item.element.GetTypeId()))
+                        tid = _eid_int(item.element.GetTypeId())
+                        type_ids_touched.add(tid)
                     except:
                         pass
                     try:
-                        self.doc.Delete(ElementId(item.element_id))
+                        self.doc.Delete(make_element_id(item.element_id))
                         deleted += 1
                     except Exception as ex:
-                        failed.append("{} (ID {}) - {}".format(
-                            item.name, item.element_id, ex))
+                        stuck.setdefault(tid, []).append((item, ex))
+
+                # Revit refuses Document.Delete() on the instance of an
+                # embedded CAD Import ("ElementId cannot be deleted") -
+                # its own UI removes those through the Type instead, the
+                # "About to delete type X and its instances" route. Do the
+                # same, but only when every instance still using that Type
+                # is in this selection, so an instance the user did not
+                # pick can never be deleted out from under them.
+                for tid, entries in stuck.items():
+                    picked = set(i.element_id for i, _ in entries)
+                    living = []
+                    pinned = False
+                    if tid is not None:
+                        try:
+                            survivors = get_instances_of_type(self.doc, tid)
+                            living = [_eid_int(x.Id) for x in survivors]
+                            for x in survivors:
+                                try:
+                                    if x.Pinned:
+                                        pinned = True
+                                        break
+                                except:
+                                    continue
+                        except:
+                            living = []
+                    if pinned:
+                        # Deleting the Type would take a pinned instance
+                        # with it - the pin is there to stop exactly that,
+                        # so the refusal stands and says why.
+                        for item, ex in entries:
+                            failed.append(
+                                "{} (ID {}) - pinned, or another instance of "
+                                "this file is pinned. Unpin it first.".format(
+                                    item.name, item.element_id))
+                        continue
+                    if living and set(living).issubset(picked):
+                        try:
+                            self.doc.Delete(make_element_id(tid))
+                            deleted += len(entries)
+                            purged_types += 1
+                            type_ids_touched.discard(tid)
+                            continue
+                        except Exception as ex2:
+                            for item, _ in entries:
+                                failed.append(
+                                    "{} (ID {}) - could not be deleted on its "
+                                    "own, and deleting its Type failed too: "
+                                    "{}".format(item.name, item.element_id, ex2))
+                            continue
+                    for item, ex in entries:
+                        failed.append("{} (ID {}) - {}{}".format(
+                            item.name, item.element_id, ex,
+                            "" if not living else
+                            "  (Revit removes this kind of CAD Import through "
+                            "its Type - select all {} instance(s) of this file "
+                            "so the Type can go with them.)".format(len(living))))
 
                 if type_ids_touched:
                     still_used = set()
@@ -859,7 +918,7 @@ class CADImportManagerWindow(WPFWindow):
                         if tid in still_used:
                             continue
                         try:
-                            self.doc.Delete(ElementId(tid))
+                            self.doc.Delete(make_element_id(tid))
                             purged_types += 1
                         except:
                             pass
@@ -899,7 +958,10 @@ class CADImportManagerWindow(WPFWindow):
             "  Export CSV saves the visible list.\n"
             "  Delete removes the selected CAD elements from the model - "
             "any Type left with zero instances afterward is purged "
-            "automatically in the same step.\n"
+            "automatically in the same step. Revit refuses to delete an "
+            "embedded CAD Import one instance at a time; select ALL "
+            "instances of that file and Delete removes them through their "
+            "Type, the same route Revit's own UI uses.\n"
             "  Purge Unused Types finds and deletes every CAD Type with "
             "zero instances left, even ones this tool did not just delete "
             "(e.g. left over from deleting instances one at a time before "

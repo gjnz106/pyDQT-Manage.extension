@@ -12,8 +12,9 @@ Copyright (c) 2026 Dang Quoc Truong (DQT)
 All rights reserved.
 """
 
+import System
 from Autodesk.Revit.DB import (FilteredElementCollector, ImportInstance,
-                               CADLinkType)
+                               CADLinkType, ElementId)
 
 
 def _eid_int(eid):
@@ -24,6 +25,35 @@ def _eid_int(eid):
         return eid.Value
     except AttributeError:
         return eid.IntegerValue
+
+
+def make_element_id(value):
+    """int -> ElementId, whichever constructor overload this build wants.
+
+    Revit 2025+ made ElementId 64-bit, so a build may expose Int64, Int32
+    or both; picking the wrong one is how an id silently turns into
+    something Revit then refuses to act on."""
+    try:
+        return ElementId(value)
+    except:
+        pass
+    try:
+        return ElementId(System.Int64(value))
+    except:
+        pass
+    return ElementId(System.Int32(value))
+
+
+def get_instances_of_type(doc, type_id_int):
+    """Every placed CAD instance currently using this type."""
+    found = []
+    for inst in get_cad_instances(doc):
+        try:
+            if _eid_int(inst.GetTypeId()) == type_id_int:
+                found.append(inst)
+        except:
+            continue
+    return found
 
 
 def cad_type_of(doc, instance):

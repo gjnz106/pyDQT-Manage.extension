@@ -105,6 +105,16 @@
       indefinitely. Run <b>Purge Unused Types</b> here, then Sync/upload a
       new version and wait for ACC to reprocess it.
     </div>
+    <div class="box fixed">
+      <b>"ElementId cannot be deleted" when deleting a CAD Import.</b>
+      Revit will not remove an embedded CAD Import one instance at a time
+      - its own UI takes them out through the Type ("About to delete type
+      X and its instances"). Delete now does the same: when every instance
+      still using that file is in the selection, it removes the Type and
+      they all go with it. Select only some of them and it deliberately
+      refuses, and says how many instances that file has, rather than
+      deleting the ones you did not pick.
+    </div>
     <div class="box tip">
       <b>Unused Types reads 0 but ACC still lists the file?</b> Then the
       file is genuinely still in the model. Match ACC's Element ID against
