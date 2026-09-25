@@ -27,6 +27,10 @@ clr.AddReference("PresentationFramework")
 clr.AddReference("PresentationCore")
 clr.AddReference("WindowsBase")
 clr.AddReference("System.Windows.Forms")   # FolderBrowserDialog + DoEvents only
+clr.AddReference("System.Core")            # HashSet<T> - not auto-loaded on
+                                            # Revit 2024's .NET Framework CLR
+                                            # (Revit 2025+'s .NET 8 CLR has it
+                                            # loaded already, masking the gap)
 
 import System.IO                            # DirectoryInfo / FileInfo for backups
 
