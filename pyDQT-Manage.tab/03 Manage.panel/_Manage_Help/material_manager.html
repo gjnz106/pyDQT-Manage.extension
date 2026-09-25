@@ -34,9 +34,23 @@
       <dt class="v-dark">Total</dt><dd>materials in the model</dd>
       <dt class="v-dark">Visible</dt><dd>materials left after Search/Filter/Category</dd>
       <dt class="v-dark">Selected</dt><dd>rows currently ticked</dd>
-      <dt class="v-green">In Use</dt><dd>materials with at least one element using them</dd>
-      <dt class="v-red">Unused</dt><dd>materials with none - purge candidates</dd>
+      <dt class="v-green">In Use</dt><dd>materials Revit's own dependency graph (Document.GetUnusedElements) says are genuinely in use</dd>
+      <dt class="v-red">Unused</dt><dd>materials Revit itself has no use for right now - safe purge candidates</dd>
     </dl>
+  </div>
+
+  <div class="card">
+    <h2>Usage/Types column</h2>
+    <p class="lede">
+      Informational only - it counts type-level references (compound
+      structure layers, single-material families) and under-counts on
+      purpose: it can't see a material painted directly onto an element
+      with the Paint tool, or set through an instance-level parameter
+      such as Structural Material. <b>In Use</b>/<b>Unused</b> and
+      <b>Select Unused</b> always go by the real Revit check instead, so
+      a painted-but-not-typed material is correctly kept as in-use even
+      though this column reads 0.
+    </p>
   </div>
 
   <div class="card">

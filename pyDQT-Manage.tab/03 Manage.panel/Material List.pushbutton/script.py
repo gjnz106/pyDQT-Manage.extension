@@ -17,8 +17,13 @@ clr.AddReference('System')
 clr.AddReference('PresentationCore')
 clr.AddReference('PresentationFramework')
 clr.AddReference('WindowsBase')
+clr.AddReference('System.Core')            # HashSet<T> - not auto-loaded on
+                                            # Revit 2024's .NET Framework CLR
+                                            # (Revit 2025+'s .NET 8 CLR has it
+                                            # loaded already, masking the gap)
 
 import System
+from System.Collections.Generic import HashSet
 from System.Windows import (Window, Thickness, GridLength, GridUnitType,
                             HorizontalAlignment, VerticalAlignment, FontWeights,
                             MessageBox, MessageBoxButton, MessageBoxImage, MessageBoxResult,
@@ -78,6 +83,18 @@ def _eid_int(element_id):
         return int(element_id.IntegerValue)
     except:
         return -1
+
+
+def get_real_unused_ids(doc):
+    """Element ids Revit's own purge engine considers unused right now -
+    the same source the native Purge Unused dialog reads. Returns None
+    when the API is missing (Revit 2023 and earlier), so callers can
+    tell "nothing is unused" apart from "can't tell what's unused"."""
+    try:
+        ids = doc.GetUnusedElements(HashSet[DB.ElementId]())
+        return set(_eid_int(i) for i in ids)
+    except Exception:
+        return None
 
 
 def _brush(hex_color):
@@ -161,6 +178,9 @@ class MaterialItem(INotifyPropertyChanged):
 
         self._usage_count = 0
         self._usage_percentage = 0.0
+        # Ground truth for "safe to delete" - see calculate_material_usage().
+        # Defaults to False (never a purge candidate) until proven otherwise.
+        self._is_really_unused = False
 
     # Properties
     @property
@@ -221,6 +241,15 @@ class MaterialItem(INotifyPropertyChanged):
         self.OnPropertyChanged("usage_count")
 
     @property
+    def is_really_unused(self):
+        return self._is_really_unused
+
+    @is_really_unused.setter
+    def is_really_unused(self, value):
+        self._is_really_unused = value
+        self.OnPropertyChanged("is_really_unused")
+
+    @property
     def usage_percentage(self):
         # str(round(...)) is reliable in IronPython; "{:.1f}".format is not.
         return str(round(self._usage_percentage, 1)) + "%"
@@ -251,20 +280,34 @@ class MaterialItem(INotifyPropertyChanged):
 # ============================================================================
 
 def calculate_material_usage(doc, material_items):
-    """Calculate usage for materials.
+    """Calculate usage for materials, and - separately - whether each one is
+    actually safe to delete.
 
-    Counts how many element types reference each material. Uses three sources
-    so compound structures (multi-layer walls/floors), painted faces and the
-    simple MATERIAL_ID_PARAM are all covered:
-      1) ElementType.GetMaterialIds(False)  -> structural/appearance materials
-      2) ElementType.GetMaterialIds(True)   -> paint materials
-      3) BuiltInParameter.MATERIAL_ID_PARAM -> single-material families
+    usage_count is informational only: it counts how many element TYPES
+    reference each material via GetMaterialIds()/MATERIAL_ID_PARAM, so it
+    is a real positive signal when > 0 but an undercount when it reads 0.
+    It cannot see a material painted directly onto an element INSTANCE
+    with the Paint tool, or assigned through an INSTANCE parameter (e.g.
+    Structural Material on framing/columns is commonly instance-level,
+    not type-level) - both are everyday workflows, not edge cases.
+
+    is_really_unused is the one that gates deletion, and comes from
+    Document.GetUnusedElements() - Revit's own dependency graph, the
+    same source the native Purge Unused dialog reads. It has none of the
+    blind spots above, since it does not care which mechanism made the
+    material "in use".
     """
 
     # Reset all counts
     for item in material_items:
         item.usage_count = 0
         item.usage_percentage = 0.0
+        item.is_really_unused = False
+
+    real_unused_ids = get_real_unused_ids(doc)
+    if real_unused_ids is not None:
+        for item in material_items:
+            item.is_really_unused = item.id in real_unused_ids
 
     # Build lookup by material ID
     material_lookup = {}
@@ -1631,10 +1674,10 @@ class MaterialManagerWindow(Window):
                 continue
 
             if filter_index == 1:  # In Use Only
-                if item.usage_count == 0:
+                if item.is_really_unused:
                     continue
             elif filter_index == 2:  # Unused Only
-                if item.usage_count > 0:
+                if not item.is_really_unused:
                     continue
 
             if category_filter and item.category != category_filter:
@@ -1662,11 +1705,11 @@ class MaterialManagerWindow(Window):
             self.txt_selected.Text = str(selected)
 
         if self.txt_used:
-            used = sum(1 for item in self.all_items if item.usage_count > 0)
+            used = sum(1 for item in self.all_items if not item.is_really_unused)
             self.txt_used.Text = str(used)
 
         if self.txt_unused:
-            unused = sum(1 for item in self.all_items if item.usage_count == 0)
+            unused = sum(1 for item in self.all_items if item.is_really_unused)
             self.txt_unused.Text = str(unused)
 
     def _get_selected_items(self):
@@ -1710,9 +1753,15 @@ class MaterialManagerWindow(Window):
         self._update_stats()
 
     def _on_select_unused(self, sender, args):
+        if get_real_unused_ids(doc) is None:
+            MessageBox.Show(
+                "Select Unused needs Document.GetUnusedElements, which "
+                "requires Revit 2024 or newer.",
+                "Not available", MessageBoxButton.OK, MessageBoxImage.Warning)
+            return
         self.data_grid.UnselectAll()
         for item in self.filtered_items:
-            item.is_selected = item.usage_count == 0
+            item.is_selected = item.is_really_unused
         self._update_stats()
 
     def _on_refresh(self, sender, args):
@@ -1724,14 +1773,26 @@ class MaterialManagerWindow(Window):
             return
         MessageBox.Show(
             "Material Manager\n\n"
-            "Lists every Material in the model with how many elements use "
-            "it, so unused materials can be found and cleaned up.\n\n"
+            "Lists every Material in the model with how many element "
+            "types use it, so unused materials can be found and cleaned "
+            "up.\n\n"
             "STAT CARDS\n"
             "  TOTAL     - materials in the model\n"
             "  VISIBLE   - materials left after Search/Filter/Category\n"
             "  SELECTED  - rows currently ticked\n"
-            "  IN USE    - materials with at least one element using them\n"
-            "  UNUSED    - materials with none - purge candidates\n\n"
+            "  IN USE    - materials Revit's own dependency graph "
+            "(Document.GetUnusedElements) says are genuinely in use\n"
+            "  UNUSED    - materials Revit itself has no use for right "
+            "now - safe purge candidates\n\n"
+            "The Usage/Types column is informational only - it counts "
+            "type-level references (compound structure layers, single-"
+            "material families) and can under-count on purpose: it "
+            "cannot see a material painted directly onto an element with "
+            "the Paint tool, or set through an instance-level parameter "
+            "such as Structural Material. IN USE/UNUSED and Select "
+            "Unused always go by the real Revit check instead, so a "
+            "painted-but-not-typed material is correctly kept as "
+            "in-use.\n\n"
             "WORKFLOW\n"
             "  Search / Filter by Usage / Filter by Category narrow the "
             "list.\n"
@@ -1844,6 +1905,14 @@ class MaterialManagerWindow(Window):
             self._load_data()
 
     def _on_delete(self, sender, args):
+        if get_real_unused_ids(doc) is None:
+            MessageBox.Show(
+                "Delete needs Document.GetUnusedElements, which requires "
+                "Revit 2024 or newer, to check whether a material is "
+                "really safe to delete.",
+                "Not available", MessageBoxButton.OK, MessageBoxImage.Warning)
+            return
+
         selected = self._get_selected_items()
 
         if not selected:
@@ -1851,14 +1920,21 @@ class MaterialManagerWindow(Window):
                           "Warning", MessageBoxButton.OK, MessageBoxImage.Warning)
             return
 
-        # Check usage
-        in_use = [item for item in selected if item.usage_count > 0]
-        can_delete = [item for item in selected if item.usage_count == 0]
+        # Check usage - is_really_unused (Document.GetUnusedElements) is the
+        # authority; usage_count is only an informational undercount (it
+        # cannot see paint applied directly to an instance, or an instance-
+        # level material parameter such as Structural Material).
+        in_use = [item for item in selected if not item.is_really_unused]
+        can_delete = [item for item in selected if item.is_really_unused]
 
         if in_use:
             msg = "WARNING: {} material(s) are IN USE:\n\n".format(len(in_use))
             for item in in_use[:5]:
-                msg += "  - '{}': {} types\n".format(item.name, item.usage_count)
+                if item.usage_count > 0:
+                    msg += "  - '{}': {} type(s)\n".format(item.name, item.usage_count)
+                else:
+                    msg += ("  - '{}': in use (e.g. painted onto an element, "
+                             "or an instance-level override)\n".format(item.name))
             if len(in_use) > 5:
                 msg += "  ... and {} more\n".format(len(in_use) - 5)
             msg += "\nDeleting may affect existing elements. Continue?"
