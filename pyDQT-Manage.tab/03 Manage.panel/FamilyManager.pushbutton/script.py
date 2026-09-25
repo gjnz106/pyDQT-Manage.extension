@@ -19,7 +19,12 @@ from pyrevit import revit, forms, script
 from pyrevit.forms import WPFWindow
 from Autodesk.Revit.DB import *
 from Autodesk.Revit.DB.Architecture import StairsType, RailingType
-from System.Collections.Generic import List
+import clr
+clr.AddReference("System.Core")            # HashSet<T> - not auto-loaded on
+                                            # Revit 2024's .NET Framework CLR
+                                            # (Revit 2025+'s .NET 8 CLR has it
+                                            # loaded already, masking the gap)
+from System.Collections.Generic import List, HashSet
 import System
 import re, datetime, codecs, os, json
 
@@ -87,6 +92,44 @@ def _eid_int(element_id):
             return element_id.IntegerValue
         except:
             return -1
+
+
+def get_real_unused_ids(doc):
+    """Element ids Revit's own purge engine considers unused right now -
+    the same source the native Purge Unused dialog (and the Purge
+    Families batch tool) reads. Returns None when the API is missing
+    (Revit 2023 and earlier), so callers can tell "nothing is unused"
+    apart from "can't tell what's unused"."""
+    try:
+        ids = doc.GetUnusedElements(HashSet[ElementId]())
+        return set(_eid_int(i) for i in ids)
+    except Exception:
+        return None
+
+
+def is_family_really_unused(fam, real_unused_ids):
+    """A Family is safe to purge only when every one of its types is in
+    Revit's own unused-elements set - not just "zero placed instances".
+    A Family can have real, load-bearing uses this tool cannot see by
+    counting placed instances: a Profile family referenced only by a
+    Wall Sweep/Reveal/Railing/Fascia/Gutter TYPE, or a family used only
+    as a nested/shared sub-component inside another family, never shows
+    up as a top-level instance yet is very much in use. Deleting one
+    anyway cascades into whatever depends on it, and Revit's own
+    dependency graph - which GetUnusedElements reads - is the only
+    reliable way to tell the two apart. Returns False (never offered for
+    purge) whenever that isn't available or can't be determined."""
+    if real_unused_ids is None:
+        return False
+    try:
+        if _eid_int(fam.Id) in real_unused_ids:
+            return True
+        type_ids = fam.GetFamilySymbolIds()
+        if not type_ids or type_ids.Count == 0:
+            return False
+        return all(_eid_int(tid) in real_unused_ids for tid in type_ids)
+    except Exception:
+        return False
 
 # ============================================================================
 # CONFIGURATION
@@ -347,10 +390,14 @@ class ParameterData(object):
 def get_all_families(doc, include_loadable=True, include_system=True, include_groups=True):
     """Get all families grouped (not individual types) for Families tab"""
     families = []
-    
+
+    # Ground truth for "is this Family safe to purge" - see
+    # is_family_really_unused() for why plain instance-counting isn't enough.
+    real_unused_ids = get_real_unused_ids(doc)
+
     # Count instances for each type
     type_instance_counts = {}
-    
+
     # Count FamilyInstance
     for inst in FilteredElementCollector(doc).OfClass(FamilyInstance).WhereElementIsNotElementType():
         try:
@@ -428,10 +475,11 @@ def get_all_families(doc, include_loadable=True, include_system=True, include_gr
                     d.type_count = 0
                     d.instance_count = 0
                 
-                d.is_unused = d.instance_count == 0 and not d.is_in_place
+                d.is_unused = (not d.is_in_place
+                               and is_family_really_unused(fam, real_unused_ids))
                 d.estimated_size_kb = 50 + d.type_count * 10
                 d.size_display = format_size(d.estimated_size_kb)
-                
+
                 families.append(d)
             except:
                 pass
@@ -1729,14 +1777,25 @@ class FamilyManagerWindow(WPFWindow):
                 self.dataGrid.SelectedItems.Add(i)
     
     def purge_unused(self, sender, args):
-        unused = [i for i in self.items if i.is_unused and not i.is_in_place]
+        if get_real_unused_ids(self.doc) is None:
+            forms.alert(
+                "Purge Unused needs Document.GetUnusedElements, which "
+                "requires Revit 2024 or newer.",
+                title="Not available")
+            return
+
+        # is_family_really_unused() already requires a real Family object,
+        # but this guard stays: it is the only thing standing between a
+        # stray System/Group row and doc.Delete(i.family.Id) below.
+        unused = [i for i in self.items
+                  if i.is_unused and not i.is_in_place and i.family is not None]
         if not unused:
             forms.alert("No unused families found", title="Info")
             return
-        
+
         if not forms.alert("Delete {} unused families?".format(len(unused)), yes=True, no=True):
             return
-        
+
         count = 0
         try:
             with revit.Transaction("Purge Unused"):
@@ -1749,10 +1808,10 @@ class FamilyManagerWindow(WPFWindow):
             forms.alert("Purged {} families".format(count), title="Done")
         except Exception as ex:
             forms.alert("Error: {}".format(str(ex)), title="Error")
-        
+
         self.load_data()
         self.update_ui()
-    
+
     def rename_families(self, sender, args):
         """Rename Family Name (Families tab only manages Family names)"""
         if self.dataGrid.SelectedItems.Count == 0:
