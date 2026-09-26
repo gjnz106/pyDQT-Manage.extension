@@ -40,8 +40,17 @@
       <dt class="v-orange">DEPENDENCIES</dt><dd>Other elements/views that reference them</dd>
       <dt class="v-red">CRITICAL</dt><dd>Dependencies serious enough to reconsider deleting</dd>
       <dt class="v-orange">HIGH RISK</dt><dd>Dependencies worth reviewing before deleting</dd>
-      <dt class="v-green">SAFE</dt><dd>No dependencies found - clear to delete</dd>
+      <dt class="v-green">SAFE</dt><dd>Revit itself deletes nothing else along with it (Element.GetDependentElements), and it isn't in a group, assembly, room boundary or MEP connection</dd>
     </dl>
+    <p>
+      Besides the named checks (hosted elements, dimensions, tags, groups,
+      assemblies, room boundaries, MEP connections), every element also
+      gets Revit's own "what else goes with it" list. That is what keeps a
+      Level (its views and everything hosted on it), a type (every
+      instance of it) or a view (its text, detail lines and detail items)
+      from showing as SAFE. The element's own internal parts - its sketch,
+      sketch lines and nested sub-components - are not counted.
+    </p>
   </div>
 
   <div class="card">

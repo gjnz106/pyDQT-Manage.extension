@@ -77,6 +77,17 @@
       unused loaded type), Zoom To has nowhere to switch to since there's
       no placement.
     </div>
+    <div class="box fixed">
+      Not placed is not the same as unused. An image picked as the value
+      of an <b>Image</b> / <b>Type Image</b> parameter (or a custom
+      Image-type parameter) is what schedules and tags show, and it has no
+      instance in any view. Such a row now shows
+      <span class="code">(not placed - used in Image parameter)</span>, and
+      Delete warns with how many elements/types use it before going ahead,
+      because deleting it clears that parameter everywhere. Only
+      <span class="code">(not placed - loaded only)</span> rows are truly
+      unused.
+    </div>
   </div>
 
   <div class="pagenav">

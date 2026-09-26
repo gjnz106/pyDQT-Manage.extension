@@ -66,6 +66,9 @@ class ImageItem(object):
         self.level = "-"
         self.view_name = "-"
         self.element = None
+        # Unplaced image types only: how many elements/types still point at
+        # it through an Image-type parameter (Image, Type Image, custom).
+        self.param_use_count = 0
 
 
 def _type_name_from_type(img_type, fallback_id):
@@ -264,6 +267,55 @@ def _get_view_name(doc, elem):
     return "-"
 
 
+def _image_param_ids(doc):
+    """Parameter ids that can hold an image: the built-in instance "Image"
+    and type "Type Image" parameters, plus every project/shared parameter
+    whose data type is Image."""
+    ids = []
+    for bip_name in ("ALL_MODEL_IMAGE", "ALL_MODEL_TYPE_IMAGE"):
+        try:
+            ids.append(ElementId(getattr(BuiltInParameter, bip_name)))
+        except Exception:
+            pass
+    try:
+        image_spec = SpecTypeId.Reference.Image
+        for pe in FilteredElementCollector(doc).OfClass(ParameterElement):
+            try:
+                if pe.GetDefinition().GetDataType() == image_spec:
+                    ids.append(pe.Id)
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return ids
+
+
+def image_parameter_use_counts(doc, image_type_ids):
+    """{image type id: how many elements/types point at it through an
+    Image-type parameter}.
+
+    An image used that way - the picture a schedule or tag shows for an
+    element - has no ImageInstance placed in any view, so it used to be
+    listed as "not placed - loaded only" and deleted like an orphan, which
+    silently clears that parameter on everything using it."""
+    counts = {}
+    if not image_type_ids:
+        return counts
+    param_ids = _image_param_ids(doc)
+    for tid in image_type_ids:
+        n = 0
+        for pid in param_ids:
+            try:
+                rule = ParameterFilterRuleFactory.CreateEqualsRule(pid, ElementId(tid))
+                n += FilteredElementCollector(doc).WherePasses(
+                    ElementParameterFilter(rule)).GetElementCount()
+            except Exception:
+                continue
+        if n:
+            counts[tid] = n
+    return counts
+
+
 def get_images(doc):
     items = []
     placed_type_ids = set()
@@ -307,8 +359,11 @@ def get_images(doc):
     # source Manage Links itself reads from, so this closes that gap and
     # keeps the two dialogs' counts in agreement. These rows have no
     # instance to report a creator/workset/level/view for - Select, Zoom
-    # and Delete still work through element_id (Delete removes the unused
-    # loaded type, which is exactly the cleanup this gap otherwise hides).
+    # and Delete still work through element_id (Delete removes the loaded
+    # type itself). "Not placed" is not the same as unused: an image can be
+    # the value of an Image / Type Image (or custom Image) parameter, which
+    # is how schedules and tags show pictures, with no instance anywhere.
+    # Those rows are labeled separately and Delete warns before clearing it.
     try:
         refs = doc.GetAllExternalFileReferences()
         for type_id, efr in refs.items():
@@ -342,6 +397,17 @@ def get_images(doc):
                 continue
     except:
         pass
+
+    unplaced = [i for i in items if i.element is None]
+    try:
+        counts = image_parameter_use_counts(doc, [i.element_id for i in unplaced])
+    except Exception:
+        counts = {}
+    for item in unplaced:
+        n = counts.get(item.element_id, 0)
+        if n:
+            item.param_use_count = n
+            item.view_name = "(not placed - used in Image parameter)"
 
     return items
 
@@ -594,6 +660,11 @@ class ImageManagerWindow(WPFWindow):
             "image still has a placeholder in its view, so both still work.\n"
             "- Delete removes the selected image instance(s) - Undo restores "
             "them right after if needed.\n"
+            "- View \"(not placed - loaded only)\" is an image type with no "
+            "instance and no parameter use - safe to clean up. \"(not placed "
+            "- used in Image parameter)\" is still shown by schedules/tags "
+            "through an Image / Type Image parameter; Delete warns first "
+            "because it clears that value.\n"
             "- To fix a Missing image, use Revit's own Manage tab > Manage "
             "Images to browse to the file's new location.\n\n"
             "Dang Quoc Truong - DQT (c) 2026",
@@ -710,11 +781,26 @@ class ImageManagerWindow(WPFWindow):
         count = len(selected)
         missing_n = len([i for i in selected if i.status != "OK"])
 
-        msg = "Delete {} image(s) from this model?".format(count)
+        param_used = [i for i in selected if i.param_use_count > 0]
+
+        if param_used:
+            lines = ["- {} ({} element(s)/type(s))".format(i.name, i.param_use_count)
+                     for i in param_used[:8]]
+            if len(param_used) > 8:
+                lines.append("... and {} more".format(len(param_used) - 8))
+            msg = ("WARNING: {} of the {} selected image(s) are not placed in any "
+                   "view but are still IN USE as the value of an Image / Type "
+                   "Image parameter (the picture schedules and tags show):\n\n"
+                   "{}\n\nDeleting them clears that parameter on every element "
+                   "and type using it.").format(len(param_used), count, "\n".join(lines))
+        else:
+            msg = "Delete {} image(s) from this model?".format(count)
         if missing_n:
             msg += "\n\n{} of them already have a missing source file.".format(missing_n)
         msg += ("\n\nThis removes them from the model - Undo (Ctrl+Z) restores "
                 "them right after if needed.")
+        if param_used:
+            msg += "\n\nDelete anyway?"
         if not forms.alert(msg, title="DQT - Image Manager: Confirm Delete",
                            yes=True, no=True):
             return

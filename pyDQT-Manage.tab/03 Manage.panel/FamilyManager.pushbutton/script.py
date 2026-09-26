@@ -131,6 +131,17 @@ def is_family_really_unused(fam, real_unused_ids):
     except Exception:
         return False
 
+
+def is_type_really_unused(type_id_int, real_unused_ids):
+    """Same rule for a System type (Wall/Floor/Ceiling/Roof) or a Group
+    type: unused only if Revit's own unused set says so. Counting placed
+    instances misses a basic wall type used only as a layer of a Stacked
+    Wall type, or a group type used only nested inside another group, and
+    those rows go straight into Select Unused -> Delete."""
+    if real_unused_ids is None:
+        return False
+    return type_id_int in real_unused_ids
+
 # ============================================================================
 # CONFIGURATION
 # ============================================================================
@@ -498,7 +509,7 @@ def get_all_families(doc, include_loadable=True, include_system=True, include_gr
                 d.is_editable = True
                 d.type_count = 1
                 d.instance_count = type_instance_counts.get(d.element_id, 0)
-                d.is_unused = d.instance_count == 0
+                d.is_unused = is_type_really_unused(d.element_id, real_unused_ids)
                 d.family = None  # No family object for system
                 d._system_type = wt  # Store for rename
                 families.append(d)
@@ -517,7 +528,7 @@ def get_all_families(doc, include_loadable=True, include_system=True, include_gr
                 d.is_editable = True
                 d.type_count = 1
                 d.instance_count = type_instance_counts.get(d.element_id, 0)
-                d.is_unused = d.instance_count == 0
+                d.is_unused = is_type_really_unused(d.element_id, real_unused_ids)
                 d.family = None
                 d._system_type = ft
                 families.append(d)
@@ -536,7 +547,7 @@ def get_all_families(doc, include_loadable=True, include_system=True, include_gr
                 d.is_editable = True
                 d.type_count = 1
                 d.instance_count = type_instance_counts.get(d.element_id, 0)
-                d.is_unused = d.instance_count == 0
+                d.is_unused = is_type_really_unused(d.element_id, real_unused_ids)
                 d.family = None
                 d._system_type = ct
                 families.append(d)
@@ -555,7 +566,7 @@ def get_all_families(doc, include_loadable=True, include_system=True, include_gr
                 d.is_editable = True
                 d.type_count = 1
                 d.instance_count = type_instance_counts.get(d.element_id, 0)
-                d.is_unused = d.instance_count == 0
+                d.is_unused = is_type_really_unused(d.element_id, real_unused_ids)
                 d.family = None
                 d._system_type = rt
                 families.append(d)
@@ -586,7 +597,7 @@ def get_all_families(doc, include_loadable=True, include_system=True, include_gr
                         except:
                             pass
                     d.instance_count = group_count
-                    d.is_unused = d.instance_count == 0
+                    d.is_unused = is_type_really_unused(d.element_id, real_unused_ids)
                     d.family = None
                     d._system_type = gt
                     families.append(d)
@@ -1985,11 +1996,42 @@ class FamilyManagerWindow(WPFWindow):
         if self.dataGrid.SelectedItems.Count == 0:
             forms.alert("Select families first", title="Info")
             return
-        
-        if not forms.alert("Delete {} families?".format(self.dataGrid.SelectedItems.Count), yes=True, no=True):
-            return
-        
+
         selected = [item for item in self.dataGrid.SelectedItems]
+
+        # Warn before deleting anything still in use. Placed instances are
+        # the obvious case (Revit deletes them with their type); the other
+        # is a row with no placed instance that Revit's own unused set still
+        # says is in use - a profile behind a sweep/railing type, a wall type
+        # inside a stacked wall - which instance counts alone cannot see.
+        api_ok = get_real_unused_ids(self.doc) is not None
+        placed = [i for i in selected if i.instance_count > 0]
+        other_use = [i for i in selected
+                     if api_ok and i.instance_count == 0 and not i.is_unused]
+
+        def _names(rows):
+            text = "\n".join("   - {}".format(r.family_name) for r in rows[:5])
+            if len(rows) > 5:
+                text += "\n   ... and {} more".format(len(rows) - 5)
+            return text
+
+        if placed or other_use:
+            msg = "Delete {} families?\n\nWARNING:".format(len(selected))
+            if placed:
+                msg += ("\n\n{} have placed instances - deleting them "
+                        "deletes those instances too:\n{}").format(
+                            len(placed), _names(placed))
+            if other_use:
+                msg += ("\n\n{} have no placed instance but Revit still "
+                        "reports them in use (e.g. a profile used by a wall "
+                        "sweep/railing type, a wall type inside a stacked "
+                        "wall):\n{}").format(len(other_use), _names(other_use))
+            msg += "\n\nDelete anyway?"
+            if not forms.alert(msg, yes=True, no=True, warn_icon=True):
+                return
+        elif not forms.alert("Delete {} families?".format(len(selected)), yes=True, no=True):
+            return
+
         count = 0
         errors = []
         try:

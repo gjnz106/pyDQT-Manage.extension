@@ -28,7 +28,8 @@ from Autodesk.Revit.DB import (
     Transaction, ElementId, FilteredElementCollector,
     BuiltInCategory, BuiltInParameter,
     ElementClassFilter, BoundingBoxIntersectsFilter, Outline,
-    FamilyInstance, Dimension, IndependentTag, XYZ
+    FamilyInstance, Dimension, IndependentTag, XYZ,
+    Sketch, SketchPlane, View, CategoryType
 )
 from Autodesk.Revit.UI.Selection import ObjectType
 
@@ -159,6 +160,105 @@ def get_view_name(element, document):
     except:
         pass
     return ""
+
+
+CASCADE_LIST_CAP = 25
+
+
+def _is_own_subcomponent(dep, element_id):
+    """True when `dep` is a nested (shared) sub-component placed inside the
+    element itself - deleting a door takes its own nested frame with it,
+    which is part of the door, not collateral."""
+    cur = dep
+    for _ in range(10):
+        try:
+            sup = cur.SuperComponent
+        except Exception:
+            return False
+        if sup is None:
+            return False
+        if sup.Id == element_id:
+            return True
+        cur = sup
+    return False
+
+
+def cascade_dependents(element, document, already_reported):
+    """Everything else Revit itself deletes together with `element`, per
+    Element.GetDependentElements(None) - the authoritative answer, where
+    the checks above are a hand-picked subset (hosted FamilyInstances,
+    dimensions, tags). Without this, a Level (its views and every element
+    hosted on it), a type (every instance of it), a view (its text, detail
+    lines and detail items), a wall's sweeps and openings, and so on all
+    read as SAFE.
+
+    The element's own internals are left out - its sketch and sketch
+    plane, the sketch's own lines, uncategorised internal elements, and
+    its own nested sub-components - since those are the element, not
+    something else lost with it."""
+    el_id = element.Id
+    try:
+        dep_ids = element.GetDependentElements(None)
+    except Exception:
+        return []
+    if not dep_ids:
+        return []
+
+    elems = []
+    internal = set()
+    for did in dep_ids:
+        if did == el_id:
+            continue
+        try:
+            d = document.GetElement(did)
+        except Exception:
+            d = None
+        if d is None:
+            continue
+        elems.append(d)
+        if isinstance(d, Sketch):
+            internal.add(eid_int(did))
+            try:
+                for sid in d.GetAllElements():
+                    internal.add(eid_int(sid))
+            except Exception:
+                pass
+        elif isinstance(d, SketchPlane):
+            internal.add(eid_int(did))
+
+    found = []
+    for d in elems:
+        did = eid_int(d.Id)
+        if did in internal or did in already_reported:
+            continue
+        cat = None
+        try:
+            cat = d.Category
+        except Exception:
+            pass
+        if cat is None:
+            continue
+        if isinstance(d, FamilyInstance) and _is_own_subcomponent(d, el_id):
+            continue
+        if isinstance(d, View):
+            dep_type, sev = "View", "Critical"
+        else:
+            try:
+                is_model = cat.CategoryType == CategoryType.Model
+            except Exception:
+                is_model = False
+            dep_type = cat.Name or "Element"
+            sev = "High" if is_model else "Medium"
+        found.append(DepInfo(did, safe_name(d) or dep_type, dep_type, sev,
+                             "Deleted with it", get_view_name(d, document)))
+
+    if len(found) > CASCADE_LIST_CAP:
+        extra = len(found) - CASCADE_LIST_CAP
+        found.sort(key=lambda x: ElemData.SEV.get(x.severity, 0), reverse=True)
+        found = found[:CASCADE_LIST_CAP]
+        found.append(DepInfo(-1, "+{} more".format(extra), "More",
+                             "Medium", "Also deleted with it"))
+    return found
 
 
 def analyze_element(element, document):
@@ -334,6 +434,10 @@ def analyze_element(element, document):
                     continue
     except:
         pass
+
+    # 8. Anything else Revit deletes along with it (authoritative catch-all)
+    reported = set(d.eid for d in deps)
+    deps.extend(cascade_dependents(element, document, reported))
 
     return deps
 
@@ -917,7 +1021,9 @@ class SmartDeleteWindow(Window):
                 text += "Category: {}  |  ID: {}\n".format(item.cat, item.eid)
                 text += "=" * 60 + "\n\n"
                 text += "STATUS: SAFE - No dependencies found\n\n"
-                text += "This element can be safely deleted."
+                text += ("Revit reports nothing else is deleted along with "
+                         "this element, and it is not in a group, assembly, "
+                         "room boundary or MEP connection.")
                 self.txtDeps.Text = text
                 return
 
@@ -1002,7 +1108,9 @@ class SmartDeleteWindow(Window):
             "  DEPENDENCIES  - other elements/views that reference them\n"
             "  CRITICAL      - dependencies serious enough to reconsider\n"
             "  HIGH RISK     - dependencies worth reviewing first\n"
-            "  SAFE          - no dependencies found\n\n"
+            "  SAFE          - Revit deletes nothing else along with it\n"
+            "                  (GetDependentElements), and no group/\n"
+            "                  assembly/room/MEP relationship applies\n\n"
             "WORKFLOW\n"
             "  1. + Pick Elements to load them into the list\n"
             "  2. Filter by Search / Category / Risk\n"
@@ -1206,17 +1314,26 @@ class SmartDeleteWindow(Window):
             return
 
         ok = 0
+        gone = set()
+        committed = False
         t = Transaction(self.doc, "Smart Delete - DQT")
         t.Start()
         try:
             for item in items:
+                if item.eid in gone:
+                    continue  # already removed along with an earlier item
                 try:
-                    self.doc.Delete(make_eid(item.eid))
+                    removed = self.doc.Delete(make_eid(item.eid))
                     ok += 1
+                    gone.add(item.eid)
+                    if removed:
+                        for rid in removed:
+                            gone.add(eid_int(rid))
                 except:
                     pass
             if ok > 0:
                 t.Commit()
+                committed = True
             else:
                 t.RollBack()
         except:
@@ -1225,13 +1342,17 @@ class SmartDeleteWindow(Window):
             except:
                 pass
 
-        del_ids = set(i.eid for i in items if ok > 0)
+        # Only rows whose element really is gone leave the list - a row
+        # Revit refused to delete stays, instead of silently vanishing
+        # because some other row in the same batch succeeded.
+        del_ids = gone if committed else set()
+        deleted_n = sum(1 for i in items if i.eid in del_ids)
         self.all_items = [i for i in self.all_items if i.eid not in del_ids]
         self._rebuild_cat_filter()
         self._apply_filters()
         self._update_cards()
 
-        self.txtDeps.Text = "Deleted {} of {} element(s).\nUndo: Ctrl+Z".format(ok, count)
+        self.txtDeps.Text = "Deleted {} of {} element(s).\nUndo: Ctrl+Z".format(deleted_n, count)
         self.Show()
 
 
