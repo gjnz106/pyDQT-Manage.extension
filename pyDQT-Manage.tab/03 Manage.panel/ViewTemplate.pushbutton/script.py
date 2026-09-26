@@ -134,7 +134,10 @@ class ViewTemplateItem(INotifyPropertyChanged):
         
         self._usage_count = 0
         self._usage_percentage = 0.0
-    
+        # View Types (ViewFamilyType) that use this template as their
+        # default for new views - a real use with no view applied yet.
+        self.default_for_types = []
+
     # Properties
     @property
     def element(self):
@@ -178,7 +181,13 @@ class ViewTemplateItem(INotifyPropertyChanged):
     def usage_count(self, value):
         self._usage_count = value
         self.OnPropertyChanged("usage_count")
-    
+
+    @property
+    def is_in_use(self):
+        """Applied to at least one view, OR set as a View Type's default
+        template. usage_count alone only sees the first."""
+        return self._usage_count > 0 or bool(self.default_for_types)
+
     @property
     def usage_percentage(self):
         # IronPython: avoid "{:.1f}".format() - unreliable
@@ -216,15 +225,30 @@ def calculate_viewtemplate_usage(doc, template_items):
     for item in template_items:
         item.usage_count = 0
         item.usage_percentage = 0.0
-    
+        item.default_for_types = []
+
     # Build lookup by template ID
     template_lookup = {}
     for item in template_items:
         template_lookup[item.id] = item
-    
+
     total_views_with_template = 0
     invalid_id = _eid_invalid_value()
-    
+
+    # A template can also be a View Type's default (Edit Type > "View
+    # Template applied to new views") without any view carrying it yet.
+    # Deleting it silently clears that default, so it is in use too.
+    try:
+        for vft in DB.FilteredElementCollector(doc).OfClass(DB.ViewFamilyType):
+            try:
+                tid_int = _eid_int(vft.DefaultTemplateId)
+                if tid_int > 0 and tid_int != invalid_id and tid_int in template_lookup:
+                    template_lookup[tid_int].default_for_types.append(vft.Name)
+            except:
+                pass
+    except Exception as ex:
+        print("Error reading view type default templates: {}".format(str(ex)))
+
     try:
         # Get all views
         collector = DB.FilteredElementCollector(doc).OfClass(DB.View)
@@ -1436,7 +1460,8 @@ class ViewTemplateManagerWindow(Window):
             "View Template Manager\n\n"
             "- Search filters by name; use the dropdown to narrow by view type.\n"
             "- Rename / Batch Rename / Duplicate / Delete apply to the selected rows.\n"
-            "- IN USE / UNUSED counts come from how many views each template is applied to.\n"
+            "- IN USE / UNUSED counts come from how many views each template is applied to,\n"
+            "  plus whether a View Type uses it as its default template for new views.\n"
             "- Select one template and click Detail (or double-click its row) to see\n"
             "  exactly which views use it - View Name / View Type / Scale / Sheet - and\n"
             "  open any of them straight from that list.\n"
@@ -1846,10 +1871,10 @@ class ViewTemplateManagerWindow(Window):
                 continue
             
             if filter_index == 1:  # In Use Only
-                if item.usage_count == 0:
+                if not item.is_in_use:
                     continue
             elif filter_index == 2:  # Unused Only
-                if item.usage_count > 0:
+                if item.is_in_use:
                     continue
             
             if viewtype_filter and item.view_type != viewtype_filter:
@@ -1867,11 +1892,11 @@ class ViewTemplateManagerWindow(Window):
             self.txt_selected.Text = str(self.data_grid.SelectedItems.Count)
         
         if self.txt_used:
-            used = sum(1 for item in self.all_items if item.usage_count > 0)
+            used = sum(1 for item in self.all_items if item.is_in_use)
             self.txt_used.Text = str(used)
         
         if self.txt_unused:
-            unused = sum(1 for item in self.all_items if item.usage_count == 0)
+            unused = sum(1 for item in self.all_items if not item.is_in_use)
             self.txt_unused.Text = str(unused)
     
     def _get_selected_items(self):
@@ -1902,7 +1927,7 @@ class ViewTemplateManagerWindow(Window):
     def _on_select_unused(self, sender, args):
         self.data_grid.UnselectAll()
         for item in self.filtered_items:
-            if item.usage_count == 0:
+            if not item.is_in_use:
                 self.data_grid.SelectedItems.Add(item)
         self._update_stats()
     
@@ -2040,13 +2065,19 @@ class ViewTemplateManagerWindow(Window):
             return
         
         # Check usage - only unused can be deleted
-        in_use = [item for item in selected if item.usage_count > 0]
-        can_delete = [item for item in selected if item.usage_count == 0]
-        
+        in_use = [item for item in selected if item.is_in_use]
+        can_delete = [item for item in selected if not item.is_in_use]
+
         if in_use:
             msg = "WARNING: {} template(s) are IN USE and CANNOT be deleted:\n\n".format(len(in_use))
             for item in in_use[:5]:
-                msg += "  - '{}': {} views\n".format(item.name, item.usage_count)
+                uses = []
+                if item.usage_count > 0:
+                    uses.append("{} views".format(item.usage_count))
+                if item.default_for_types:
+                    uses.append("default for View Type: {}".format(
+                        ", ".join(item.default_for_types[:3])))
+                msg += "  - '{}': {}\n".format(item.name, "; ".join(uses))
             if len(in_use) > 5:
                 msg += "  ... and {} more\n".format(len(in_use) - 5)
             

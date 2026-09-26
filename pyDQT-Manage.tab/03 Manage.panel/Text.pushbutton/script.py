@@ -283,6 +283,9 @@ class TextNoteTypeItem(object):
         # Usage
         self._usage_count = 0
         self._usage_locations = []
+        # Schedules using this type as their Title/Header/Body text
+        # (Schedule Properties > Appearance) - no TextNote involved.
+        self.schedule_uses = []
     
     def _get_font_name(self):
         """Get font name"""
@@ -406,6 +409,12 @@ class TextNoteTypeItem(object):
         self._usage_count = value
 
     @property
+    def is_in_use(self):
+        """Placed as a TextNote, OR used as a schedule's title/header/body
+        text type. usage_count alone only sees the first."""
+        return self._usage_count > 0 or bool(self.schedule_uses)
+
+    @property
     def usage_locations(self):
         return self._usage_locations
 
@@ -426,6 +435,7 @@ def calculate_textnote_usage(doc, text_items):
     for item in text_items:
         item.usage_count = 0
         item.usage_locations = []
+        item.schedule_uses = []
 
     # Build lookup by type ID
     type_lookup = {}
@@ -486,6 +496,28 @@ def calculate_textnote_usage(doc, text_items):
             })
         entries.sort(key=lambda e: e["view_name"])
         item.usage_locations = entries
+
+    # Schedules (incl. sheet lists, note blocks, schedule templates) pick a
+    # text type for their Title, Header and Body text. A type used only
+    # there has zero TextNotes, yet deleting it changes those schedules.
+    try:
+        for sched in DB.FilteredElementCollector(doc).OfClass(DB.ViewSchedule):
+            seen = set()
+            for attr in ("TitleTextTypeId", "HeaderTextTypeId", "BodyTextTypeId"):
+                try:
+                    tid = _eid_int(getattr(sched, attr))
+                except Exception:
+                    continue
+                item = type_lookup.get(tid)
+                if item is None or tid in seen:
+                    continue
+                seen.add(tid)
+                try:
+                    item.schedule_uses.append(sched.Name)
+                except Exception:
+                    item.schedule_uses.append("(schedule)")
+    except Exception as ex:
+        print("Error reading schedule text types: {}".format(str(ex)))
 
 
 # ============================================================================
@@ -1760,7 +1792,8 @@ class TextNoteTypeManagerWindow(Window):
             "- Batch Edit... sets Text Size / Font / Bold / Italic / Width Factor "
             "on every ticked type at once, instead of one cell at a time.\n"
             "- Rename / Batch Rename / Duplicate / Delete apply to the ticked rows.\n"
-            "- IN USE / UNUSED counts come from TextNote instances in the model.\n\n"
+            "- IN USE / UNUSED counts TextNote instances in the model plus schedules that use\n"
+            "  the type as their title/header/body text (Usage shows TextNotes only).\n\n"
             "Dang Quoc Truong - DQT (c) 2026",
             "Help", MessageBoxButton.OK, MessageBoxImage.Information)
     
@@ -2193,10 +2226,10 @@ class TextNoteTypeManagerWindow(Window):
                 continue
             
             if filter_index == 1:  # In Use Only
-                if item.usage_count == 0:
+                if not item.is_in_use:
                     continue
             elif filter_index == 2:  # Unused Only
-                if item.usage_count > 0:
+                if item.is_in_use:
                     continue
             
             self.filtered_items.append(item)
@@ -2214,11 +2247,11 @@ class TextNoteTypeManagerWindow(Window):
             self.txt_selected.Text = str(selected)
         
         if self.txt_used:
-            used = sum(1 for item in self.all_items if item.usage_count > 0)
+            used = sum(1 for item in self.all_items if item.is_in_use)
             self.txt_used.Text = str(used)
         
         if self.txt_unused:
-            unused = sum(1 for item in self.all_items if item.usage_count == 0)
+            unused = sum(1 for item in self.all_items if not item.is_in_use)
             self.txt_unused.Text = str(unused)
     
     def _get_selected_items(self):
@@ -2263,14 +2296,18 @@ class TextNoteTypeManagerWindow(Window):
         self._update_stats()
     
     def _on_select_unused(self, sender, args):
-        """Select rows where Usage == 0.
-        Reads the Usage cell straight off each bound DataRowView instead of
-        indexing filtered_items by position - Items[i] reflects the grid's
-        current (possibly user-sorted) view order, not the load order."""
+        """Select rows whose type is not in use - no TextNote placed AND
+        not a schedule's title/header/body text type.
+        Maps each bound DataRowView back to its item through the ElemId
+        column instead of indexing filtered_items by position - Items[i]
+        reflects the grid's current (possibly user-sorted) view order, not
+        the load order."""
         self.data_grid.UnselectAll()
+        by_id = dict((item.id, item) for item in self.all_items)
         try:
             for row_view in self.data_grid.Items:
-                if row_view["Usage"] == 0:
+                item = by_id.get(int(row_view["ElemId"]))
+                if item is not None and not item.is_in_use:
                     self.data_grid.SelectedItems.Add(row_view)
         except Exception:
             pass
@@ -2484,8 +2521,14 @@ class TextNoteTypeManagerWindow(Window):
         item = selected[0]
 
         if item.usage_count == 0:
-            MessageBox.Show("'{}' is not placed anywhere in the model.".format(item.name),
-                          "Where Used", MessageBoxButton.OK, MessageBoxImage.Information)
+            if item.schedule_uses:
+                msg = ("'{}' has no text notes placed, but is the title/header/"
+                       "body text type of {} schedule(s):\n\n{}").format(
+                           item.name, len(item.schedule_uses),
+                           "\n".join("  - " + n for n in item.schedule_uses[:15]))
+            else:
+                msg = "'{}' is not placed anywhere in the model.".format(item.name)
+            MessageBox.Show(msg, "Where Used", MessageBoxButton.OK, MessageBoxImage.Information)
             return
 
         dialog = UsageLocationsDialog(item, self.uidoc)
@@ -2506,15 +2549,22 @@ class TextNoteTypeManagerWindow(Window):
             return
         
         # Check usage
-        in_use = [item for item in selected if item.usage_count > 0]
-        
+        in_use = [item for item in selected if item.is_in_use]
+
         if in_use:
             msg = "WARNING: {} type(s) are in use:\n\n".format(len(in_use))
             for item in in_use[:5]:
-                msg += "  - '{}': {} instances\n".format(item.name, item.usage_count)
+                uses = []
+                if item.usage_count > 0:
+                    uses.append("{} instances".format(item.usage_count))
+                if item.schedule_uses:
+                    uses.append("schedule text in: {}".format(
+                        ", ".join(item.schedule_uses[:3])))
+                msg += "  - '{}': {}\n".format(item.name, "; ".join(uses))
             if len(in_use) > 5:
                 msg += "  ... and {} more\n".format(len(in_use) - 5)
-            msg += "\nDeleting will affect existing text notes. Continue?"
+            msg += ("\nDeleting deletes their text notes and changes the "
+                    "text formatting of those schedules. Continue?")
             
             result = MessageBox.Show(msg, "Types In Use",
                                     MessageBoxButton.YesNo, MessageBoxImage.Warning)
