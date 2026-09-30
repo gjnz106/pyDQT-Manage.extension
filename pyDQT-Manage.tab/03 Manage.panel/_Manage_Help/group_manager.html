@@ -49,11 +49,14 @@
       <b>Detail Group</b> types fill in as soon as the tool opens - a detail
       group belongs to one view. A <b>Model Group</b> shows in every view
       that can see it, so the only way to know is to ask each view; its
-      cells read <span class="code">(scan needed)</span> until you click
-      <b>Scan Views</b>. That scan shows a progress bar you can cancel, runs
-      once, and is kept until <b>Refresh</b> (placements may have changed).
-      Clicking <b>Detail</b> on a Model type runs the same scan, so the grid
-      fills in then too.
+      cells read <span class="code">(scan needed)</span> until you
+      <b>select the Model type(s) you want and click Scan Selected</b>.
+      <b>Only the selected types are scanned</b> - nothing else in the model
+      is touched. The scan shows a progress bar you can cancel (a cancelled
+      scan keeps nothing), and its result is kept per type until
+      <b>Refresh</b> (placements may have changed); scanning more types
+      later adds to it. Clicking <b>Detail</b> on a Model type scans just
+      that one type, so the grid fills in for it then too.
     </p>
     <p>
       A long list shows its first 3 entries and <span class="code">(+N
@@ -76,8 +79,8 @@
         about.</li>
       <li><b>Select in Model</b> or <b>Zoom To</b> the ticked type's
         instances.</li>
-      <li><b>Scan Views</b> (once) fills in the View / Sheet of the Model
-        Group types.</li>
+      <li>Select the Model Group type(s) you care about and click
+        <b>Scan Selected</b> to fill in their View / Sheet.</li>
       <li><b>Detail</b> opens a breakdown of the selected type - which
         view(s) and sheet(s) each of its instances is in, with its own
         Select in Model / Zoom To.</li>
@@ -94,9 +97,13 @@
       <span class="code">-</span>.
     </div>
     <div class="box fixed">
-      The Model Group scan now skips views that can never show a model
-      group (sheets, schedules, legends, drafting views and reports), so it
-      has fewer views to ask than before.
+      <b>The scan is light on a big model.</b> It used to walk every group
+      in every view and build an element object for each one - enough to run
+      Revit out of memory on a large model. It now scans only the types you
+      select, asks each view just about those instances (Revit answers with
+      ids, so no group element is created), and skips views that can never
+      show a model group (sheets, schedules, legends, drafting views and
+      reports).
     </div>
   </div>
 
