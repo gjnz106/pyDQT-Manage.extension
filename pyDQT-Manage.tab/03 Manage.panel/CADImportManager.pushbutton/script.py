@@ -3,9 +3,10 @@
 Author: Dang Quoc Truong (DQT)
 
 Lists every CAD file imported or linked into the model (ImportInstance
-elements) with its file name, link type, creator, workset, host level and
-the view it was placed into, so a stray or oversized CAD file can be found
-and selected without hunting through every view.
+elements) with its file name, link type, creator, workset, host level, the
+view it was placed into and the sheet that view is on, so a stray or
+oversized CAD file can be found and selected without hunting through every
+view or sheet.
 
 Also finds and purges "unused" CAD Import/Link Types - a Type left with
 zero instances after its last placement is deleted, which Revit never
@@ -28,6 +29,7 @@ from System.Collections.Generic import List
 from System.Windows import Visibility
 from dqt_cad_utils import (is_cad_link, get_unused_cad_types,
                             get_instances_of_type, make_element_id)
+from dqt_sheet_utils import build_view_sheet_map, sheets_of_view, summarize
 import codecs
 import datetime
 
@@ -69,6 +71,7 @@ class CADImportItem(object):
         self.workset = "-"
         self.level = "-"
         self.view_name = "-"
+        self.sheet = "-"
         self.element = None
 
 
@@ -224,6 +227,30 @@ def _get_view_name(doc, elem):
     return "All views"
 
 
+def _get_sheet(doc, elem, view_sheet_map):
+    """The sheet(s) this CAD file is on, through the view it was placed into
+    (view_sheet_map is build_view_sheet_map(doc), built once per load).
+
+      "-"              imported/linked into all views - no single view, so no
+                       single sheet to name
+      "Not on a sheet" its view is not placed on any sheet
+      "A101 - Plans"   the sheet; a CAD placed straight onto a sheet is its
+                       own sheet, and a Legend on several sheets lists them
+
+    Never raises - an unreadable one is reported as "-"""
+    try:
+        owner_id = elem.OwnerViewId
+        if owner_id is None or _eid_int(owner_id) <= 0:
+            return "-"
+        view = doc.GetElement(owner_id)
+        if view is None:
+            return "-"
+        labels = sheets_of_view(view, view_sheet_map)
+        return summarize(labels) if labels else "Not on a sheet"
+    except:
+        return "-"
+
+
 def _link_status_suffix(doc, elem, is_linked):
     """" (Unloaded)" / " (Not Found)" for a CAD Link whose external file
     is not currently loaded - empty string for an Import (no external file
@@ -255,6 +282,10 @@ def _link_status_suffix(doc, elem, is_linked):
 
 def get_cad_imports(doc):
     items = []
+    try:
+        view_sheet_map = build_view_sheet_map(doc)
+    except Exception:
+        view_sheet_map = {}
     collector = FilteredElementCollector(doc).OfClass(ImportInstance) \
         .WhereElementIsNotElementType()
     for elem in collector:
@@ -271,6 +302,7 @@ def get_cad_imports(doc):
             item.workset = _get_workset(doc, elem)
             item.level = _get_level(doc, elem)
             item.view_name = _get_view_name(doc, elem)
+            item.sheet = _get_sheet(doc, elem, view_sheet_map)
             items.append(item)
         except:
             continue
@@ -321,7 +353,7 @@ MAIN_XAML = """
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="CAD Import Manager - DQT"
-        Height="680" Width="1190"
+        Height="680" Width="1340"
         WindowStartupLocation="CenterScreen"
         Background="#FEF8E7">
     <Grid Margin="12">
@@ -389,7 +421,7 @@ MAIN_XAML = """
             <Border Grid.Column="0" Background="White" BorderBrush="#D4B87A" BorderThickness="1" CornerRadius="4" Padding="8" Margin="0,0,8,0">
                 <StackPanel>
                     <TextBlock Text="SEARCH" FontSize="9" FontWeight="SemiBold" Margin="0,0,0,4"/>
-                    <TextBox x:Name="txtSearch" Padding="6,4" Margin="0,0,0,10" ToolTip="Name, creator, workset, view, ID or Type ID"/>
+                    <TextBox x:Name="txtSearch" Padding="6,4" Margin="0,0,0,10" ToolTip="Name, creator, workset, view, sheet, ID or Type ID"/>
                     <TextBlock Text="TYPE" FontSize="9" FontWeight="SemiBold" Margin="0,0,0,4"/>
                     <ComboBox x:Name="cmbFilter" Padding="6,4" Margin="0,0,0,10" SelectedIndex="0">
                         <ComboBoxItem Content="All"/>
@@ -416,6 +448,7 @@ MAIN_XAML = """
                     <DataGridTextColumn Header="Created By" Binding="{Binding created_by}" Width="120" SortMemberPath="created_by"/>
                     <DataGridTextColumn Header="Workset" Binding="{Binding workset}" Width="120" SortMemberPath="workset"/>
                     <DataGridTextColumn Header="View" Binding="{Binding view_name}" Width="160" SortMemberPath="view_name"/>
+                    <DataGridTextColumn Header="Sheet" Binding="{Binding sheet}" Width="170" SortMemberPath="sheet"/>
                     <DataGridTextColumn Header="Level" Binding="{Binding level}" Width="100" SortMemberPath="level"/>
                 </DataGrid.Columns>
             </DataGrid>
@@ -531,9 +564,10 @@ class CADImportManagerWindow(WPFWindow):
                 continue
             if fi == 2 and not item.link_type.startswith("Link"):
                 continue
-            if search and search not in "{} {} {} {} {} {}".format(
+            if search and search not in "{} {} {} {} {} {} {}".format(
                     item.name, item.created_by, item.workset,
-                    item.view_name, item.element_id, item.type_id).lower():
+                    item.view_name, item.sheet, item.element_id,
+                    item.type_id).lower():
                 continue
             self.filtered.append(item)
         self.update_grid()
@@ -712,13 +746,14 @@ class CADImportManagerWindow(WPFWindow):
         if dlg.ShowDialog() == DialogResult.OK:
             try:
                 with codecs.open(dlg.FileName, 'w', 'utf-8-sig') as f:
-                    f.write("ID,Type ID,File Name,Type,Created By,Workset,View,Level\n")
+                    f.write("ID,Type ID,File Name,Type,Created By,Workset,View,Sheet,Level\n")
                     for item in current_items:
-                        f.write('{},{},"{}",{},{},{},"{}",{}\n'.format(
+                        f.write('{},{},"{}",{},{},{},"{}","{}",{}\n'.format(
                             item.element_id, item.type_id,
                             item.name.replace('"', '""'),
                             item.link_type, item.created_by, item.workset,
-                            item.view_name.replace('"', '""'), item.level))
+                            item.view_name.replace('"', '""'),
+                            item.sheet.replace('"', '""'), item.level))
                 forms.alert("Exported {} row(s).".format(len(current_items)),
                             title="DQT - CAD Import Manager")
             except Exception as ex:
@@ -935,9 +970,10 @@ class CADImportManagerWindow(WPFWindow):
         forms.alert(
             "CAD Import Manager\n\n"
             "Lists every CAD file imported or linked into the model, with "
-            "its creator, workset, host level and the view it was placed "
-            "into - so a stray or oversized CAD file can be found without "
-            "hunting through every view.\n\n"
+            "its creator, workset, host level, the view it was placed into "
+            "and the sheet that view is on - so a stray or oversized CAD "
+            "file can be found without hunting through every view or "
+            "sheet.\n\n"
             "STAT CARDS\n"
             "  TOTAL         - CAD ImportInstance elements found\n"
             "  IMPORTS       - imported (not linked) files\n"
@@ -949,9 +985,13 @@ class CADImportManagerWindow(WPFWindow):
             "  Type ID - the CAD Type's Element ID, shared by every\n"
             "            instance of that file. This is the ID ACC's\n"
             "            Model Analytics reports, so paste it into\n"
-            "            Search to find that file's instances here.\n\n"
+            "            Search to find that file's instances here.\n"
+            "  Sheet   - the sheet the CAD file's view is placed on. '-' "
+            "means it was imported into all views, so there is no single "
+            "sheet; 'Not on a sheet' means its view is on no sheet.\n\n"
             "WORKFLOW\n"
-            "  Search matches name, creator, workset, view, ID or Type ID.\n"
+            "  Search matches name, creator, workset, view, sheet, ID or "
+            "Type ID.\n"
             "  Double-click ID or Type ID to copy it; double-click "
             "elsewhere on a row to select + zoom to that file.\n"
             "  Select in Model / Zoom To act on the checked rows.\n"

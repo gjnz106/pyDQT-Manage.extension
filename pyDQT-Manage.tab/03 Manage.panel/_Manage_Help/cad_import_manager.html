@@ -23,8 +23,8 @@
     <h2>What it does</h2>
     <p class="lede">
       Lists every imported and linked CAD file (DWG/DXF/etc.) in the model
-      with who created it, which workset and view it's in, and its level -
-      so stray or duplicate CAD content is easy to find and remove.
+      with who created it, which workset, view and sheet it's in, and its
+      level - so stray or duplicate CAD content is easy to find and remove.
     </p>
   </div>
 
@@ -45,13 +45,14 @@
       <dt class="v-dark">ID</dt><dd>the placed instance's own Element ID</dd>
       <dt class="v-dark">Type ID</dt><dd>the CAD Type's Element ID, shared by every instance of that file - <b>this is the ID ACC's Model Analytics reports</b>, so paste it into Search to find that file's instances here</dd>
       <dt class="v-dark">Type</dt><dd>Import (geometry embedded in the model) vs Link (external .dwg still on disk)</dd>
+      <dt class="v-dark">Sheet</dt><dd>the sheet the CAD file's view is placed on, as <span class="code">number - name</span>. <span class="code">-</span> means it was imported into all views, so there is no single sheet; <span class="code">Not on a sheet</span> means its view is on no sheet. A view that is on several sheets (a Legend) lists them all</dd>
     </dl>
   </div>
 
   <div class="card">
     <h2>Filters</h2>
     <dl class="kv">
-      <dt class="v-dark">Search</dt><dd>matches name, creator, workset, view, ID or Type ID</dd>
+      <dt class="v-dark">Search</dt><dd>matches name, creator, workset, view, sheet, ID or Type ID - type a sheet number to find every CAD file on it</dd>
       <dt class="v-dark">Type</dt><dd>All / Import only / Link only</dd>
     </dl>
   </div>

@@ -23,8 +23,9 @@
     <h2>What it does</h2>
     <p class="lede">
       Lists every Model and Detail group type in the model with its instance
-      count, creator and workset, and lets you drill into a type to see
-      exactly which view(s) its instances live in.
+      count, the view(s) and sheet(s) it is used in, its creator and
+      workset, and lets you drill into a type to see exactly which view and
+      sheet each of its instances lives in.
     </p>
   </div>
 
@@ -39,9 +40,31 @@
   </div>
 
   <div class="card">
+    <h2>View and Sheet columns</h2>
+    <dl class="kv">
+      <dt class="v-dark">View</dt><dd>the view(s) the type's instances are in</dd>
+      <dt class="v-dark">Sheet</dt><dd>the sheet(s) those views are placed on, as <span class="code">number - name</span>; <span class="code">Not on a sheet</span> when none of them is</dd>
+    </dl>
+    <p>
+      <b>Detail Group</b> types fill in as soon as the tool opens - a detail
+      group belongs to one view. A <b>Model Group</b> shows in every view
+      that can see it, so the only way to know is to ask each view; its
+      cells read <span class="code">(scan needed)</span> until you click
+      <b>Scan Views</b>. That scan shows a progress bar you can cancel, runs
+      once, and is kept until <b>Refresh</b> (placements may have changed).
+      Clicking <b>Detail</b> on a Model type runs the same scan, so the grid
+      fills in then too.
+    </p>
+    <p>
+      A long list shows its first 3 entries and <span class="code">(+N
+      more)</span>; <b>Detail</b> and <b>Export CSV</b> have all of them.
+    </p>
+  </div>
+
+  <div class="card">
     <h2>Filters</h2>
     <dl class="kv">
-      <dt class="v-dark">Search</dt><dd>matches name, creator or workset</dd>
+      <dt class="v-dark">Search</dt><dd>matches name, creator, workset, view or sheet - type a sheet number to find every group used on it</dd>
       <dt class="v-dark">Category</dt><dd>All / Model only / Detail only</dd>
     </dl>
   </div>
@@ -53,9 +76,11 @@
         about.</li>
       <li><b>Select in Model</b> or <b>Zoom To</b> the ticked type's
         instances.</li>
+      <li><b>Scan Views</b> (once) fills in the View / Sheet of the Model
+        Group types.</li>
       <li><b>Detail</b> opens a breakdown of the selected type - which
-        view(s) its instances are placed in, with its own Select in Model /
-        Zoom To.</li>
+        view(s) and sheet(s) each of its instances is in, with its own
+        Select in Model / Zoom To.</li>
       <li><b>Export CSV</b> saves the current (filtered) list; <b>Refresh</b>
         reloads it; <b>Close</b> exits the tool.</li>
     </ol>
@@ -65,7 +90,13 @@
     <h2>Good to know</h2>
     <div class="box tip">
       A type with an Instances count of 0 is loaded but unplaced - a purge
-      candidate if it's not needed.
+      candidate if it's not needed. Its View and Sheet read
+      <span class="code">-</span>.
+    </div>
+    <div class="box fixed">
+      The Model Group scan now skips views that can never show a model
+      group (sheets, schedules, legends, drafting views and reports), so it
+      has fewer views to ask than before.
     </div>
   </div>
 

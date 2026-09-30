@@ -5,8 +5,9 @@ Author: Dang Quoc Truong (DQT)
 Lists every Model Group and Detail Group TYPE in the model with how many
 instances are actually placed, so an unused group type (a purge candidate)
 or an over-used one is visible at a glance instead of hunting through the
-Project Browser. Selecting a type and clicking Detail shows exactly which
-view each of its instances lives in.
+Project Browser. View and Sheet columns say where each type is used;
+selecting a type and clicking Detail shows exactly which view and sheet each
+of its instances lives in.
 """
 __title__ = "Group\nManager"
 __author__ = "DQT"
@@ -21,6 +22,7 @@ from pyrevit.forms import WPFWindow
 from pyrevit.compat import get_elementid_value_func
 from Autodesk.Revit.DB import *
 from System.Collections.Generic import List
+from dqt_sheet_utils import build_view_sheet_map, sheets_of_view, summarize
 import codecs
 import datetime
 
@@ -52,6 +54,9 @@ def _eid_int(eid):
 # ============================================================================
 # DATA MODEL
 # ============================================================================
+SCAN_NEEDED = "(scan needed)"
+
+
 class GroupTypeSummary(object):
     def __init__(self):
         self.type_id = 0
@@ -61,12 +66,45 @@ class GroupTypeSummary(object):
         self.created_by = "-"
         self.workset = "-"
         self.instance_ids = []     # ElementId of every placed instance
+        # Where its instances are used. view_names / sheet_names are the
+        # full lists (search, CSV); views / sheets are the grid text.
+        self.view_names = []
+        self.sheet_names = []
+        self.views = "-"
+        self.sheets = "-"
+
+    def set_usage(self, view_names, sheet_names, empty_text="-"):
+        """Set the views / sheets this type's instances are in. No views at
+        all reads empty_text; views that are on no sheet read "Not on a
+        sheet"."""
+        self.view_names = sorted(set(n for n in view_names if n))
+        self.sheet_names = sorted(set(n for n in sheet_names if n))
+        if not self.view_names:
+            self.views = self.sheets = empty_text
+            return
+        self.views = summarize(self.view_names)
+        self.sheets = summarize(self.sheet_names) if self.sheet_names else "Not on a sheet"
+
+    def set_needs_scan(self):
+        """A Model Group type: its views are only known after Scan Views."""
+        self.view_names = []
+        self.sheet_names = []
+        self.views = self.sheets = SCAN_NEEDED
+
+    @property
+    def views_csv(self):
+        return "; ".join(self.view_names) if self.view_names else self.views
+
+    @property
+    def sheets_csv(self):
+        return "; ".join(self.sheet_names) if self.sheet_names else self.sheets
 
 
 class GroupInstanceDetail(object):
     def __init__(self):
         self.instance_id = 0
         self.views = "-"
+        self.sheets = "-"
         self.workset = "-"
         self.element_id = None     # ElementId, kept for navigation
 
@@ -128,18 +166,73 @@ def _get_workset(doc, elem):
     return "-"
 
 
-def get_group_types(doc):
+def _fill_type_usage(doc, item, owner_ids, view_sheet_map, view_cache):
+    """View / Sheet text for one type, from what needs no scan: a Detail
+    Group instance carries the one view it was placed into (OwnerViewId).
+    A Model Group instance carries none - it is shown in every view that
+    sees it - so a Model type stays "(scan needed)" until Scan Views has
+    run (see apply_model_group_usage)."""
+    if item.instance_count == 0:
+        item.set_usage([], [])
+        return
+    if item.category != "Detail":
+        item.set_needs_scan()
+        return
+    names = []
+    sheets = []
+    for owner_id in owner_ids:
+        key = _eid_int(owner_id)
+        if key not in view_cache:
+            try:
+                view_cache[key] = doc.GetElement(owner_id)
+            except:
+                view_cache[key] = None
+        view = view_cache[key]
+        if view is None:
+            continue
+        try:
+            name = view.Name
+        except:
+            name = None
+        if name:
+            names.append(name)
+        sheets.extend(sheets_of_view(view, view_sheet_map))
+    item.set_usage(names, sheets)
+
+
+def apply_model_group_usage(items, membership, view_sheet_map):
+    """Fill View / Sheet on every Model type from the view-membership scan
+    ({group instance id: [(view id, view name), ...]}) - the sheets are the
+    ones those views are placed on."""
+    for item in items:
+        if item.category == "Detail" or item.instance_count == 0:
+            continue
+        names = []
+        sheets = []
+        for eid in item.instance_ids:
+            for view_id, view_name in membership.get(_eid_int(eid), []):
+                names.append(view_name)
+                sheets.extend(view_sheet_map.get(view_id, []))
+        item.set_usage(names, sheets, empty_text="(no view found)")
+
+
+def get_group_types(doc, view_sheet_map=None):
     """One row per GroupType (Model or Detail), with how many placed
-    instances reference it. Types with zero instances are listed too - an
-    unused group type sitting in the model is exactly what this tool is
-    for finding.
+    instances reference it and the views / sheets they are in. Types with
+    zero instances are listed too - an unused group type sitting in the
+    model is exactly what this tool is for finding.
 
     Counting is done in one pass over every Group instance (matching each
     to its type via GetTypeId(), the same pattern this suite's own
     FamilyManager tool already uses) rather than re-scanning all instances
-    once per type."""
+    once per type. The same pass collects each instance's owner view, so
+    Detail Group views cost nothing extra. view_sheet_map is
+    build_view_sheet_map(doc)."""
+    if view_sheet_map is None:
+        view_sheet_map = {}
     counts = {}
     instances_of = {}
+    owner_views_of = {}
     for inst in FilteredElementCollector(doc).OfClass(Group):
         try:
             tid = _eid_int(inst.GetTypeId())
@@ -147,7 +240,14 @@ def get_group_types(doc):
             continue
         counts[tid] = counts.get(tid, 0) + 1
         instances_of.setdefault(tid, []).append(inst.Id)
+        try:
+            owner_id = inst.OwnerViewId
+            if owner_id is not None and _eid_int(owner_id) > 0:
+                owner_views_of.setdefault(tid, []).append(owner_id)
+        except:
+            pass
 
+    view_cache = {}
     items = []
     for gt in FilteredElementCollector(doc).OfClass(GroupType):
         try:
@@ -159,41 +259,67 @@ def get_group_types(doc):
             item.instance_ids = instances_of.get(item.type_id, [])
             item.created_by = _get_created_by(doc, gt)
             item.workset = _get_workset(doc, gt)
+            _fill_type_usage(doc, item, owner_views_of.get(item.type_id, []),
+                             view_sheet_map, view_cache)
             items.append(item)
         except:
             continue
     return items
 
 
-def _detail_group_owner_view(doc, inst):
+def _owner_view(doc, inst):
     """The single view a Detail Group instance was placed into - Detail
     Groups are view-specific, so OwnerViewId always answers this directly
-    without needing to scan anything. Never raises."""
+    without needing to scan anything. None if it has no owner view. Never
+    raises."""
     try:
         owner_id = inst.OwnerViewId
         if owner_id is not None and _eid_int(owner_id) > 0:
-            view = doc.GetElement(owner_id)
-            name = getattr(view, "Name", None) if view else None
-            if name:
-                return name
+            return doc.GetElement(owner_id)
     except:
         pass
     return None
 
 
+# View types that can never show a Model Group instance: no model geometry
+# in them, so asking them what they contain is wasted time (sheets alone are
+# often a large share of a big model's views). Looked up by name so one
+# missing in this Revit version (or spelled differently) cannot break the
+# tool.
+_NON_MODEL_VIEW_TYPES = set(
+    getattr(ViewType, name) for name in (
+        "Undefined", "Internal", "ProjectBrowser", "SystemBrowser",
+        "DrawingSheet", "Schedule", "Legend", "DraftingView",
+        "PanelSchedule", "ColumnSchedule", "CostReport", "LoadsReport",
+        "PresureLossReport", "PressureLossReport", "Report",
+        "SystemsAnalysisReport")
+    if hasattr(ViewType, name))
+
+
+def _is_model_view(v):
+    """A non-template view that can show model elements."""
+    try:
+        if getattr(v, "IsTemplate", False):
+            return False
+        return v.ViewType not in _NON_MODEL_VIEW_TYPES
+    except:
+        return False
+
+
 def build_model_group_view_membership(doc, cancel_check=None, progress_cb=None):
-    """{group_instance_id_int: [view_name, ...]} for every Group instance
-    Revit shows in each view.
+    """{group_instance_id_int: [(view_id_int, view_name), ...]} for every
+    Group instance Revit shows in each view.
 
     A Model Group instance carries no OwnerView - unlike a Detail Group, it
     can appear in many views at once - so the only way to know which views
     actually show one is to ask each view what it contains. This costs one
     FilteredElementCollector per VIEW (not per instance and not per group
     type), which is what keeps it affordable to run on demand rather than
-    a collector per group per view."""
+    a collector per group per view. Only views that can hold model elements
+    are asked (see _NON_MODEL_VIEW_TYPES)."""
     membership = {}
     views = [v for v in FilteredElementCollector(doc).OfClass(View)
-             if not getattr(v, "IsTemplate", False)]
+             if _is_model_view(v)]
     total = len(views)
     for i, v in enumerate(views):
         if cancel_check and cancel_check():
@@ -201,23 +327,27 @@ def build_model_group_view_membership(doc, cancel_check=None, progress_cb=None):
         if progress_cb:
             progress_cb(i + 1, total)
         try:
+            view_id = _eid_int(v.Id)
+            view_name = v.Name
             for g in FilteredElementCollector(doc, v.Id).OfClass(Group):
-                gid = _eid_int(g.Id)
-                membership.setdefault(gid, []).append(v.Name)
+                membership.setdefault(_eid_int(g.Id), []).append((view_id, view_name))
         except:
             continue
     return membership
 
 
-def get_group_instance_details(doc, type_summary, model_group_views=None):
-    """Per-instance rows for one GroupType: which view(s) each instance is
-    used in.
+def get_group_instance_details(doc, type_summary, model_group_views=None,
+                               view_sheet_map=None):
+    """Per-instance rows for one GroupType: which view(s) and sheet(s) each
+    instance is used in.
 
     Detail Group instances resolve instantly via OwnerViewId. Model Group
     instances need the (expensive, caller-supplied/cached) view-membership
     map - model_group_views is None until the caller has actually built it,
     in which case every Model Group instance is reported as not-yet-scanned
     rather than the tool pretending to have an answer it does not."""
+    if view_sheet_map is None:
+        view_sheet_map = {}
     rows = []
     for eid in type_summary.instance_ids:
         inst = doc.GetElement(eid)
@@ -229,14 +359,25 @@ def get_group_instance_details(doc, type_summary, model_group_views=None):
         row.workset = _get_workset(doc, inst)
 
         if type_summary.category == "Detail":
-            view_name = _detail_group_owner_view(doc, inst)
+            view = _owner_view(doc, inst)
+            view_name = getattr(view, "Name", None) if view else None
             row.views = view_name if view_name else "-"
+            sheets = sheets_of_view(view, view_sheet_map)
+            if view_name:
+                row.sheets = "; ".join(sheets) if sheets else "Not on a sheet"
         else:
             if model_group_views is None:
-                row.views = "(not scanned)"
+                row.views = row.sheets = "(not scanned)"
             else:
-                names = model_group_views.get(row.instance_id)
-                row.views = ", ".join(sorted(set(names))) if names else "(no view found)"
+                pairs = model_group_views.get(row.instance_id)
+                if pairs:
+                    names = sorted(set(name for _, name in pairs))
+                    sheets = sorted(set(label for view_id, _ in pairs
+                                        for label in view_sheet_map.get(view_id, [])))
+                    row.views = "; ".join(names)
+                    row.sheets = "; ".join(sheets) if sheets else "Not on a sheet"
+                else:
+                    row.views = "(no view found)"
         rows.append(row)
     return rows
 
@@ -283,7 +424,7 @@ DETAIL_XAML = """
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Group Detail - DQT"
-        Height="500" Width="650"
+        Height="500" Width="900"
         WindowStartupLocation="CenterScreen"
         Background="#FEF8E7">
     <Grid Margin="12">
@@ -311,6 +452,7 @@ DETAIL_XAML = """
             <DataGrid.Columns>
                 <DataGridTextColumn x:Name="colId" Header="Instance ID" Binding="{Binding instance_id}" Width="100" SortMemberPath="instance_id"/>
                 <DataGridTextColumn Header="View(s)" Binding="{Binding views}" Width="*" SortMemberPath="views"/>
+                <DataGridTextColumn Header="Sheet(s)" Binding="{Binding sheets}" Width="240" SortMemberPath="sheets"/>
                 <DataGridTextColumn Header="Workset" Binding="{Binding workset}" Width="140" SortMemberPath="workset"/>
             </DataGrid.Columns>
         </DataGrid>
@@ -432,7 +574,7 @@ MAIN_XAML = """
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Group Manager - DQT"
-        Height="620" Width="1020"
+        Height="620" Width="1300"
         WindowStartupLocation="CenterScreen"
         Background="#FEF8E7">
     <Grid Margin="12">
@@ -489,14 +631,14 @@ MAIN_XAML = """
             <Border Grid.Column="0" Background="White" BorderBrush="#D4B87A" BorderThickness="1" CornerRadius="4" Padding="8" Margin="0,0,8,0">
                 <StackPanel>
                     <TextBlock Text="SEARCH" FontSize="9" FontWeight="SemiBold" Margin="0,0,0,4"/>
-                    <TextBox x:Name="txtSearch" Padding="6,4" Margin="0,0,0,10" ToolTip="Name, creator or workset"/>
+                    <TextBox x:Name="txtSearch" Padding="6,4" Margin="0,0,0,10" ToolTip="Name, creator, workset, view or sheet"/>
                     <TextBlock Text="CATEGORY" FontSize="9" FontWeight="SemiBold" Margin="0,0,0,4"/>
                     <ComboBox x:Name="cmbFilter" Padding="6,4" Margin="0,0,0,10" SelectedIndex="0">
                         <ComboBoxItem Content="All"/>
                         <ComboBoxItem Content="Model only"/>
                         <ComboBoxItem Content="Detail only"/>
                     </ComboBox>
-                    <TextBlock Text="Select a type and click Detail to see which view(s) its instances are used in." FontSize="9" Foreground="#888" TextWrapping="Wrap" Margin="0,6,0,0"/>
+                    <TextBlock Text="View / Sheet: Detail Group types fill in at once. A Model Group shows in many views, so click Scan Views once to fill those in. Select a type and click Detail to see it per instance." FontSize="9" Foreground="#888" TextWrapping="Wrap" Margin="0,6,0,0"/>
                 </StackPanel>
             </Border>
 
@@ -513,6 +655,8 @@ MAIN_XAML = """
                     <DataGridTextColumn Header="Name" Binding="{Binding name}" Width="*" SortMemberPath="name"/>
                     <DataGridTextColumn Header="Category" Binding="{Binding category}" Width="80" SortMemberPath="category"/>
                     <DataGridTextColumn Header="Instances" Binding="{Binding instance_count}" Width="80" SortMemberPath="instance_count"/>
+                    <DataGridTextColumn Header="View" Binding="{Binding views}" Width="200" SortMemberPath="views"/>
+                    <DataGridTextColumn Header="Sheet" Binding="{Binding sheets}" Width="200" SortMemberPath="sheets"/>
                     <DataGridTextColumn Header="Created By" Binding="{Binding created_by}" Width="120" SortMemberPath="created_by"/>
                     <DataGridTextColumn Header="Workset" Binding="{Binding workset}" Width="120" SortMemberPath="workset"/>
                 </DataGrid.Columns>
@@ -530,6 +674,7 @@ MAIN_XAML = """
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                     <Button x:Name="btnSelectInModel" Content="Select in Model" Padding="10,5" Margin="2" Background="#F0CC88"/>
                     <Button x:Name="btnZoom" Content="Zoom To" Padding="10,5" Margin="2" Background="#F0CC88"/>
+                    <Button x:Name="btnScan" Content="Scan Views" Padding="10,5" Margin="2" Background="#F0CC88" ToolTip="Find the views and sheets the Model Group instances appear in (one scan, then cached until Refresh)"/>
                     <Button x:Name="btnDetail" Content="Detail" Padding="10,5" Margin="2" Background="#F0CC88" FontWeight="SemiBold"/>
                     <Button x:Name="btnExportCSV" Content="Export CSV" Padding="10,5" Margin="2" Background="White"/>
                     <Button x:Name="btnClose" Content="Close" Padding="10,5" Margin="2" Background="White"/>
@@ -557,6 +702,7 @@ class GroupManagerWindow(WPFWindow):
         self.items = []
         self.filtered = []
         self._model_group_views = None     # lazy cache, see _ensure_model_group_view_cache
+        self._view_sheet_map = {}          # view id -> sheet labels, built per load
 
         self.txtSearch.TextChanged += self.on_filter
         self.cmbFilter.SelectionChanged += self.on_filter
@@ -568,6 +714,7 @@ class GroupManagerWindow(WPFWindow):
         self.btnRefresh.Click += self.refresh
         self.btnSelectInModel.Click += self.select_in_model
         self.btnZoom.Click += self.zoom_to
+        self.btnScan.Click += self.scan_views
         self.btnDetail.Click += self.show_detail
         self.btnExportCSV.Click += self.export_csv
         self.btnClose.Click += self.close_window
@@ -577,7 +724,11 @@ class GroupManagerWindow(WPFWindow):
         self.update_ui()
 
     def load_data(self):
-        self.items = get_group_types(self.doc)
+        self._view_sheet_map = build_view_sheet_map(self.doc)
+        self.items = get_group_types(self.doc, self._view_sheet_map)
+        if self._model_group_views is not None:
+            apply_model_group_usage(self.items, self._model_group_views,
+                                    self._view_sheet_map)
         self.filtered = list(self.items)
 
     def update_ui(self):
@@ -602,8 +753,9 @@ class GroupManagerWindow(WPFWindow):
                 continue
             if fi == 2 and item.category != "Detail":
                 continue
-            if search and search not in "{} {} {}".format(
-                    item.name, item.created_by, item.workset).lower():
+            if search and search not in "{} {} {} {} {}".format(
+                    item.name, item.created_by, item.workset,
+                    "; ".join(item.view_names), "; ".join(item.sheet_names)).lower():
                 continue
             self.filtered.append(item)
         self.update_grid()
@@ -725,6 +877,27 @@ class GroupManagerWindow(WPFWindow):
         self._model_group_views = result
         return result
 
+    def _apply_scan_to_grid(self):
+        """Put the view-membership scan's results on the Model rows and
+        redraw, keeping the current selection."""
+        apply_model_group_usage(self.items, self._model_group_views,
+                                self._view_sheet_map)
+        keep = set(i.type_id for i in self.dataGrid.SelectedItems)
+        self.update_grid()
+        for item in self.filtered:
+            if item.type_id in keep:
+                self.dataGrid.SelectedItems.Add(item)
+
+    def scan_views(self, s, e):
+        if self._model_group_views is not None:
+            forms.alert("Model Group views are already scanned. Use Refresh "
+                        "to scan again after placements change.",
+                        title="DQT - Group Manager")
+            return
+        if self._ensure_model_group_view_cache() is None:
+            return      # user cancelled the scan
+        self._apply_scan_to_grid()
+
     def show_detail(self, s, e):
         if self.dataGrid.SelectedItems.Count != 1:
             forms.alert("Select exactly one group type to see its detail.",
@@ -738,11 +911,15 @@ class GroupManagerWindow(WPFWindow):
 
         model_group_views = None
         if item.category != "Detail":
+            was_scanned = self._model_group_views is not None
             model_group_views = self._ensure_model_group_view_cache()
             if model_group_views is None:
                 return      # user cancelled the scan
+            if not was_scanned:
+                self._apply_scan_to_grid()      # the grid's View/Sheet too
 
-        rows = get_group_instance_details(self.doc, item, model_group_views)
+        rows = get_group_instance_details(self.doc, item, model_group_views,
+                                          self._view_sheet_map)
         dlg = GroupDetailWindow(self.doc, self.uidoc, item.name, rows)
         dlg.ShowDialog()
 
@@ -761,11 +938,13 @@ class GroupManagerWindow(WPFWindow):
         if dlg.ShowDialog() == DialogResult.OK:
             try:
                 with codecs.open(dlg.FileName, 'w', 'utf-8-sig') as f:
-                    f.write("ID,Name,Category,Instances,Created By,Workset\n")
+                    f.write("ID,Name,Category,Instances,View,Sheet,Created By,Workset\n")
                     for item in current_items:
-                        f.write('{},"{}",{},{},{},{}\n'.format(
+                        f.write('{},"{}",{},{},"{}","{}",{},{}\n'.format(
                             item.type_id, item.name.replace('"', '""'),
                             item.category, item.instance_count,
+                            item.views_csv.replace('"', '""'),
+                            item.sheets_csv.replace('"', '""'),
                             item.created_by, item.workset))
                 forms.alert("Exported {} row(s).".format(len(current_items)),
                             title="DQT - Group Manager")
@@ -788,11 +967,21 @@ class GroupManagerWindow(WPFWindow):
             "  MODEL        - Model Group types\n"
             "  DETAIL       - Detail Group types\n"
             "  SELECTED     - rows currently selected in the grid\n\n"
+            "VIEW / SHEET COLUMNS\n"
+            "  View  - the view(s) the type's instances are in.\n"
+            "  Sheet - the sheet(s) those views are on; 'Not on a sheet' "
+            "if none is.\n"
+            "  Detail Group types fill in at once. A Model Group shows in "
+            "many views, so its cells read '(scan needed)' until you click "
+            "Scan Views - one scan (progress bar, cancellable), cached "
+            "until Refresh. A long list shows the first 3 and '(+N more)'; "
+            "Detail and Export CSV have all of them.\n\n"
             "WORKFLOW\n"
-            "  Search / Type filter narrow the list.\n"
+            "  Search matches name, creator, workset, view or sheet.\n"
+            "  Category filter narrows the list.\n"
             "  Select in Model / Zoom To act on the ticked types' instances.\n"
-            "  Detail shows exactly which view each instance of the "
-            "selected type lives in.\n"
+            "  Detail shows exactly which view and sheet each instance of "
+            "the selected type lives in.\n"
             "  Export CSV saves the visible list.",
             title="Group Manager - Help")
 
