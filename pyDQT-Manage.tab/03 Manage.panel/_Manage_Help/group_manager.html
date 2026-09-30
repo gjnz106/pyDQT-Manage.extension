@@ -25,7 +25,8 @@
       Lists every Model and Detail group type in the model with its instance
       count, the view(s) and sheet(s) it is used in, its creator and
       workset, and lets you drill into a type to see exactly which view and
-      sheet each of its instances lives in.
+      sheet each of its instances lives in. <b>Delete</b> removes the group
+      types you select.
     </p>
   </div>
 
@@ -84,6 +85,8 @@
       <li><b>Detail</b> opens a breakdown of the selected type - which
         view(s) and sheet(s) each of its instances is in, with its own
         Select in Model / Zoom To.</li>
+      <li><b>Delete</b> removes the selected group types - see the warning
+        below before using it on a type that is placed.</li>
       <li><b>Export CSV</b> saves the current (filtered) list; <b>Refresh</b>
         reloads it; <b>Close</b> exits the tool.</li>
     </ol>
@@ -94,7 +97,20 @@
     <div class="box tip">
       A type with an Instances count of 0 is loaded but unplaced - a purge
       candidate if it's not needed. Its View and Sheet read
-      <span class="code">-</span>.
+      <span class="code">-</span>. Click the <b>Instances</b> header to sort
+      them together, then select and <b>Delete</b> them.
+    </div>
+    <div class="box warn">
+      <b>Delete a placed type and it takes its instances with it.</b>
+      Deleting a group type also deletes every instance of it, and the
+      elements inside those groups, from the model. The confirmation lists
+      the placed types (with their instance counts) before anything is
+      removed; a selection of only unused types says that nothing else is
+      affected. <b>Undo (Ctrl+Z)</b> restores everything right after. If
+      Revit refuses one (a pinned instance, an element another user has
+      checked out) that type is listed as not deleted and the rest still
+      go; one removed together with an earlier one (a group nested inside
+      another) counts as deleted.
     </div>
     <div class="box fixed">
       <b>The scan is light on a big model.</b> It used to walk every group

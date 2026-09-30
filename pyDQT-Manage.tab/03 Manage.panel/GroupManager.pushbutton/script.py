@@ -7,7 +7,7 @@ instances are actually placed, so an unused group type (a purge candidate)
 or an over-used one is visible at a glance instead of hunting through the
 Project Browser. View and Sheet columns say where each type is used;
 selecting a type and clicking Detail shows exactly which view and sheet each
-of its instances lives in.
+of its instances lives in. Delete removes the selected group types.
 """
 __title__ = "Group\nManager"
 __author__ = "DQT"
@@ -66,6 +66,7 @@ class GroupTypeSummary(object):
         self.created_by = "-"
         self.workset = "-"
         self.instance_ids = []     # ElementId of every placed instance
+        self.type_element_id = None   # the GroupType's own ElementId, for Delete
         # Where its instances are used. view_names / sheet_names are the
         # full lists (search, CSV); views / sheets are the grid text.
         self.view_names = []
@@ -257,6 +258,7 @@ def get_group_types(doc, view_sheet_map=None):
         try:
             item = GroupTypeSummary()
             item.type_id = _eid_int(gt.Id)
+            item.type_element_id = gt.Id
             item.name = _group_type_name(gt)
             item.category = _group_category(gt.Category.Id) if gt.Category else "?"
             item.instance_count = counts.get(item.type_id, 0)
@@ -395,6 +397,36 @@ def get_group_instance_details(doc, type_summary, model_group_views=None,
                     row.views = "(no view found)"
         rows.append(row)
     return rows
+
+
+def delete_confirm_message(selected):
+    """(message, placed) for the Delete confirmation: placed is the selected
+    types that still have instances. Deleting a group type deletes every
+    instance of it and the elements inside those groups, so those are named
+    up front; a selection of unused types says nothing else goes with it."""
+    placed = [i for i in selected if i.instance_count > 0]
+    unused = [i for i in selected if i.instance_count == 0]
+    if placed:
+        lines = ["   - {} ({}, {} instance(s))".format(
+            i.name, i.category, i.instance_count) for i in placed[:8]]
+        if len(placed) > 8:
+            lines.append("   ... and {} more".format(len(placed) - 8))
+        msg = ("Delete {} group type(s)?\n\nWARNING: {} of them are PLACED in "
+               "the model ({} instance(s) in all):\n{}\n\nDeleting a group "
+               "type also deletes every instance of it, and the elements "
+               "inside those groups, from the model.").format(
+                   len(selected), len(placed),
+                   sum(i.instance_count for i in placed), "\n".join(lines))
+        if unused:
+            msg += ("\n\nThe other {} have no instances, so nothing else goes "
+                    "with them.").format(len(unused))
+        msg += ("\n\nUndo (Ctrl+Z) restores everything right after if "
+                "needed.\n\nDelete anyway?")
+    else:
+        msg = ("Delete {} unused group type(s)?\n\nNone of them is placed in "
+               "the model, so nothing else is removed.\n\nUndo (Ctrl+Z) "
+               "restores them right after if needed.").format(len(selected))
+    return msg, placed
 
 
 def _navigate_to(uidoc, doc, ids):
@@ -692,6 +724,7 @@ MAIN_XAML = """
                     <Button x:Name="btnScan" Content="Scan Selected" Padding="10,5" Margin="2" Background="#F0CC88" ToolTip="Find the views and sheets of the SELECTED Model Group types. Only those are scanned; the result is kept until Refresh."/>
                     <Button x:Name="btnDetail" Content="Detail" Padding="10,5" Margin="2" Background="#F0CC88" FontWeight="SemiBold"/>
                     <Button x:Name="btnExportCSV" Content="Export CSV" Padding="10,5" Margin="2" Background="White"/>
+                    <Button x:Name="btnDelete" Content="Delete" Padding="10,5" Margin="2" Background="#FF6B6B" Foreground="White" ToolTip="Delete the selected group types. A type that is placed also loses its instances - you are asked to confirm first."/>
                     <Button x:Name="btnClose" Content="Close" Padding="10,5" Margin="2" Background="White"/>
                 </StackPanel>
             </Grid>
@@ -736,6 +769,7 @@ class GroupManagerWindow(WPFWindow):
         self.btnScan.Click += self.scan_views
         self.btnDetail.Click += self.show_detail
         self.btnExportCSV.Click += self.export_csv
+        self.btnDelete.Click += self.delete_selected
         self.btnClose.Click += self.close_window
         self.btnHelp.Click += self.on_help
 
@@ -991,6 +1025,69 @@ class GroupManagerWindow(WPFWindow):
             except Exception as ex:
                 forms.alert(str(ex), title="DQT - Group Manager")
 
+    def delete_selected(self, s, e):
+        selected = list(self.dataGrid.SelectedItems)
+        if not selected:
+            forms.alert("Select at least one group type first.",
+                        title="DQT - Group Manager")
+            return
+
+        msg, placed = delete_confirm_message(selected)
+        if not forms.alert(msg, title="DQT - Group Manager: Confirm Delete",
+                           yes=True, no=True, warn_icon=bool(placed)):
+            return
+
+        deleted, failed = self._delete_items(selected)
+
+        result = "Deleted {} of {} group type(s).".format(len(deleted), len(selected))
+        removed_instances = sum(i.instance_count for i in deleted)
+        if removed_instances:
+            result += "\nThat removed {} placed instance(s) with them.".format(
+                removed_instances)
+        if failed:
+            lines = failed[:8]
+            more = "" if len(failed) <= 8 else "\n... and {} more".format(len(failed) - 8)
+            result += "\n\nCould not delete:\n{}{}".format("\n".join(lines), more)
+        forms.alert(result, title="DQT - Group Manager")
+
+        self.refresh(s, e)
+
+    def _delete_items(self, items):
+        """Delete these group types in one transaction. Returns (deleted
+        items, failure descriptions).
+
+        Each type is deleted on its own inside the transaction, so one Revit
+        refuses (a pinned instance, an element another user has checked out)
+        is reported and the rest still go. A type Revit already removed along
+        with an earlier one (a group nested in another) counts as deleted
+        rather than as a failure. If the transaction itself fails it is
+        rolled back, so nothing is reported as deleted."""
+        deleted = []
+        failed = []
+        gone = set()
+        try:
+            with revit.Transaction("DQT - Delete Group(s)"):
+                for item in items:
+                    if item.type_id in gone:
+                        deleted.append(item)
+                        continue
+                    if item.type_element_id is None:
+                        failed.append("{} (ID {}) - no element id".format(
+                            item.name, item.type_id))
+                        continue
+                    try:
+                        removed = self.doc.Delete(item.type_element_id)
+                        for eid in removed:
+                            gone.add(_eid_int(eid))
+                        deleted.append(item)
+                    except Exception as ex:
+                        failed.append("{} (ID {}) - {}".format(
+                            item.name, item.type_id, ex))
+        except Exception as ex:
+            deleted = []
+            failed.append("transaction failed and was rolled back: {}".format(ex))
+        return deleted, failed
+
     def close_window(self, s, e):
         self.Close()
 
@@ -1024,7 +1121,12 @@ class GroupManagerWindow(WPFWindow):
             "  Detail shows exactly which view and sheet each instance of "
             "the selected type lives in (for a Model type it scans just "
             "that one type).\n"
-            "  Export CSV saves the visible list.",
+            "  Export CSV saves the visible list.\n"
+            "  Delete removes the selected group types, after asking. A "
+            "type with no instances is removed on its own; a type that is "
+            "placed also takes every instance of it, and the elements "
+            "inside those groups, with it - the confirmation names those "
+            "types first. Undo (Ctrl+Z) restores it right after.",
             title="Group Manager - Help")
 
 
