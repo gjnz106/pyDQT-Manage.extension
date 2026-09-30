@@ -86,7 +86,8 @@ class GroupTypeSummary(object):
         self.sheets = summarize(self.sheet_names) if self.sheet_names else "Not on a sheet"
 
     def set_needs_scan(self):
-        """A Model Group type: its views are only known after Scan Views."""
+        """A Model Group type: its views are only known once it has been
+        selected and scanned (Scan Selected)."""
         self.view_names = []
         self.sheet_names = []
         self.views = self.sheets = SCAN_NEEDED
@@ -170,8 +171,8 @@ def _fill_type_usage(doc, item, owner_ids, view_sheet_map, view_cache):
     """View / Sheet text for one type, from what needs no scan: a Detail
     Group instance carries the one view it was placed into (OwnerViewId).
     A Model Group instance carries none - it is shown in every view that
-    sees it - so a Model type stays "(scan needed)" until Scan Views has
-    run (see apply_model_group_usage)."""
+    sees it - so a Model type stays "(scan needed)" until it has been
+    selected and scanned with Scan Selected (see apply_model_group_usage)."""
     if item.instance_count == 0:
         item.set_usage([], [])
         return
@@ -200,12 +201,15 @@ def _fill_type_usage(doc, item, owner_ids, view_sheet_map, view_cache):
     item.set_usage(names, sheets)
 
 
-def apply_model_group_usage(items, membership, view_sheet_map):
-    """Fill View / Sheet on every Model type from the view-membership scan
-    ({group instance id: [(view id, view name), ...]}) - the sheets are the
-    ones those views are placed on."""
+def apply_model_group_usage(items, membership, view_sheet_map, scanned_type_ids):
+    """Fill View / Sheet on the Model types that have been scanned
+    (scanned_type_ids) from the view-membership scan ({group instance id:
+    [(view id, view name), ...]}) - the sheets are the ones those views are
+    placed on. A type that was never scanned is left as it is."""
     for item in items:
         if item.category == "Detail" or item.instance_count == 0:
+            continue
+        if item.type_id not in scanned_type_ids:
             continue
         names = []
         sheets = []
@@ -306,31 +310,42 @@ def _is_model_view(v):
         return False
 
 
-def build_model_group_view_membership(doc, cancel_check=None, progress_cb=None):
-    """{group_instance_id_int: [(view_id_int, view_name), ...]} for every
-    Group instance Revit shows in each view.
+def build_model_group_view_membership(doc, instance_ids, cancel_check=None,
+                                      progress_cb=None):
+    """{group_instance_id_int: [(view_id_int, view_name), ...]} for the given
+    Model Group instances only - which views show each one.
 
     A Model Group instance carries no OwnerView - unlike a Detail Group, it
     can appear in many views at once - so the only way to know which views
-    actually show one is to ask each view what it contains. This costs one
+    actually show one is to ask each view what it contains. That is one
     FilteredElementCollector per VIEW (not per instance and not per group
-    type), which is what keeps it affordable to run on demand rather than
-    a collector per group per view. Only views that can hold model elements
-    are asked (see _NON_MODEL_VIEW_TYPES)."""
+    type). Two things keep it light on a big model:
+      - each view is asked only about instance_ids, through an
+        ElementIdSetFilter, and answers with ElementIds (ToElementIds) - no
+        Group element object is created for any group in any view. Walking
+        every group in every view with OfClass(Group) built one element
+        wrapper per group per view, which on a large model is what ran
+        Revit out of memory;
+      - only views that can hold model elements are asked (see
+        _NON_MODEL_VIEW_TYPES).
+    instance_ids is a list of ElementId."""
     membership = {}
-    views = [v for v in FilteredElementCollector(doc).OfClass(View)
+    if not instance_ids:
+        return membership
+    id_filter = ElementIdSetFilter(List[ElementId](instance_ids))
+    views = [(_eid_int(v.Id), v.Name, v.Id)
+             for v in FilteredElementCollector(doc).OfClass(View)
              if _is_model_view(v)]
     total = len(views)
-    for i, v in enumerate(views):
+    for i, (view_id, view_name, view_eid) in enumerate(views):
         if cancel_check and cancel_check():
             break
         if progress_cb:
             progress_cb(i + 1, total)
         try:
-            view_id = _eid_int(v.Id)
-            view_name = v.Name
-            for g in FilteredElementCollector(doc, v.Id).OfClass(Group):
-                membership.setdefault(_eid_int(g.Id), []).append((view_id, view_name))
+            for eid in FilteredElementCollector(doc, view_eid) \
+                    .WherePasses(id_filter).ToElementIds():
+                membership.setdefault(_eid_int(eid), []).append((view_id, view_name))
         except:
             continue
     return membership
@@ -638,7 +653,7 @@ MAIN_XAML = """
                         <ComboBoxItem Content="Model only"/>
                         <ComboBoxItem Content="Detail only"/>
                     </ComboBox>
-                    <TextBlock Text="View / Sheet: Detail Group types fill in at once. A Model Group shows in many views, so click Scan Views once to fill those in. Select a type and click Detail to see it per instance." FontSize="9" Foreground="#888" TextWrapping="Wrap" Margin="0,6,0,0"/>
+                    <TextBlock Text="View / Sheet: Detail Group types fill in at once. A Model Group shows in many views, so select the Model type(s) you want and click Scan Selected - only those are scanned. Detail scans just the one type you select." FontSize="9" Foreground="#888" TextWrapping="Wrap" Margin="0,6,0,0"/>
                 </StackPanel>
             </Border>
 
@@ -674,7 +689,7 @@ MAIN_XAML = """
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                     <Button x:Name="btnSelectInModel" Content="Select in Model" Padding="10,5" Margin="2" Background="#F0CC88"/>
                     <Button x:Name="btnZoom" Content="Zoom To" Padding="10,5" Margin="2" Background="#F0CC88"/>
-                    <Button x:Name="btnScan" Content="Scan Views" Padding="10,5" Margin="2" Background="#F0CC88" ToolTip="Find the views and sheets the Model Group instances appear in (one scan, then cached until Refresh)"/>
+                    <Button x:Name="btnScan" Content="Scan Selected" Padding="10,5" Margin="2" Background="#F0CC88" ToolTip="Find the views and sheets of the SELECTED Model Group types. Only those are scanned; the result is kept until Refresh."/>
                     <Button x:Name="btnDetail" Content="Detail" Padding="10,5" Margin="2" Background="#F0CC88" FontWeight="SemiBold"/>
                     <Button x:Name="btnExportCSV" Content="Export CSV" Padding="10,5" Margin="2" Background="White"/>
                     <Button x:Name="btnClose" Content="Close" Padding="10,5" Margin="2" Background="White"/>
@@ -701,7 +716,11 @@ class GroupManagerWindow(WPFWindow):
         self.uidoc = revit.uidoc
         self.items = []
         self.filtered = []
-        self._model_group_views = None     # lazy cache, see _ensure_model_group_view_cache
+        # Model Group view scan, kept per scanned type until Refresh (see
+        # _scan_types): {instance id: [(view id, view name), ...]} and the
+        # ids of the types it covers.
+        self._model_group_views = {}
+        self._scanned_types = set()
         self._view_sheet_map = {}          # view id -> sheet labels, built per load
 
         self.txtSearch.TextChanged += self.on_filter
@@ -726,9 +745,9 @@ class GroupManagerWindow(WPFWindow):
     def load_data(self):
         self._view_sheet_map = build_view_sheet_map(self.doc)
         self.items = get_group_types(self.doc, self._view_sheet_map)
-        if self._model_group_views is not None:
+        if self._scanned_types:
             apply_model_group_usage(self.items, self._model_group_views,
-                                    self._view_sheet_map)
+                                    self._view_sheet_map, self._scanned_types)
         self.filtered = list(self.items)
 
     def update_ui(self):
@@ -819,7 +838,8 @@ class GroupManagerWindow(WPFWindow):
         self.dataGrid.UnselectAll()
 
     def refresh(self, s, e):
-        self._model_group_views = None     # placements may have changed
+        self._model_group_views = {}       # placements may have changed
+        self._scanned_types = set()
         self.load_data()
         self.on_filter(None, None)
         self.txtTotal.Text = str(len(self.items))
@@ -851,37 +871,43 @@ class GroupManagerWindow(WPFWindow):
             return
         _navigate_to(self.uidoc, self.doc, ids)
 
-    def _ensure_model_group_view_cache(self):
-        """Build (once, cached) {instance_id: [view_name,...]} for every
-        Model Group instance. Returns None if the user cancels the scan."""
-        if self._model_group_views is not None:
-            return self._model_group_views
+    def _scan_types(self, items):
+        """Scan the views of these Model Group types (the ones not scanned
+        yet) and keep the result. Returns False if the user cancels - nothing
+        from a cancelled scan is kept, so a type is never half-filled."""
+        todo = [i for i in items
+                if i.category != "Detail" and i.instance_count > 0
+                and i.type_id not in self._scanned_types]
+        if not todo:
+            return True
+        instance_ids = [eid for i in todo for eid in i.instance_ids]
 
         cancelled = {"flag": False}
         with forms.ProgressBar(
-                title="DQT - Scanning views for Model Group usage: "
-                      "{value} of {max_value}",
+                title="DQT - Scanning views for " + str(len(instance_ids)) +
+                      " Model Group instance(s): {value} of {max_value}",
                 cancellable=True) as pb:
             def _cancel_check():
                 cancelled["flag"] = pb.cancelled
                 return cancelled["flag"]
 
             result = build_model_group_view_membership(
-                self.doc, cancel_check=_cancel_check,
+                self.doc, instance_ids, cancel_check=_cancel_check,
                 progress_cb=lambda i, total: pb.update_progress(i, total))
 
         if cancelled["flag"]:
-            forms.alert("Scan cancelled - Detail needs the full scan to show "
-                        "Model Group usage.", title="DQT - Group Manager")
-            return None
-        self._model_group_views = result
-        return result
+            forms.alert("Scan cancelled - nothing was kept for the type(s) "
+                        "being scanned.", title="DQT - Group Manager")
+            return False
+        self._model_group_views.update(result)
+        self._scanned_types.update(i.type_id for i in todo)
+        return True
 
     def _apply_scan_to_grid(self):
-        """Put the view-membership scan's results on the Model rows and
-        redraw, keeping the current selection."""
+        """Put the view-membership scan's results on the scanned Model rows
+        and redraw, keeping the current selection."""
         apply_model_group_usage(self.items, self._model_group_views,
-                                self._view_sheet_map)
+                                self._view_sheet_map, self._scanned_types)
         keep = set(i.type_id for i in self.dataGrid.SelectedItems)
         self.update_grid()
         for item in self.filtered:
@@ -889,12 +915,27 @@ class GroupManagerWindow(WPFWindow):
                 self.dataGrid.SelectedItems.Add(item)
 
     def scan_views(self, s, e):
-        if self._model_group_views is not None:
-            forms.alert("Model Group views are already scanned. Use Refresh "
-                        "to scan again after placements change.",
+        """Scan Selected - only the Model Group types ticked in the grid."""
+        selected = list(self.dataGrid.SelectedItems)
+        if not selected:
+            forms.alert("Select the Model Group type(s) to scan first. Only "
+                        "the selected types are scanned.",
                         title="DQT - Group Manager")
             return
-        if self._ensure_model_group_view_cache() is None:
+        model_items = [i for i in selected
+                       if i.category != "Detail" and i.instance_count > 0]
+        if not model_items:
+            forms.alert("Nothing to scan in the selection: Detail Group types "
+                        "are filled in already, and a type with no instances "
+                        "has nothing to scan.", title="DQT - Group Manager")
+            return
+        todo = [i for i in model_items if i.type_id not in self._scanned_types]
+        if not todo:
+            forms.alert("The selected Model Group type(s) are already "
+                        "scanned. Use Refresh to scan again after placements "
+                        "change.", title="DQT - Group Manager")
+            return
+        if not self._scan_types(todo):
             return      # user cancelled the scan
         self._apply_scan_to_grid()
 
@@ -911,12 +952,11 @@ class GroupManagerWindow(WPFWindow):
 
         model_group_views = None
         if item.category != "Detail":
-            was_scanned = self._model_group_views is not None
-            model_group_views = self._ensure_model_group_view_cache()
-            if model_group_views is None:
-                return      # user cancelled the scan
-            if not was_scanned:
+            if item.type_id not in self._scanned_types:
+                if not self._scan_types([item]):    # just this one type
+                    return      # user cancelled the scan
                 self._apply_scan_to_grid()      # the grid's View/Sheet too
+            model_group_views = self._model_group_views
 
         rows = get_group_instance_details(self.doc, item, model_group_views,
                                           self._view_sheet_map)
@@ -972,16 +1012,18 @@ class GroupManagerWindow(WPFWindow):
             "  Sheet - the sheet(s) those views are on; 'Not on a sheet' "
             "if none is.\n"
             "  Detail Group types fill in at once. A Model Group shows in "
-            "many views, so its cells read '(scan needed)' until you click "
-            "Scan Views - one scan (progress bar, cancellable), cached "
-            "until Refresh. A long list shows the first 3 and '(+N more)'; "
-            "Detail and Export CSV have all of them.\n\n"
+            "many views, so its cells read '(scan needed)' until you select "
+            "the Model type(s) and click Scan Selected. Only the selected "
+            "types are scanned (progress bar, cancellable), and the result "
+            "is kept until Refresh. A long list shows the first 3 and "
+            "'(+N more)'; Detail and Export CSV have all of them.\n\n"
             "WORKFLOW\n"
             "  Search matches name, creator, workset, view or sheet.\n"
             "  Category filter narrows the list.\n"
             "  Select in Model / Zoom To act on the ticked types' instances.\n"
             "  Detail shows exactly which view and sheet each instance of "
-            "the selected type lives in.\n"
+            "the selected type lives in (for a Model type it scans just "
+            "that one type).\n"
             "  Export CSV saves the visible list.",
             title="Group Manager - Help")
 
