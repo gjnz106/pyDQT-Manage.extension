@@ -1,8 +1,9 @@
 title: "Health\nCheck"
 tooltip: >-
-  Analyze model health with color-coded metrics dashboard.
-  Monitors file size, warnings, CAD imports, in-place families,
-  RVT links, worksets, views, sheets, and more.
+  Analyze model health on a Green / Amber / Red scale, with the
+  metrics listed by impact on model performance and stability:
+  warnings, CAD imports, file size, in-place families, duplicates,
+  CAD and RVT links, images, model groups, design options and more.
   
   Copyright by Dang Quoc Truong - DQT
 author: Dang Quoc Truong (DQT)
