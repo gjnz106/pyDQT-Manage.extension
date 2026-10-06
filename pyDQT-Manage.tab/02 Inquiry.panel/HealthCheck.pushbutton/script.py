@@ -66,7 +66,7 @@ from Autodesk.Revit.DB import *
 from Autodesk.Revit.UI import *
 from Autodesk.Revit.UI.Selection import *
 from pyrevit import script
-from dqt_cad_utils import is_cad_link, get_unused_cad_types
+from dqt_cad_utils import is_cad_link, is_cad_link_type, get_unused_cad_types
 
 WPFGrid = WPFControls.Grid
 
@@ -495,7 +495,9 @@ class ModelHealthAnalyzer:
                 except:
                     pass
             try:
-                elems.extend(get_unused_cad_types(self.doc))
+                # a type left behind by a LINK is not an import
+                elems.extend(t for t in get_unused_cad_types(self.doc)
+                             if not is_cad_link_type(t))
             except:
                 pass
             self.metrics["cad_imports"] = len(elems)
@@ -628,7 +630,9 @@ class ModelHealthAnalyzer:
                     pass
             for inst in FilteredElementCollector(self.doc).OfClass(ImportInstance).WhereElementIsNotElementType():
                 try:
-                    if inst.IsLinked and not inst.Pinned:
+                    # same link test as CAD Imports / CAD Links, so a cloud
+                    # DWG link is not missed here either
+                    if is_cad_link(self.doc, inst) and not inst.Pinned:
                         elems.append(inst)
                 except:
                     pass

@@ -121,6 +121,17 @@
       invisible here while ACC kept reporting them. Clear them with
       <b>Purge Unused Types</b> in CAD Import Manager.
     </div>
+    <div class="box fixed">
+      <b>A DWG linked from the cloud counted as a CAD Import.</b> A link
+      whose Manage Links Path Type is <b>Cloud</b> (Autodesk Docs / Forma)
+      is an external resource, not an external file reference, and the
+      shared Import/Link check took "not a file reference" to mean
+      "import". It now uses Revit's own <code>IsLinked</code> answer, and
+      on builds without it counts a cloud reference as a link - so a cloud
+      link is counted under CAD Links (and Unpinned Links when it is not
+      pinned). A CAD type left behind by a <i>link</i> is no longer counted
+      as a CAD Import either.
+    </div>
   </div>
 
   <div class="pagenav">

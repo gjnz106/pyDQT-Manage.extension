@@ -43,6 +43,7 @@ import json
 import codecs
 import traceback
 import datetime
+from dqt_cad_utils import is_cad_link
 
 
 def _open_help_page(html_filename):
@@ -1171,7 +1172,9 @@ class RuleEngine:
         
         collector = FilteredElementCollector(self.doc).OfClass(ImportInstance)
         for imp in collector:
-            is_linked = imp.IsLinked
+            # the shared link test: also right for a cloud DWG link
+            # (Autodesk Docs / Forma), and for builds without IsLinked
+            is_linked = is_cad_link(self.doc, imp)
             if check_type == "imported" and is_linked:
                 continue
             if check_type == "linked" and not is_linked:
