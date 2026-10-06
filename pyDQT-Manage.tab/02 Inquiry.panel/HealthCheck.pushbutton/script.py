@@ -1,9 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-Model Health Check v1.4 - DQT
+Model Health Check v2.0 - DQT
 Analyzes Revit model health with color-coded metrics dashboard.
 Features: Gauge dashboard, Select Elements, Weighted score, Purgeable elements.
 Pure code-behind WPF for IronPython stability.
+
+v2.0: a 3-level RAG health scale (Green / Amber / Red) instead of the
+6-level one, and the metrics presented in order of their impact on model
+performance and stability (Critical / High / Moderate / Low impact).
 
 Copyright (c) 2025 Dang Quoc Truong (DQT)
 All rights reserved.
@@ -100,32 +104,69 @@ DQT_TEXT = "#333333"
 DQT_BORDER = "#D4B87A"
 
 HEALTH_GREEN = "#4CAF50"
-HEALTH_LIGHT_GREEN = "#8BC34A"
-HEALTH_YELLOW = "#FFC107"
-HEALTH_ORANGE = "#FF9800"
-HEALTH_RED = "#F44336"
-HEALTH_DARK_RED = "#D32F2F"
+HEALTH_AMBER = "#FFB300"
+HEALTH_RED = "#D32F2F"
 
 BC = BrushConverter()
 def brush(hex_color):
     return BC.ConvertFromString(hex_color)
 
 # ============================================================
-# METRIC THRESHOLDS WITH WEIGHTS
-# weight: 5=Critical, 4=High, 3=Medium, 2=Low, 1=Minor
+# RAG HEALTH SCALE - every metric, and the model as a whole, is one of
+# three levels. A 3-level scale reads faster than the old 6-level one:
+# it says straight away whether action is needed.
+# ============================================================
+RAG_GREEN = "Green"
+RAG_AMBER = "Amber"
+RAG_RED = "Red"
+RAG_LEVELS = [RAG_GREEN, RAG_AMBER, RAG_RED]
+RAG_COLORS = {RAG_GREEN: HEALTH_GREEN, RAG_AMBER: HEALTH_AMBER, RAG_RED: HEALTH_RED}
+RAG_MEANING = {
+    RAG_GREEN: "Healthy, meeting expectations",
+    RAG_AMBER: "Needs attention, improvement recommended",
+    RAG_RED: "Action required, high risk or major impact",
+}
+# Short form for the overall model result under the gauge.
+RAG_SHORT = {RAG_GREEN: "Healthy", RAG_AMBER: "Needs Attention",
+             RAG_RED: "Action Required"}
+# Text on a coloured cell: white reads on green and red, not on amber.
+RAG_TEXT_COLORS = {RAG_GREEN: "#FFFFFF", RAG_AMBER: DQT_TEXT, RAG_RED: "#FFFFFF"}
+# A metric's contribution to the weighted score.
+RAG_SCORES = {RAG_GREEN: 100, RAG_AMBER: 50, RAG_RED: 0}
+# Overall result from the weighted score: Green from 90, Amber from 60
+# (the old grade A / grades B-C / grades D-F).
+OVERALL_GREEN_MIN = 90
+OVERALL_AMBER_MIN = 60
+
+# ============================================================
+# IMPACT TIERS - the metrics are listed by how much they hurt the model,
+# not as if every metric mattered equally. Each tier's default weight in
+# the overall score follows from it.
+# ============================================================
+IMPACT_TIERS = OrderedDict([
+    ("Critical", {"weight": 5, "description":
+        "Most likely to cause performance issues, instability, file bloat "
+        "and user frustration."}),
+    ("High", {"weight": 4, "description":
+        "Affect manageability, model quality and long-term maintainability."}),
+    ("Moderate", {"weight": 3, "description":
+        "Affect manageability and model quality, to a lesser degree."}),
+    ("Low", {"weight": 2, "description":
+        "Model housekeeping rather than performance issues."}),
+])
+
+# ============================================================
+# METRICS - in priority order (most impact first), which is the order
+# the dashboard, the Settings tab and the report list them in.
+# thresholds: [Green <=, Amber <=] - anything above the Amber value is Red.
+# weight: 1-5, how much the metric counts toward the overall score.
 # ============================================================
 METRIC_THRESHOLDS = OrderedDict([
-    ("file_size_mb", {
-        "label": "File Size (MB)",
-        "thresholds": [100, 250, 500, 750, 1000],
-        "tooltip": "Model file size. Large files slow loading and sync.",
-        "unit": "MB",
-        "selectable": False,
-        "weight": 4
-    }),
+    # ---- Critical impact ----
     ("warnings", {
         "label": "Warnings",
-        "thresholds": [100, 500, 1000, 2000, 5000],
+        "impact": "Critical",
+        "thresholds": [500, 1000],
         "tooltip": "Total warnings. High count = model instability.",
         "unit": "",
         "selectable": False,
@@ -133,63 +174,92 @@ METRIC_THRESHOLDS = OrderedDict([
     }),
     ("cad_imports", {
         "label": "CAD Imports",
-        "thresholds": [0, 2, 5, 7, 10],
+        "impact": "Critical",
+        "thresholds": [2, 5],
         "tooltip": "Imported CAD (not linked), plus CAD types left with no instances. Bloats file size significantly, and orphaned types keep being reported by ACC Model Analytics.",
         "unit": "",
         "selectable": True,
         "weight": 5
     }),
+    ("file_size_mb", {
+        "label": "File Size (MB)",
+        "impact": "Critical",
+        "thresholds": [250, 500],
+        "tooltip": "Model file size. Large files slow loading and sync.",
+        "unit": "MB",
+        "selectable": False,
+        "weight": 5
+    }),
     ("in_place_families", {
         "label": "In-Place Families",
-        "thresholds": [5, 15, 30, 60, 100],
+        "impact": "Critical",
+        "thresholds": [15, 30],
         "tooltip": "In-Place families can't be reused, increase file size.",
+        "unit": "",
+        "selectable": True,
+        "weight": 5
+    }),
+    # ---- High impact ----
+    ("duplicate_elements", {
+        "label": "Duplicate Elements",
+        "impact": "High",
+        "thresholds": [10, 30],
+        "tooltip": "Elements of same type overlapping at same location. Cause double counting and visual issues.",
+        "unit": "",
+        "selectable": True,
+        "weight": 4
+    }),
+    ("cad_links", {
+        "label": "CAD Links",
+        "impact": "High",
+        "thresholds": [25, 50],
+        "tooltip": "Linked CAD files. Many links degrade navigation.",
         "unit": "",
         "selectable": True,
         "weight": 4
     }),
     ("rvt_links", {
         "label": "RVT Links",
-        "thresholds": [10, 20, 35, 50, 80],
+        "impact": "High",
+        "thresholds": [20, 35],
         "tooltip": "Linked Revit files. Too many = slow performance.",
         "unit": "",
         "selectable": True,
-        "weight": 2
+        "weight": 4
     }),
-    ("cad_links", {
-        "label": "CAD Links",
-        "thresholds": [10, 25, 50, 80, 120],
-        "tooltip": "Linked CAD files. Many links degrade navigation.",
-        "unit": "",
-        "selectable": True,
-        "weight": 3
-    }),
+    # ---- Moderate impact ----
     ("imported_images", {
         "label": "Imported Images",
-        "thresholds": [5, 15, 30, 60, 100],
+        "impact": "Moderate",
+        "thresholds": [15, 30],
         "tooltip": "Embedded raster images. Each one bloats file size and can go missing if the source file moves.",
         "unit": "",
         "selectable": True,
         "weight": 3
     }),
     ("groups", {
-        "label": "Groups",
-        "thresholds": [20, 50, 100, 200, 500],
-        "tooltip": "Model and Detail Groups cause performance issues.",
+        "label": "Model Groups",
+        "impact": "Moderate",
+        "thresholds": [50, 100],
+        "tooltip": "Model groups placed in the model. Many or large groups slow editing and regeneration.",
         "unit": "",
         "selectable": True,
         "weight": 3
     }),
     ("design_options", {
         "label": "Design Options",
-        "thresholds": [3, 5, 8, 15, 20],
+        "impact": "Moderate",
+        "thresholds": [5, 8],
         "tooltip": "Design Options add complexity and memory usage.",
         "unit": "",
         "selectable": True,
-        "weight": 1
+        "weight": 3
     }),
+    # ---- Low impact ----
     ("rooms_unplaced", {
         "label": "Unplaced Rooms",
-        "thresholds": [0, 5, 15, 30, 50],
+        "impact": "Low",
+        "thresholds": [5, 15],
         "tooltip": "Unplaced rooms cause errors in schedules.",
         "unit": "",
         "selectable": True,
@@ -197,21 +267,26 @@ METRIC_THRESHOLDS = OrderedDict([
     }),
     ("linked_dwg_not_pinned", {
         "label": "Unpinned Links",
-        "thresholds": [0, 3, 8, 15, 30],
+        "impact": "Low",
+        "thresholds": [3, 8],
         "tooltip": "Unpinned links can be accidentally moved.",
         "unit": "",
         "selectable": True,
         "weight": 2
     }),
-    ("duplicate_elements", {
-        "label": "Duplicate Elements",
-        "thresholds": [0, 10, 30, 60, 100],
-        "tooltip": "Elements of same type overlapping at same location. Cause double counting and visual issues.",
-        "unit": "",
-        "selectable": True,
-        "weight": 4
-    }),
 ])
+
+# The weights v1.x shipped with. A settings file saved by v1.x holds a
+# full snapshot (every metric's weight, edited or not), so a saved weight
+# equal to its old default is treated as "never edited" and the new
+# impact-based default is used instead.
+LEGACY_DEFAULT_WEIGHTS = {
+    "file_size_mb": 4, "warnings": 5, "cad_imports": 5,
+    "in_place_families": 4, "rvt_links": 2, "cad_links": 3,
+    "imported_images": 3, "groups": 3, "design_options": 1,
+    "rooms_unplaced": 2, "linked_dwg_not_pinned": 2,
+    "duplicate_elements": 4,
+}
 
 # The hardcoded values above, snapshotted before any saved override is
 # applied - "Reset to Defaults" in the Settings tab restores from this,
@@ -244,18 +319,35 @@ def _load_threshold_overrides():
         return {}
 
 
-def _valid_thresholds_list(t):
-    """5 non-decreasing numbers - the shape get_health_score/get_status_text
-    actually need. Anything else (wrong length, non-numeric, out of
-    order, or a bool masquerading as a number) is rejected so a
-    corrupted or hand-edited settings file can only ever fall back to
-    the default for that one metric, never break the scoring math."""
-    if not isinstance(t, list) or len(t) != 5:
+def _numbers_in_order(t, count):
+    """`count` non-decreasing numbers (a bool is not a number here)."""
+    if not isinstance(t, list) or len(t) != count:
         return False
     for x in t:
         if isinstance(x, bool) or not isinstance(x, (int, float)):
             return False
-    return all(t[i] <= t[i + 1] for i in range(4))
+    return all(t[i] <= t[i + 1] for i in range(count - 1))
+
+
+def _valid_thresholds_list(t):
+    """[Green <=, Amber <=]: 2 non-decreasing numbers - the shape
+    get_status_text actually needs. Anything else (wrong length,
+    non-numeric, out of order, or a bool masquerading as a number) is
+    rejected so a corrupted or hand-edited settings file can only ever
+    fall back to the default for that one metric, never break the
+    scoring math."""
+    return _numbers_in_order(t, 2)
+
+
+def _legacy_thresholds_to_rag(t):
+    """A v1.x 6-level threshold list (the upper bounds of Good /
+    Acceptable / Warning / Concerning / Critical) as [Green <=, Amber <=]:
+    Green is the old Good + Acceptable, Amber the old Warning, Red the
+    old Concerning and worse - the levels v1.x already flagged for
+    action. None when `t` is not a valid v1.x list."""
+    if not _numbers_in_order(t, 5):
+        return None
+    return [t[1], t[2]]
 
 
 def _parse_threshold_number(text):
@@ -281,15 +373,24 @@ def _apply_threshold_overrides():
     - scoring, coloring, the heatmap, the Excel/HTML export - automatically
     sees the customized values with no other change needed. An entry for
     an unknown key, or one that fails validation, is simply skipped and
-    that metric keeps its hardcoded default."""
+    that metric keeps its hardcoded default.
+
+    A file saved by v1.x (6-level scale) is read too: its 5 thresholds
+    are converted to Green/Amber, and a weight still equal to its v1.x
+    default gives way to the new impact-based default."""
     for key, val in _load_threshold_overrides().items():
         if key not in METRIC_THRESHOLDS or not isinstance(val, dict):
             continue
         t = val.get("thresholds")
+        legacy = _legacy_thresholds_to_rag(t)
+        if legacy is not None:
+            t = legacy
         if _valid_thresholds_list(t):
             METRIC_THRESHOLDS[key]["thresholds"] = list(t)
         w = val.get("weight")
         if isinstance(w, int) and not isinstance(w, bool) and 1 <= w <= 5:
+            if legacy is not None and w == LEGACY_DEFAULT_WEIGHTS.get(key):
+                continue
             METRIC_THRESHOLDS[key]["weight"] = w
 
 
@@ -482,8 +583,10 @@ class ModelHealthAnalyzer:
             self.metrics["imported_images"] = 0
 
     def _groups(self):
+        # Model groups only - detail groups are view annotation, not part
+        # of the model's performance picture.
         try:
-            col = FilteredElementCollector(self.doc).OfClass(Group).WhereElementIsNotElementType()
+            col = FilteredElementCollector(self.doc).OfCategory(BuiltInCategory.OST_IOSModelGroups).WhereElementIsNotElementType()
             elems = list(col)
             self.metrics["groups"] = len(elems)
             self._store_ids("groups", elems)
@@ -574,51 +677,88 @@ class ModelHealthAnalyzer:
 # ============================================================
 # HELPER FUNCTIONS
 # ============================================================
-def get_health_color(key, value):
+def get_status_text(key, value):
+    """The metric's RAG level: Green up to the Green value, Amber up to
+    the Amber value, Red above it ("N/A" for an unknown metric)."""
     if key not in METRIC_THRESHOLDS:
-        return "#FFFFFF"
+        return "N/A"
     t = METRIC_THRESHOLDS[key]["thresholds"]
-    if value <= t[0]: return HEALTH_GREEN
-    elif value <= t[1]: return HEALTH_LIGHT_GREEN
-    elif value <= t[2]: return HEALTH_YELLOW
-    elif value <= t[3]: return HEALTH_ORANGE
-    elif value <= t[4]: return HEALTH_RED
-    else: return HEALTH_DARK_RED
+    if value <= t[0]: return RAG_GREEN
+    elif value <= t[1]: return RAG_AMBER
+    else: return RAG_RED
+
+def get_health_color(key, value):
+    return RAG_COLORS.get(get_status_text(key, value), "#FFFFFF")
+
+def get_text_color(key, value):
+    """Text colour that reads on the metric's RAG colour."""
+    return RAG_TEXT_COLORS.get(get_status_text(key, value), DQT_TEXT)
 
 def get_health_score(metrics):
+    """Weighted average of the metrics' RAG scores (Green 100, Amber 50,
+    Red 0), 0-100."""
     weighted_total = 0
     weight_sum = 0
     for key, value in metrics.items():
         if key in METRIC_THRESHOLDS:
-            t = METRIC_THRESHOLDS[key]["thresholds"]
             w = METRIC_THRESHOLDS[key].get("weight", 1)
-            if value <= t[0]: s = 100
-            elif value <= t[1]: s = 80
-            elif value <= t[2]: s = 60
-            elif value <= t[3]: s = 40
-            elif value <= t[4]: s = 20
-            else: s = 0
-            weighted_total += s * w
+            weighted_total += RAG_SCORES[get_status_text(key, value)] * w
             weight_sum += w
     return round(weighted_total / max(weight_sum, 1), 1)
 
-def get_health_grade(score):
-    if score >= 90: return "A", "Excellent", HEALTH_GREEN
-    elif score >= 75: return "B", "Good", HEALTH_LIGHT_GREEN
-    elif score >= 60: return "C", "Fair", HEALTH_YELLOW
-    elif score >= 40: return "D", "Poor", HEALTH_ORANGE
-    else: return "F", "Critical", HEALTH_RED
+def get_overall_status(score):
+    """(RAG level, short label, colour) of the whole model from its
+    weighted score."""
+    if score >= OVERALL_GREEN_MIN: level = RAG_GREEN
+    elif score >= OVERALL_AMBER_MIN: level = RAG_AMBER
+    else: level = RAG_RED
+    return level, RAG_SHORT[level], RAG_COLORS[level]
 
-def get_status_text(key, value):
-    if key not in METRIC_THRESHOLDS:
-        return "N/A"
-    t = METRIC_THRESHOLDS[key]["thresholds"]
-    if value <= t[0]: return "Good"
-    elif value <= t[1]: return "Acceptable"
-    elif value <= t[2]: return "Warning"
-    elif value <= t[3]: return "Concerning"
-    elif value <= t[4]: return "Critical"
-    else: return "Severe"
+def count_statuses(metrics):
+    """{"Green": n, "Amber": n, "Red": n} over the known metrics."""
+    counts = OrderedDict((level, 0) for level in RAG_LEVELS)
+    for key, value in metrics.items():
+        if key in METRIC_THRESHOLDS:
+            counts[get_status_text(key, value)] += 1
+    return counts
+
+def status_summary(counts):
+    """One line on what the counts mean for the user."""
+    red, amber = counts[RAG_RED], counts[RAG_AMBER]
+    if red:
+        return "{} Red metric(s) - action required. {} Amber.".format(red, amber)
+    if amber:
+        return "{} Amber metric(s) - improvement recommended.".format(amber)
+    return "All metrics Green - the model is healthy."
+
+def counts_text(counts):
+    return "Total: {} metrics | Green: {} | Amber: {} | Red: {}".format(
+        sum(counts.values()), counts[RAG_GREEN], counts[RAG_AMBER], counts[RAG_RED])
+
+def metrics_by_impact(metrics):
+    """[(tier, [(priority number, key), ...]), ...] - the analysed metrics
+    in priority order (the order of METRIC_THRESHOLDS), grouped by impact
+    tier. The number is the metric's place in the full priority list."""
+    groups = OrderedDict((tier, []) for tier in IMPACT_TIERS)
+    for number, key in enumerate(METRIC_THRESHOLDS, 1):
+        if key in metrics:
+            tier = METRIC_THRESHOLDS[key].get("impact", "Low")
+            groups.setdefault(tier, []).append((number, key))
+    return [(tier, items) for tier, items in groups.items() if items]
+
+def thresholds_text(thresholds):
+    return u"Green ≤ {0} | Amber ≤ {1} | Red > {1}".format(
+        thresholds[0], thresholds[1])
+
+def bar_scale(thresholds):
+    """The value at the right end of the health bar: half again past the
+    Amber value, so the Red zone shows as the last third of the bar."""
+    return max(float(thresholds[1]) * 1.5, float(thresholds[1]) + 1, 1.0)
+
+def recommended_keys(metrics):
+    """Metrics that are Amber or Red, in priority order."""
+    return [key for key in METRIC_THRESHOLDS if key in metrics
+            and get_status_text(key, metrics[key]) in (RAG_AMBER, RAG_RED)]
 
 RECOMMENDATIONS = {
     "file_size_mb": "Purge unused families, remove imported CAD files, audit model.",
@@ -661,16 +801,16 @@ def create_gauge(score, size=120):
         sweep = min(score / 100.0, 1.0) * 180
     
     if sweep > 0:
-        _, _, color = get_health_grade(score)
+        _, _, color = get_overall_status(score)
         fg_arc = _create_arc_path(cx, cy, radius, 180, 180 + sweep, color, stroke_width)
         canvas.Children.Add(fg_arc)
-    
+
     # Score text
     score_tb = TextBlock()
     score_tb.Text = str(score)
     score_tb.FontSize = size * 0.22
     score_tb.FontWeight = FontWeights.Bold
-    _, _, sc = get_health_grade(score)
+    _, _, sc = get_overall_status(score)
     score_tb.Foreground = brush(sc)
     score_tb.HorizontalAlignment = HorizontalAlignment.Center
     Canvas.SetLeft(score_tb, cx - size * 0.18)
@@ -728,7 +868,7 @@ class ModelHealthWindow(Window):
         self.metrics = OrderedDict()
         self.analyzer = None
 
-        self.Title = "Model Health Check v1.4 - DQT"
+        self.Title = "Model Health Check v2.0 - DQT"
         self.Height = 900
         self.Width = 1400
         self.MinHeight = 700
@@ -849,13 +989,14 @@ class ModelHealthWindow(Window):
         intro.Margin = Thickness(0, 0, 0, 10)
         intro_txt = TextBlock()
         intro_txt.Text = (
-            u"Set the threshold boundaries and weight used to grade each "
-            u"metric, then “Save & Apply” before running "
-            u"Re-Analyze. Each value is the upper bound of its band - "
-            u"Good ≤ Acceptable ≤ Warning ≤ Concerning ≤ "
-            u"Critical - anything above the Critical value is Severe. "
-            u"Weight (1-5) is how much that metric counts toward the "
-            u"overall weighted score.")
+            u"Set the thresholds and weight used to grade each metric, "
+            u"then “Save & Apply” before running Re-Analyze. "
+            u"Each metric is Green up to its Green value, Amber up to its "
+            u"Amber value, and Red above that. Weight (1-5) is how much "
+            u"the metric counts toward the overall weighted score; by "
+            u"default it follows the metric's impact (Critical 5, High 4, "
+            u"Moderate 3, Low 2). Metrics are listed by impact, most "
+            u"impact first.")
         intro_txt.FontSize = 13
         intro_txt.TextWrapping = TextWrapping.Wrap
         intro_txt.Foreground = brush(DQT_TEXT_DARK)
@@ -880,14 +1021,13 @@ class ModelHealthWindow(Window):
         # afterthought.
         table = WPFGrid()
         table.Margin = Thickness(10)
-        col_widths = [230, 105, 120, 105, 130, 100, 120]
+        col_widths = [230, 110, 120, 120, 120]
         for w in col_widths:
             cd = ColumnDefinition()
             cd.Width = GridLength(w)
             table.ColumnDefinitions.Add(cd)
 
-        headers = [u"Metric", u"Good ≤", u"Acceptable ≤",
-                   u"Warning ≤", u"Concerning ≤", u"Critical ≤",
+        headers = [u"Metric", u"Impact", u"Green ≤", u"Amber ≤",
                    u"Weight (1-5)"]
         header_row = RowDefinition()
         header_row.Height = GridLength(1, GridUnitType.Auto)
@@ -927,8 +1067,20 @@ class ModelHealthWindow(Window):
             WPFGrid.SetColumn(lbl, 0)
             table.Children.Add(lbl)
 
+            impact = cfg.get("impact", "")
+            itb = TextBlock()
+            itb.Text = impact
+            itb.FontSize = 13
+            itb.Foreground = brush(DQT_TEXT_DARK)
+            itb.VerticalAlignment = VerticalAlignment.Center
+            itb.Margin = Thickness(6, 6, 6, 6)
+            itb.ToolTip = IMPACT_TIERS.get(impact, {}).get("description", "")
+            WPFGrid.SetRow(itb, row_i)
+            WPFGrid.SetColumn(itb, 1)
+            table.Children.Add(itb)
+
             boxes = []
-            for ci in range(5):
+            for ci in range(2):
                 tb = WPFControls.TextBox()
                 tb.Text = str(cfg["thresholds"][ci])
                 tb.FontSize = 13
@@ -938,7 +1090,7 @@ class ModelHealthWindow(Window):
                 tb.BorderBrush = brush(DQT_BORDER)
                 tb.Background = brush("#FFFFFF")
                 WPFGrid.SetRow(tb, row_i)
-                WPFGrid.SetColumn(tb, ci + 1)
+                WPFGrid.SetColumn(tb, ci + 2)
                 table.Children.Add(tb)
                 boxes.append(tb)
 
@@ -951,7 +1103,7 @@ class ModelHealthWindow(Window):
             wtb.BorderBrush = brush(DQT_BORDER)
             wtb.Background = brush("#FFFFFF")
             WPFGrid.SetRow(wtb, row_i)
-            WPFGrid.SetColumn(wtb, 6)
+            WPFGrid.SetColumn(wtb, 4)
             table.Children.Add(wtb)
 
             self._threshold_boxes[key] = {"boxes": boxes, "weight_box": wtb}
@@ -1016,7 +1168,7 @@ class ModelHealthWindow(Window):
     def _on_save_thresholds(self, sender, args):
         """Validate every row, then apply + persist in one all-or-nothing
         step - a bad value in one metric must never silently save the
-        other 16 while leaving that one row's edit lost."""
+        other 11 while leaving that one row's edit lost."""
         new_values = {}
         for key, refs in self._threshold_boxes.items():
             label = METRIC_THRESHOLDS[key]["label"]
@@ -1029,9 +1181,8 @@ class ModelHealthWindow(Window):
                 return
             if not _valid_thresholds_list(t):
                 MessageBox.Show(
-                    u"{}: the 5 values must be in non-decreasing order\n"
-                    u"(Good ≤ Acceptable ≤ Warning ≤ "
-                    u"Concerning ≤ Critical).".format(label),
+                    u"{}: the Amber value cannot be smaller than the Green "
+                    u"value\n(Green ≤ Amber).".format(label),
                     "Invalid Thresholds", MessageBoxButton.OK, MessageBoxImage.Warning)
                 return
             w_text = (refs["weight_box"].Text or "").strip()
@@ -1189,7 +1340,7 @@ class ModelHealthWindow(Window):
         cs.HorizontalAlignment = HorizontalAlignment.Center
         self.txt_grade = TextBlock()
         self.txt_grade.Text = "?"
-        self.txt_grade.FontSize = 32
+        self.txt_grade.FontSize = 22
         self.txt_grade.FontWeight = FontWeights.Bold
         self.txt_grade.Foreground = brush("#FFFFFF")
         self.txt_grade.HorizontalAlignment = HorizontalAlignment.Center
@@ -1305,19 +1456,16 @@ class ModelHealthWindow(Window):
         lbl.Foreground = brush(DQT_TEXT_DARK)
         lbl.VerticalAlignment = VerticalAlignment.Center
         sp.Children.Add(lbl)
-        for color, text in [
-            (HEALTH_GREEN, "Good"), (HEALTH_LIGHT_GREEN, "Acceptable"),
-            (HEALTH_YELLOW, "Warning"), (HEALTH_ORANGE, "Concerning"),
-            (HEALTH_RED, "Critical"), (HEALTH_DARK_RED, "Severe")]:
+        for level in RAG_LEVELS:
             b = Border()
-            b.Background = brush(color)
+            b.Background = brush(RAG_COLORS[level])
             b.CornerRadius = WinCornerRadius(3)
-            b.Padding = Thickness(8, 3, 8, 3)
-            b.Margin = Thickness(2, 0, 2, 0)
+            b.Padding = Thickness(10, 3, 10, 3)
+            b.Margin = Thickness(3, 0, 3, 0)
             t = TextBlock()
-            t.Text = text
-            t.FontSize = 10
-            t.Foreground = brush("#FFFFFF")
+            t.Text = u"{} - {}".format(level, RAG_MEANING[level])
+            t.FontSize = 11
+            t.Foreground = brush(RAG_TEXT_COLORS[level])
             t.FontWeight = FontWeights.SemiBold
             b.Child = t
             sp.Children.Add(b)
@@ -1362,11 +1510,13 @@ class ModelHealthWindow(Window):
 
     def _update_score(self):
         score = get_health_score(self.metrics)
-        grade, label, color = get_health_grade(score)
+        grade, label, color = get_overall_status(score)
 
         self.txt_grade.Text = grade
+        self.txt_grade.Foreground = brush(RAG_TEXT_COLORS[grade])
         self.txt_score_num.Text = str(score)
-        self.txt_score_label.Text = "Model Health: {}".format(label)
+        self.txt_score_num.Foreground = brush(RAG_TEXT_COLORS[grade])
+        self.txt_score_label.Text = "Model Health: {} - {}".format(grade, label)
         self.score_circle.Background = brush(color)
 
         # Update gauge
@@ -1388,36 +1538,13 @@ class ModelHealthWindow(Window):
         grade_label.Margin = Thickness(0, 0, 0, 0)
         self.gauge_container.Children.Add(grade_label)
 
-        # Count issues
-        good = 0
-        acceptable = 0
-        warn = 0
-        concern = 0
-        crit = 0
-        severe = 0
-        for key, value in self.metrics.items():
-            if key in METRIC_THRESHOLDS:
-                status = get_status_text(key, value)
-                if status == "Good": good += 1
-                elif status == "Acceptable": acceptable += 1
-                elif status == "Warning": warn += 1
-                elif status == "Concerning": concern += 1
-                elif status == "Critical": crit += 1
-                elif status == "Severe": severe += 1
-
-        total = good + acceptable + warn + concern + crit + severe
-
-        if crit + severe > 0:
-            self.txt_summary.Text = "{} critical/severe issues, {} warnings. Immediate attention needed.".format(crit + severe, warn + concern)
-        elif warn + concern > 0:
-            self.txt_summary.Text = "{} warnings found. Review recommended.".format(warn + concern)
-        else:
-            self.txt_summary.Text = "All metrics within acceptable ranges. Model is healthy."
-
-        self.txt_metric_counts.Text = "Total: {} metrics | Good: {} | Acceptable: {} | Warning: {} | Concerning: {} | Critical: {} | Severe: {}".format(
-            total, good, acceptable, warn, concern, crit, severe)
-
-        self.txt_breakdown.Text = "Weighted Score: {}/100\nGrade: {} ({})".format(score, grade, label)
+        counts = count_statuses(self.metrics)
+        self.txt_summary.Text = status_summary(counts)
+        self.txt_metric_counts.Text = counts_text(counts)
+        self.txt_breakdown.Text = (
+            "Weighted Score: {}/100\nOverall: {} ({})\n"
+            "Green from {}, Amber from {}".format(
+                score, grade, label, OVERALL_GREEN_MIN, OVERALL_AMBER_MIN))
 
     # ----------------------------------------------------------
     # HEATMAP TABLE
@@ -1427,24 +1554,11 @@ class ModelHealthWindow(Window):
 
         table = WPFGrid()
         # Wider columns: Metric | Value | Bar | Status | Select
-        col_widths = [180, 80, 400, 340, 90]
+        col_widths = [190, 80, 360, 380, 90]
         for w in col_widths:
             cd = ColumnDefinition()
             cd.Width = GridLength(w)
             table.ColumnDefinitions.Add(cd)
-
-        # Sort by severity
-        sorted_keys = [k for k in METRIC_THRESHOLDS if k in self.metrics]
-        def sev(k):
-            v = self.metrics[k]
-            t = METRIC_THRESHOLDS[k]["thresholds"]
-            if v > t[4]: return 0
-            elif v > t[3]: return 1
-            elif v > t[2]: return 2
-            elif v > t[1]: return 3
-            elif v > t[0]: return 4
-            return 5
-        sorted_keys.sort(key=sev)
 
         # Header row
         rd = RowDefinition()
@@ -1469,191 +1583,229 @@ class ModelHealthWindow(Window):
             WPFGrid.SetColumn(b, ci)
             table.Children.Add(b)
 
-        # Data rows
+        # Data rows, in priority order under one header per impact tier
         row_idx = 0
-        for key in sorted_keys:
+        for tier, items in metrics_by_impact(self.metrics):
             row_idx += 1
-            rd = RowDefinition()
-            rd.Height = GridLength(50)  # Taller rows
-            table.RowDefinitions.Add(rd)
-
-            value = self.metrics[key]
-            config = METRIC_THRESHOLDS[key]
-            h_color = get_health_color(key, value)
-            thresholds = config["thresholds"]
-            row_bg = "#FFFFFF" if row_idx % 2 == 0 else "#FAF8F0"
-            is_selectable = config.get("selectable", False) and value > 0
-
-            # Col 0: Name
-            b0 = Border()
-            b0.Background = brush(row_bg)
-            b0.BorderBrush = brush("#E8E0D0")
-            b0.BorderThickness = Thickness(0, 0, 1, 1)
-            b0.Padding = Thickness(10, 6, 10, 6)
-            b0.ToolTip = config["tooltip"]
-            t0 = TextBlock()
-            t0.Text = config["label"]
-            t0.FontSize = 12
-            t0.FontWeight = FontWeights.SemiBold
-            t0.Foreground = brush(DQT_TEXT)
-            t0.VerticalAlignment = VerticalAlignment.Center
-            b0.Child = t0
-            WPFGrid.SetRow(b0, row_idx)
-            WPFGrid.SetColumn(b0, 0)
-            table.Children.Add(b0)
-
-            # Col 1: Value
-            b1 = Border()
-            b1.Background = brush(h_color)
-            b1.BorderBrush = brush("#E8E0D0")
-            b1.BorderThickness = Thickness(0, 0, 1, 1)
-            b1.Padding = Thickness(8, 6, 8, 6)
-            t1 = TextBlock()
-            unit = config.get("unit", "")
-            t1.Text = "{}{}".format(value, " " + unit if unit else "")
-            t1.FontSize = 13
-            t1.FontWeight = FontWeights.Bold
-            t1.Foreground = brush("#FFFFFF")
-            t1.HorizontalAlignment = HorizontalAlignment.Center
-            t1.VerticalAlignment = VerticalAlignment.Center
-            b1.Child = t1
-            WPFGrid.SetRow(b1, row_idx)
-            WPFGrid.SetColumn(b1, 1)
-            table.Children.Add(b1)
-
-            # Col 2: Bar - using Canvas for pixel-perfect rendering
-            b2 = Border()
-            b2.Background = brush(row_bg)
-            b2.BorderBrush = brush("#E8E0D0")
-            b2.BorderThickness = Thickness(0, 0, 1, 1)
-            b2.Padding = Thickness(10, 12, 10, 12)
-            
-            BAR_W = 370
-            BAR_H = 16
-            bar_canvas = Canvas()
-            bar_canvas.Width = BAR_W
-            bar_canvas.Height = BAR_H
-            
-            # Background bar
-            bar_bg = Border()
-            bar_bg.Width = BAR_W
-            bar_bg.Height = BAR_H
-            bar_bg.Background = brush("#E0DDD5")
-            bar_bg.CornerRadius = WinCornerRadius(3)
-            Canvas.SetLeft(bar_bg, 0)
-            Canvas.SetTop(bar_bg, 0)
-            bar_canvas.Children.Add(bar_bg)
-            
-            # Fill bar
-            max_t = float(thresholds[4])
-            if max_t > 0:
-                ratio = min(value / max_t, 1.0)
-            else:
-                ratio = 0
-            fill_w = max(int(ratio * BAR_W), 3) if value > 0 else 0
-            if fill_w > 0:
-                bar_fill = Border()
-                bar_fill.Width = fill_w
-                bar_fill.Height = BAR_H
-                bar_fill.Background = brush(h_color)
-                bar_fill.CornerRadius = WinCornerRadius(3)
-                Canvas.SetLeft(bar_fill, 0)
-                Canvas.SetTop(bar_fill, 0)
-                bar_canvas.Children.Add(bar_fill)
-            
-            # Threshold markers
-            for tv in thresholds:
-                if tv > 0 and max_t > 0:
-                    mr = tv / max_t
-                    if mr <= 1.0:
-                        mk = Border()
-                        mk.Width = 1
-                        mk.Height = BAR_H
-                        mk.Background = brush("#999999")
-                        mk.Opacity = 0.4
-                        Canvas.SetLeft(mk, int(mr * BAR_W))
-                        Canvas.SetTop(mk, 0)
-                        bar_canvas.Children.Add(mk)
-            
-            b2.Child = bar_canvas
-            WPFGrid.SetRow(b2, row_idx)
-            WPFGrid.SetColumn(b2, 2)
-            table.Children.Add(b2)
-
-            # Col 3: Status (WIDER - full info)
-            b3 = Border()
-            b3.Background = brush(row_bg)
-            b3.BorderBrush = brush("#E8E0D0")
-            b3.BorderThickness = Thickness(0, 0, 1, 1)
-            b3.Padding = Thickness(10, 5, 10, 5)
-
-            info_sp = StackPanel()
-            info_sp.VerticalAlignment = VerticalAlignment.Center
-
-            status = get_status_text(key, value)
-            weight = config.get("weight", 1)
-            weight_stars = u"\u2605" * weight + u"\u2606" * (5 - weight)
-
-            st = TextBlock()
-            st.Text = "Status: {}".format(status)
-            st.FontSize = 11
-            st.FontWeight = FontWeights.SemiBold
-            st.Foreground = brush(h_color)
-            info_sp.Children.Add(st)
-
-            wt = TextBlock()
-            wt.Text = "Weight: {} ({}/5)".format(weight_stars, weight)
-            wt.FontSize = 10
-            wt.Foreground = brush("#888888")
-            wt.Margin = Thickness(0, 2, 0, 0)
-            info_sp.Children.Add(wt)
-
-            tt = TextBlock()
-            tt.Text = "Thresholds: {} | {} | {} | {} | {}".format(*thresholds)
-            tt.FontSize = 9
-            tt.Foreground = brush("#AAAAAA")
-            tt.Margin = Thickness(0, 2, 0, 0)
-            info_sp.Children.Add(tt)
-
-            b3.Child = info_sp
-            WPFGrid.SetRow(b3, row_idx)
-            WPFGrid.SetColumn(b3, 3)
-            table.Children.Add(b3)
-
-            # Col 4: Select Button
-            b4 = Border()
-            b4.Background = brush(row_bg)
-            b4.BorderBrush = brush("#E8E0D0")
-            b4.BorderThickness = Thickness(0, 0, 0, 1)
-            b4.Padding = Thickness(4, 4, 4, 4)
-            if is_selectable:
-                btn = Button()
-                btn.Content = u"\u25BA Select"
-                btn.FontSize = 10
-                btn.Padding = Thickness(8, 4, 8, 4)
-                btn.Background = brush("#FFFFFF")
-                btn.Foreground = brush(DQT_TEXT_DARK)
-                btn.BorderBrush = brush(DQT_PRIMARY_DARK)
-                btn.BorderThickness = Thickness(1)
-                btn.Cursor = Cursors.Hand
-                btn.VerticalAlignment = VerticalAlignment.Center
-                btn.HorizontalAlignment = HorizontalAlignment.Center
-                btn.Tag = key
-                btn.Click += self._on_select_elements
-                b4.Child = btn
-            else:
-                na = TextBlock()
-                na.Text = "--"
-                na.FontSize = 10
-                na.Foreground = brush("#CCCCCC")
-                na.HorizontalAlignment = HorizontalAlignment.Center
-                na.VerticalAlignment = VerticalAlignment.Center
-                b4.Child = na
-            WPFGrid.SetRow(b4, row_idx)
-            WPFGrid.SetColumn(b4, 4)
-            table.Children.Add(b4)
+            self._add_impact_header(table, row_idx, tier)
+            for number, key in items:
+                row_idx += 1
+                self._add_metric_row(table, row_idx, number, key)
 
         self.metrics_stack.Children.Add(table)
+
+    def _add_impact_header(self, table, row_idx, tier):
+        """A full-width row naming the impact tier of the metrics below it."""
+        rd = RowDefinition()
+        rd.Height = GridLength(30)
+        table.RowDefinitions.Add(rd)
+        b = Border()
+        b.Background = brush("#F6EBD2")
+        b.BorderBrush = brush(DQT_PRIMARY_DARK)
+        b.BorderThickness = Thickness(0, 0, 0, 1)
+        b.Padding = Thickness(10, 4, 10, 4)
+        sp = StackPanel()
+        sp.Orientation = Orientation.Horizontal
+        sp.VerticalAlignment = VerticalAlignment.Center
+        name = TextBlock()
+        name.Text = u"{} IMPACT".format(tier.upper())
+        name.FontSize = 11
+        name.FontWeight = FontWeights.Bold
+        name.Foreground = brush(DQT_TEXT_DARK)
+        name.VerticalAlignment = VerticalAlignment.Center
+        sp.Children.Add(name)
+        desc = TextBlock()
+        desc.Text = u"  -  " + IMPACT_TIERS.get(tier, {}).get("description", "")
+        desc.FontSize = 11
+        desc.Foreground = brush("#7A6A50")
+        desc.VerticalAlignment = VerticalAlignment.Center
+        sp.Children.Add(desc)
+        b.Child = sp
+        WPFGrid.SetRow(b, row_idx)
+        WPFGrid.SetColumn(b, 0)
+        WPFGrid.SetColumnSpan(b, 5)
+        table.Children.Add(b)
+
+    def _add_metric_row(self, table, row_idx, number, key):
+        """One metric's row: name, value, health bar, status, Select."""
+        rd = RowDefinition()
+        rd.Height = GridLength(50)  # Taller rows
+        table.RowDefinitions.Add(rd)
+
+        value = self.metrics[key]
+        config = METRIC_THRESHOLDS[key]
+        h_color = get_health_color(key, value)
+        thresholds = config["thresholds"]
+        row_bg = "#FFFFFF" if row_idx % 2 == 0 else "#FAF8F0"
+        is_selectable = config.get("selectable", False) and value > 0
+
+        # Col 0: Name
+        b0 = Border()
+        b0.Background = brush(row_bg)
+        b0.BorderBrush = brush("#E8E0D0")
+        b0.BorderThickness = Thickness(0, 0, 1, 1)
+        b0.Padding = Thickness(10, 6, 10, 6)
+        b0.ToolTip = config["tooltip"]
+        t0 = TextBlock()
+        t0.Text = "{}. {}".format(number, config["label"])
+        t0.FontSize = 12
+        t0.FontWeight = FontWeights.SemiBold
+        t0.Foreground = brush(DQT_TEXT)
+        t0.VerticalAlignment = VerticalAlignment.Center
+        b0.Child = t0
+        WPFGrid.SetRow(b0, row_idx)
+        WPFGrid.SetColumn(b0, 0)
+        table.Children.Add(b0)
+
+        # Col 1: Value
+        b1 = Border()
+        b1.Background = brush(h_color)
+        b1.BorderBrush = brush("#E8E0D0")
+        b1.BorderThickness = Thickness(0, 0, 1, 1)
+        b1.Padding = Thickness(8, 6, 8, 6)
+        t1 = TextBlock()
+        unit = config.get("unit", "")
+        t1.Text = "{}{}".format(value, " " + unit if unit else "")
+        t1.FontSize = 13
+        t1.FontWeight = FontWeights.Bold
+        t1.Foreground = brush(get_text_color(key, value))
+        t1.HorizontalAlignment = HorizontalAlignment.Center
+        t1.VerticalAlignment = VerticalAlignment.Center
+        b1.Child = t1
+        WPFGrid.SetRow(b1, row_idx)
+        WPFGrid.SetColumn(b1, 1)
+        table.Children.Add(b1)
+
+        # Col 2: Bar - using Canvas for pixel-perfect rendering
+        b2 = Border()
+        b2.Background = brush(row_bg)
+        b2.BorderBrush = brush("#E8E0D0")
+        b2.BorderThickness = Thickness(0, 0, 1, 1)
+        b2.Padding = Thickness(10, 12, 10, 12)
+        
+        BAR_W = 330
+        BAR_H = 16
+        bar_canvas = Canvas()
+        bar_canvas.Width = BAR_W
+        bar_canvas.Height = BAR_H
+        
+        # Background bar
+        bar_bg = Border()
+        bar_bg.Width = BAR_W
+        bar_bg.Height = BAR_H
+        bar_bg.Background = brush("#E0DDD5")
+        bar_bg.CornerRadius = WinCornerRadius(3)
+        Canvas.SetLeft(bar_bg, 0)
+        Canvas.SetTop(bar_bg, 0)
+        bar_canvas.Children.Add(bar_bg)
+        
+        # Fill bar
+        max_t = bar_scale(thresholds)
+        ratio = min(value / max_t, 1.0)
+        fill_w = max(int(ratio * BAR_W), 3) if value > 0 else 0
+        if fill_w > 0:
+            bar_fill = Border()
+            bar_fill.Width = fill_w
+            bar_fill.Height = BAR_H
+            bar_fill.Background = brush(h_color)
+            bar_fill.CornerRadius = WinCornerRadius(3)
+            Canvas.SetLeft(bar_fill, 0)
+            Canvas.SetTop(bar_fill, 0)
+            bar_canvas.Children.Add(bar_fill)
+        
+        # Threshold markers
+        for tv in thresholds:
+            if tv > 0 and max_t > 0:
+                mr = tv / max_t
+                if mr <= 1.0:
+                    mk = Border()
+                    mk.Width = 1
+                    mk.Height = BAR_H
+                    mk.Background = brush("#999999")
+                    mk.Opacity = 0.4
+                    Canvas.SetLeft(mk, int(mr * BAR_W))
+                    Canvas.SetTop(mk, 0)
+                    bar_canvas.Children.Add(mk)
+        
+        b2.Child = bar_canvas
+        WPFGrid.SetRow(b2, row_idx)
+        WPFGrid.SetColumn(b2, 2)
+        table.Children.Add(b2)
+
+        # Col 3: Status (WIDER - full info)
+        b3 = Border()
+        b3.Background = brush(row_bg)
+        b3.BorderBrush = brush("#E8E0D0")
+        b3.BorderThickness = Thickness(0, 0, 1, 1)
+        b3.Padding = Thickness(10, 5, 10, 5)
+
+        info_sp = StackPanel()
+        info_sp.VerticalAlignment = VerticalAlignment.Center
+
+        status = get_status_text(key, value)
+        weight = config.get("weight", 1)
+        weight_stars = u"\u2605" * weight + u"\u2606" * (5 - weight)
+
+        st = TextBlock()
+        st.Text = u"Status: {} - {}".format(status, RAG_MEANING.get(status, ""))
+        st.FontSize = 11
+        st.FontWeight = FontWeights.SemiBold
+        st.Foreground = brush(h_color if status != RAG_AMBER else "#B07800")
+        st.TextWrapping = TextWrapping.Wrap
+        info_sp.Children.Add(st)
+
+        wt = TextBlock()
+        wt.Text = u"Impact: {}  |  Weight: {} ({}/5)".format(
+            config.get("impact", ""), weight_stars, weight)
+        wt.FontSize = 10
+        wt.Foreground = brush("#888888")
+        wt.Margin = Thickness(0, 2, 0, 0)
+        info_sp.Children.Add(wt)
+
+        tt = TextBlock()
+        tt.Text = thresholds_text(thresholds)
+        tt.FontSize = 9
+        tt.Foreground = brush("#AAAAAA")
+        tt.Margin = Thickness(0, 2, 0, 0)
+        info_sp.Children.Add(tt)
+
+        b3.Child = info_sp
+        WPFGrid.SetRow(b3, row_idx)
+        WPFGrid.SetColumn(b3, 3)
+        table.Children.Add(b3)
+
+        # Col 4: Select Button
+        b4 = Border()
+        b4.Background = brush(row_bg)
+        b4.BorderBrush = brush("#E8E0D0")
+        b4.BorderThickness = Thickness(0, 0, 0, 1)
+        b4.Padding = Thickness(4, 4, 4, 4)
+        if is_selectable:
+            btn = Button()
+            btn.Content = u"\u25BA Select"
+            btn.FontSize = 10
+            btn.Padding = Thickness(8, 4, 8, 4)
+            btn.Background = brush("#FFFFFF")
+            btn.Foreground = brush(DQT_TEXT_DARK)
+            btn.BorderBrush = brush(DQT_PRIMARY_DARK)
+            btn.BorderThickness = Thickness(1)
+            btn.Cursor = Cursors.Hand
+            btn.VerticalAlignment = VerticalAlignment.Center
+            btn.HorizontalAlignment = HorizontalAlignment.Center
+            btn.Tag = key
+            btn.Click += self._on_select_elements
+            b4.Child = btn
+        else:
+            na = TextBlock()
+            na.Text = "--"
+            na.FontSize = 10
+            na.Foreground = brush("#CCCCCC")
+            na.HorizontalAlignment = HorizontalAlignment.Center
+            na.VerticalAlignment = VerticalAlignment.Center
+            b4.Child = na
+        WPFGrid.SetRow(b4, row_idx)
+        WPFGrid.SetColumn(b4, 4)
+        table.Children.Add(b4)
 
     # ----------------------------------------------------------
     # RECOMMENDATIONS
@@ -1668,47 +1820,44 @@ class ModelHealthWindow(Window):
         title.Margin = Thickness(0, 0, 0, 8)
         self.rec_panel.Children.Add(title)
 
-        has_rec = False
-        for key in METRIC_THRESHOLDS:
-            if key in self.metrics:
-                value = self.metrics[key]
-                t = METRIC_THRESHOLDS[key]["thresholds"]
-                if value > t[2]:
-                    has_rec = True
-                    h_color = get_health_color(key, value)
-                    label = METRIC_THRESHOLDS[key]["label"]
-                    rec = RECOMMENDATIONS.get(key, "Review and optimize.")
-                    row = StackPanel()
-                    row.Orientation = Orientation.Horizontal
-                    row.Margin = Thickness(0, 2, 0, 2)
-                    dot = Border()
-                    dot.Width = 8
-                    dot.Height = 8
-                    dot.CornerRadius = WinCornerRadius(4)
-                    dot.Background = brush(h_color)
-                    dot.VerticalAlignment = VerticalAlignment.Center
-                    dot.Margin = Thickness(0, 0, 8, 0)
-                    row.Children.Add(dot)
-                    lbl = TextBlock()
-                    lbl.Text = "{} ({}): ".format(label, value)
-                    lbl.FontSize = 11
-                    lbl.FontWeight = FontWeights.SemiBold
-                    lbl.Foreground = brush(DQT_TEXT)
-                    lbl.VerticalAlignment = VerticalAlignment.Center
-                    row.Children.Add(lbl)
-                    rtb = TextBlock()
-                    rtb.Text = rec
-                    rtb.FontSize = 11
-                    rtb.Foreground = brush("#666666")
-                    rtb.VerticalAlignment = VerticalAlignment.Center
-                    rtb.TextWrapping = TextWrapping.Wrap
-                    rtb.MaxWidth = 800
-                    row.Children.Add(rtb)
-                    self.rec_panel.Children.Add(row)
+        keys = recommended_keys(self.metrics)
+        for key in keys:
+            value = self.metrics[key]
+            status = get_status_text(key, value)
+            h_color = get_health_color(key, value)
+            label = METRIC_THRESHOLDS[key]["label"]
+            rec = RECOMMENDATIONS.get(key, "Review and optimize.")
+            row = StackPanel()
+            row.Orientation = Orientation.Horizontal
+            row.Margin = Thickness(0, 2, 0, 2)
+            dot = Border()
+            dot.Width = 8
+            dot.Height = 8
+            dot.CornerRadius = WinCornerRadius(4)
+            dot.Background = brush(h_color)
+            dot.VerticalAlignment = VerticalAlignment.Center
+            dot.Margin = Thickness(0, 0, 8, 0)
+            row.Children.Add(dot)
+            lbl = TextBlock()
+            lbl.Text = "{} ({}) - {}: ".format(label, value, status)
+            lbl.FontSize = 11
+            lbl.FontWeight = FontWeights.SemiBold
+            lbl.Foreground = brush(DQT_TEXT)
+            lbl.VerticalAlignment = VerticalAlignment.Center
+            row.Children.Add(lbl)
+            rtb = TextBlock()
+            rtb.Text = rec
+            rtb.FontSize = 11
+            rtb.Foreground = brush("#666666")
+            rtb.VerticalAlignment = VerticalAlignment.Center
+            rtb.TextWrapping = TextWrapping.Wrap
+            rtb.MaxWidth = 800
+            row.Children.Add(rtb)
+            self.rec_panel.Children.Add(row)
 
-        if not has_rec:
+        if not keys:
             good = TextBlock()
-            good.Text = "All metrics within acceptable ranges. No action required."
+            good.Text = "All metrics are Green. No action required."
             good.FontSize = 12
             good.Foreground = brush(HEALTH_GREEN)
             good.FontWeight = FontWeights.SemiBold
@@ -1759,14 +1908,18 @@ class ModelHealthWindow(Window):
             return
         MessageBox.Show(
             "Model Health Check\n\n"
-            "Analyzes the model against 12 metrics (file size, warnings, "
-            "CAD imports/links, in-place families, RVT links, imported "
-            "images, groups, design options, unplaced rooms, unpinned "
-            "links, duplicate elements) and combines them into one "
-            "weighted score.\n\n"
-            "HEALTH SCALE\n"
-            "  Good / Acceptable / Warning / Concerning / Critical / Severe\n"
-            "  - each metric's row in the heatmap is coloured on this same "
+            "Analyzes the model against 12 metrics and combines them into "
+            "one weighted score. The metrics are listed by their impact on "
+            "model performance and stability:\n"
+            "  Critical: Warnings, CAD Imports, File Size, In-Place Families\n"
+            "  High: Duplicate Elements, CAD Links, RVT Links\n"
+            "  Moderate: Imported Images, Model Groups, Design Options\n"
+            "  Low: Unplaced Rooms, Unpinned Links\n\n"
+            "HEALTH SCALE (RAG)\n"
+            "  Green - healthy, meeting expectations\n"
+            "  Amber - needs attention, improvement recommended\n"
+            "  Red - action required, high risk or major impact\n"
+            "  Every metric, and the model as a whole, is graded on this "
             "scale.\n\n"
             "WORKFLOW\n"
             "  Re-Analyze re-runs all metrics against the current model.\n"
@@ -1774,7 +1927,7 @@ class ModelHealthWindow(Window):
             "select the offending elements straight in Revit.\n"
             "  Export Report saves the dashboard as a report file.\n\n"
             "SETTINGS TAB\n"
-            "  Edit each metric's 5 threshold values and weight (1-5) "
+            "  Edit each metric's Green and Amber values and weight (1-5) "
             "before running an analysis. Save & Apply writes them to "
             "threshold_config.json next to this tool and re-scores the "
             "dashboard immediately; Reset to Defaults restores the "
@@ -1798,89 +1951,71 @@ class ModelHealthWindow(Window):
             file_name = os.path.basename(self.doc.PathName) if self.doc.PathName else "Unsaved"
             
             score = get_health_score(self.metrics)
-            grade, label, grade_color = get_health_grade(score)
+            grade, label, grade_color = get_overall_status(score)
+            counts = count_statuses(self.metrics)
             
-            # Count issues
-            good = acceptable = warn = concern = crit = severe = 0
-            for key, value in self.metrics.items():
-                if key in METRIC_THRESHOLDS:
-                    st = get_status_text(key, value)
-                    if st == "Good": good += 1
-                    elif st == "Acceptable": acceptable += 1
-                    elif st == "Warning": warn += 1
-                    elif st == "Concerning": concern += 1
-                    elif st == "Critical": crit += 1
-                    elif st == "Severe": severe += 1
-            
-            # Sort by severity
-            sorted_keys = [k for k in METRIC_THRESHOLDS if k in self.metrics]
-            def sev(k):
-                v = self.metrics[k]
-                t = METRIC_THRESHOLDS[k]["thresholds"]
-                if v > t[4]: return 0
-                elif v > t[3]: return 1
-                elif v > t[2]: return 2
-                elif v > t[1]: return 3
-                elif v > t[0]: return 4
-                return 5
-            sorted_keys.sort(key=sev)
-            
-            # Build metric rows HTML
+            # Build metric rows HTML - priority order, one header per impact tier
             rows_html = ""
-            for i, key in enumerate(sorted_keys):
-                value = self.metrics[key]
-                config = METRIC_THRESHOLDS[key]
-                h_color = get_health_color(key, value)
-                thresholds = config["thresholds"]
-                status = get_status_text(key, value)
-                weight = config.get("weight", 1)
-                weight_stars = "&#9733;" * weight + "&#9734;" * (5 - weight)
-                unit = config.get("unit", "")
-                val_str = "{}{}".format(value, " " + unit if unit else "")
-                row_bg = "#FFFFFF" if i % 2 == 0 else "#FAF8F0"
-                
-                # Bar width as percentage of threshold[4]
-                max_t = float(thresholds[4])
-                bar_pct = min(value / max(max_t, 1) * 100, 100) if value > 0 else 0
-                empty_pct = 100 - bar_pct
-                
+            i = 0
+            for tier, items in metrics_by_impact(self.metrics):
                 rows_html += """
-                <tr style="background:{bg};">
-                    <td style="padding:8px 10px;font-weight:600;border-bottom:1px solid #E8E0D0;">{label}</td>
-                    <td style="padding:8px;text-align:center;background:{color};color:#FFF;font-weight:700;border-bottom:1px solid #E8E0D0;">{val}</td>
-                    <td style="padding:8px 10px;border-bottom:1px solid #E8E0D0;">
-                        <table style="width:100%;border-collapse:collapse;height:14px;table-layout:fixed;"><tr>
-                            <td style="width:{pct}%;background:{color};border-radius:3px 0 0 3px;height:14px;padding:0;"></td>
-                            <td style="width:{epct}%;background:#E0DDD5;border-radius:0 3px 3px 0;height:14px;padding:0;"></td>
-                        </tr></table>
-                    </td>
-                    <td style="padding:6px 10px;border-bottom:1px solid #E8E0D0;">
-                        <div style="color:{color};font-weight:600;font-size:11px;">Status: {status}</div>
-                        <div style="color:#888;font-size:9px;">Weight: {stars} ({w}/5)</div>
-                        <div style="color:#AAA;font-size:8px;">Thresholds: {t0} | {t1} | {t2} | {t3} | {t4}</div>
-                    </td>
-                </tr>""".format(
-                    bg=row_bg, label=config["label"], color=h_color, val=val_str,
-                    pct=round(bar_pct, 1), epct=round(empty_pct, 1),
-                    status=status, stars=weight_stars, w=weight,
-                    t0=thresholds[0], t1=thresholds[1], t2=thresholds[2], t3=thresholds[3], t4=thresholds[4])
-            
-            # Build recommendations HTML
-            rec_html = ""
-            has_rec = False
-            for key in METRIC_THRESHOLDS:
-                if key in self.metrics:
+                  <tr class="tier"><td colspan="4"><strong>{name} IMPACT</strong> &nbsp;-&nbsp; {desc}</td></tr>""".format(
+                    name=tier.upper(), desc=IMPACT_TIERS[tier]["description"])
+                for number, key in items:
                     value = self.metrics[key]
-                    t = METRIC_THRESHOLDS[key]["thresholds"]
-                    if value > t[2]:
-                        has_rec = True
-                        h_color = get_health_color(key, value)
-                        label = METRIC_THRESHOLDS[key]["label"]
-                        rec = RECOMMENDATIONS.get(key, "Review and optimize.")
-                        rec_html += '<div style="margin:4px 0;"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:{};margin-right:8px;vertical-align:middle;"></span><strong>{} ({}):</strong> <span style="color:#666;">{}</span></div>'.format(
-                            h_color, label, value, rec)
-            if not has_rec:
-                rec_html = '<div style="color:#4CAF50;font-weight:600;">All metrics within acceptable ranges. No action required.</div>'
+                    config = METRIC_THRESHOLDS[key]
+                    h_color = get_health_color(key, value)
+                    text_color = get_text_color(key, value)
+                    thresholds = config["thresholds"]
+                    status = get_status_text(key, value)
+                    weight = config.get("weight", 1)
+                    weight_stars = "&#9733;" * weight + "&#9734;" * (5 - weight)
+                    unit = config.get("unit", "")
+                    val_str = "{}{}".format(value, " " + unit if unit else "")
+                    row_bg = "#FFFFFF" if i % 2 == 0 else "#FAF8F0"
+                    i += 1
+                
+                    # Bar width as a percentage of the bar's scale
+                    max_t = bar_scale(thresholds)
+                    bar_pct = min(value / max_t * 100, 100) if value > 0 else 0
+                    empty_pct = 100 - bar_pct
+                
+                    rows_html += """
+                    <tr style="background:{bg};">
+                        <td style="padding:8px 10px;font-weight:600;border-bottom:1px solid #E8E0D0;">{label}</td>
+                        <td style="padding:8px;text-align:center;background:{color};color:{tcolor};font-weight:700;border-bottom:1px solid #E8E0D0;">{val}</td>
+                        <td style="padding:8px 10px;border-bottom:1px solid #E8E0D0;">
+                            <table style="width:100%;border-collapse:collapse;height:14px;table-layout:fixed;"><tr>
+                                <td style="width:{pct}%;background:{color};border-radius:3px 0 0 3px;height:14px;padding:0;"></td>
+                                <td style="width:{epct}%;background:#E0DDD5;border-radius:0 3px 3px 0;height:14px;padding:0;"></td>
+                            </tr></table>
+                        </td>
+                        <td style="padding:6px 10px;border-bottom:1px solid #E8E0D0;">
+                            <div style="color:{scolor};font-weight:600;font-size:11px;">Status: {status} - {meaning}</div>
+                            <div style="color:#888;font-size:9px;">Impact: {impact} &nbsp;|&nbsp; Weight: {stars} ({w}/5)</div>
+                            <div style="color:#AAA;font-size:8px;">{thresholds}</div>
+                        </td>
+                    </tr>""".format(
+                        bg=row_bg, label="{}. {}".format(number, config["label"]), color=h_color,
+                        tcolor=text_color, val=val_str,
+                        pct=round(bar_pct, 1), epct=round(empty_pct, 1),
+                        scolor=h_color if status != RAG_AMBER else "#B07800",
+                        status=status, meaning=RAG_MEANING[status],
+                        impact=config.get("impact", ""), stars=weight_stars, w=weight,
+                        thresholds=thresholds_text(thresholds).replace(u"\u2264", "&le;").replace(">", "&gt;"))
+            
+            # Build recommendations HTML - Amber and Red, in priority order
+            rec_html = ""
+            rec_keys = recommended_keys(self.metrics)
+            for key in rec_keys:
+                value = self.metrics[key]
+                h_color = get_health_color(key, value)
+                metric_label = METRIC_THRESHOLDS[key]["label"]
+                rec = RECOMMENDATIONS.get(key, "Review and optimize.")
+                rec_html += '<div style="margin:4px 0;"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:{};margin-right:8px;vertical-align:middle;"></span><strong>{} ({}) - {}:</strong> <span style="color:#666;">{}</span></div>'.format(
+                    h_color, metric_label, value, get_status_text(key, value), rec)
+            if not rec_keys:
+                rec_html = '<div style="color:#4CAF50;font-weight:600;">All metrics are Green. No action required.</div>'
             
             # Full HTML
             html = u"""<!DOCTYPE html>
@@ -1898,8 +2033,8 @@ class ModelHealthWindow(Window):
     .header .sub {{ font-size: 11px; color: #5D4E37; margin-top: 4px; }}
     .score-card {{ background: #FFF; border: 1px solid #D4B87A; border-radius: 6px; padding: 15px 20px; margin-bottom: 15px; overflow: hidden; }}
     .gauge {{ float: left; width: 90px; height: 90px; border-radius: 50%; background: {grade_color}; text-align: center; margin-right: 20px; }}
-    .gauge .grade {{ font-size: 32px; font-weight: bold; color: #FFF; margin-top: 16px; }}
-    .gauge .num {{ font-size: 12px; color: #FFF; opacity: 0.9; }}
+    .gauge .grade {{ font-size: 22px; font-weight: bold; color: {grade_text}; margin-top: 24px; }}
+    .gauge .num {{ font-size: 12px; color: {grade_text}; opacity: 0.9; }}
     .score-text h2 {{ margin: 0 0 5px 0; font-size: 18px; color: #333; }}
     .score-text .summary {{ color: #666; font-size: 12px; }}
     .score-text .counts {{ color: #888; font-size: 10px; margin-top: 4px; }}
@@ -1907,6 +2042,7 @@ class ModelHealthWindow(Window):
     .legend span {{ display: inline-block; padding: 3px 10px; border-radius: 3px; color: #FFF; font-size: 10px; font-weight: 600; margin: 0 2px; -webkit-print-color-adjust: exact; }}
     table {{ width: 100%; border-collapse: collapse; background: #FFF; border: 1px solid #D4B87A; }}
     th {{ background: #F0CC88 !important; color: #5D4E37; padding: 8px 10px; text-align: left; font-size: 11px; border-bottom: 2px solid #D4B87A; }}
+    tr.tier td {{ background: #F6EBD2; color: #5D4E37; padding: 6px 10px; font-size: 11px; border-bottom: 1px solid #D4B87A; }}
     .rec-box {{ background: #FFF; border: 1px solid #D4B87A; border-radius: 6px; padding: 12px 15px; margin-top: 15px; }}
     .rec-box h3 {{ margin: 0 0 8px 0; color: #5D4E37; font-size: 13px; }}
     .footer {{ background: #F0CC88; border-radius: 4px; padding: 8px; text-align: center; margin-top: 15px; font-size: 10px; color: #5D4E37; }}
@@ -1929,9 +2065,9 @@ class ModelHealthWindow(Window):
             <div class="num">{score}</div>
         </div>
         <div class="score-text">
-            <h2>Model Health: {label}</h2>
+            <h2>Model Health: {grade} - {label}</h2>
             <div class="summary">{summary}</div>
-            <div class="counts">Total: {total} metrics | Good: {good} | Acceptable: {acceptable} | Warning: {warn} | Concerning: {concern} | Critical: {crit} | Severe: {severe}</div>
+            <div class="counts">{counts}</div>
             <div class="counts">Date: {date}</div>
         </div>
         <div style="clear:both;"></div>
@@ -1939,12 +2075,7 @@ class ModelHealthWindow(Window):
 
     <div class="legend">
         <strong>Health Scale:</strong>
-        <span style="background:#4CAF50;">Good</span>
-        <span style="background:#8BC34A;">Acceptable</span>
-        <span style="background:#FFC107;">Warning</span>
-        <span style="background:#FF9800;">Concerning</span>
-        <span style="background:#F44336;">Critical</span>
-        <span style="background:#D32F2F;">Severe</span>
+        {legend}
     </div>
 
     <table>
@@ -1965,13 +2096,15 @@ class ModelHealthWindow(Window):
     <div class="footer">Copyright by Dang Quoc Truong - DQT &copy; 2025</div>
 </body>
 </html>""".format(
-                grade_color=grade_color,
+                grade_color=grade_color, grade_text=RAG_TEXT_COLORS[grade],
                 proj=proj_name, file=file_name,
                 grade=grade, score=score, label=label,
-                summary=self.txt_summary.Text,
-                total=good+acceptable+warn+concern+crit+severe,
-                good=good, acceptable=acceptable, warn=warn,
-                concern=concern, crit=crit, severe=severe,
+                summary=status_summary(counts),
+                counts=counts_text(counts),
+                legend="\n        ".join(
+                    '<span style="background:{};color:{};">{} - {}</span>'.format(
+                        RAG_COLORS[lv], RAG_TEXT_COLORS[lv], lv, RAG_MEANING[lv])
+                    for lv in RAG_LEVELS),
                 date=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 rows=rows_html, recs=rec_html)
             

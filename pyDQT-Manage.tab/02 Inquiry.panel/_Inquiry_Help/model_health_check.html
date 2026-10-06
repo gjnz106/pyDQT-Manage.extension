@@ -22,41 +22,55 @@
   <div class="card">
     <h2>What it does</h2>
     <p class="lede">
-      Analyzes the model against 12 metrics - file size, warnings, CAD
-      imports/links, in-place families, RVT links, imported images,
-      groups, design options, unplaced rooms, unpinned links, duplicate
-      elements - and combines them into one weighted health score with a
-      colour-coded heatmap.
+      Analyzes the model against 12 metrics, grades each one Green, Amber or
+      Red, and combines them into one weighted health score. The metrics are
+      listed by their impact on model performance and stability, so the
+      dashboard shows first what hurts the model most.
     </p>
   </div>
 
   <div class="card">
-    <h2>Health scale</h2>
-    <p>Each metric's row in the heatmap is coloured on this same scale, from
-      best to worst:</p>
+    <h2>Health scale (RAG)</h2>
+    <p>Every metric, and the model as a whole, is graded on three levels:</p>
     <dl class="kv">
-      <dt class="v-green">Good</dt><dd>within a healthy range</dd>
-      <dt class="v-green">Acceptable</dt><dd>fine, worth keeping an eye on</dd>
-      <dt class="v-gold">Warning</dt><dd>starting to add up</dd>
-      <dt class="v-orange">Concerning</dt><dd>worth addressing soon</dd>
-      <dt class="v-red">Critical</dt><dd>likely already causing pain</dd>
-      <dt class="v-red">Severe</dt><dd>well outside the healthy range</dd>
+      <dt class="v-green">Green</dt><dd>healthy, meeting expectations</dd>
+      <dt class="v-gold">Amber</dt><dd>needs attention, improvement recommended</dd>
+      <dt class="v-red">Red</dt><dd>action required, high risk or major impact</dd>
     </dl>
+    <p>A metric is Green up to its Green value, Amber up to its Amber value,
+      and Red above that. The overall result comes from the weighted score
+      (Green 100, Amber 50, Red 0 per metric): Green from 90, Amber from 60,
+      Red below 60.</p>
+  </div>
+
+  <div class="card">
+    <h2>Metrics by impact</h2>
+    <dl class="kv">
+      <dt class="v-dark">Critical impact</dt><dd>1. Warnings &middot; 2. CAD Imports &middot; 3. File Size &middot; 4. In-Place Families - the most likely to cause performance issues, instability, file bloat and user frustration</dd>
+      <dt class="v-dark">High impact</dt><dd>5. Duplicate Elements &middot; 6. CAD Links &middot; 7. RVT Links - affect manageability, model quality and long-term maintainability</dd>
+      <dt class="v-dark">Moderate impact</dt><dd>8. Imported Images &middot; 9. Model Groups &middot; 10. Design Options</dd>
+      <dt class="v-dark">Low impact</dt><dd>11. Unplaced Rooms &middot; 12. Unpinned Links - model housekeeping rather than performance issues</dd>
+    </dl>
+    <p>Each metric's default weight in the overall score follows its impact:
+      Critical 5, High 4, Moderate 3, Low 2.</p>
   </div>
 
   <div class="card">
     <h2>Workflow</h2>
     <ol class="steps">
       <li>(Optional) Open the <b>Settings</b> tab first to adjust any
-        metric's thresholds or weight to match your own standards, before
-        running an analysis.</li>
+        metric's Green / Amber values or weight to match your own standards,
+        before running an analysis.</li>
       <li><b>Re-Analyze</b> re-runs all 12 metrics against the current
         model.</li>
-      <li>Read the overall score and grade, then scan the heatmap for
-        red/orange rows.</li>
-      <li>Each row in the recommendations list has <b>Select Elements</b> to
-        select the offending elements straight in Revit.</li>
-      <li><b>Export Report</b> saves the dashboard as a report file.</li>
+      <li>Read the overall result under the gauge, then go down the
+        dashboard: it is grouped Critical, High, Moderate, Low impact, so
+        the Red and Amber rows at the top matter most.</li>
+      <li>The recommendations list every Amber and Red metric, in the same
+        priority order. <b>Select</b> on a row selects the offending elements
+        straight in Revit.</li>
+      <li><b>Export Report</b> saves the dashboard as an HTML report (print
+        it to PDF from the browser).</li>
     </ol>
   </div>
 
@@ -68,19 +82,29 @@
       etc.) means switching to the matching tool elsewhere in pyDQT.
     </div>
     <div class="box fixed">
-      <b>Settings tab.</b> Every metric's 5 threshold values (the upper
-      bound of Good / Acceptable / Warning / Concerning / Critical -
-      anything above Critical is Severe) and its weight (1-5, how much it
-      counts toward the overall score) can be edited directly, right next
-      to the Dashboard tab. <span class="code">Save & Apply</span> writes
-      the change to <span class="code">threshold_config.json</span> next
-      to this tool - so it survives closing Revit - and immediately
-      re-scores the dashboard from the last analysis, no need to
-      Re-Analyze again just because a threshold changed.
-      <span class="code">Reset to Defaults</span> restores every metric to
-      the built-in values and deletes that file. A row with an invalid
-      value (not a number, or out of ascending order) blocks the whole
-      save rather than silently accepting the other 11.
+      <b>New in v2.0.</b> The 6-level scale (Good / Acceptable / Warning /
+      Concerning / Critical / Severe) is now Green / Amber / Red: Green is
+      the old Good and Acceptable, Amber the old Warning, Red the old
+      Concerning and worse. The metrics are listed by impact instead of by
+      how bad they are. <b>Model Groups</b> now counts model groups only -
+      detail groups are view annotation, not part of the model's
+      performance. The report header now always shows the overall result
+      (it could show the name of the last recommended metric instead).
+    </div>
+    <div class="box fixed">
+      <b>Settings tab.</b> Every metric's Green value, Amber value and
+      weight (1-5, how much it counts toward the overall score) can be
+      edited directly, right next to the Dashboard tab.
+      <span class="code">Save & Apply</span> writes the change to
+      <span class="code">threshold_config.json</span> next to this tool - so
+      it survives closing Revit - and immediately re-scores the dashboard
+      from the last analysis. <span class="code">Reset to Defaults</span>
+      restores the built-in values and deletes that file. A row with an
+      invalid value (not a number, or Green above Amber) blocks the whole
+      save rather than silently accepting the other 11. A settings file
+      saved by v1.x is converted on the fly: its old thresholds become
+      Green / Amber the same way as above, and weights left at their old
+      default take the new impact-based default.
     </div>
     <div class="box fixed">
       <b>CAD Imports counted 0 in models that still had imported CAD.</b>
