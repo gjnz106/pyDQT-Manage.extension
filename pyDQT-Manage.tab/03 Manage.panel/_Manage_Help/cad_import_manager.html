@@ -134,6 +134,18 @@
       older checks, requiring a reference that actually resolves to a
       path before calling something a link.
     </div>
+    <div class="box fixed">
+      <b>A DWG linked from the cloud was listed as an Import.</b> A link
+      whose Manage Links Path Type is <b>Cloud</b> (Autodesk Docs / Forma)
+      is not an external <i>file</i> reference in Revit - it is an
+      external <i>resource</i> - so the
+      <code>IsExternalFileReference()</code> test above answered "no" and
+      the tool stopped there. The check now takes Revit's own
+      <code>ImportInstance.IsLinked</code> answer whenever the build has
+      it, and otherwise counts a cloud resource reference as a link too.
+      Model Health Check and Model Checker use the same check, so all
+      three agree.
+    </div>
   </div>
 
   <div class="pagenav">

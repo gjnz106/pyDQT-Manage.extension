@@ -64,51 +64,83 @@ def cad_type_of(doc, instance):
         return None
 
 
+def has_external_resource(cad_type):
+    """True when the CAD type is loaded through an external resource server
+    - a DWG linked from the cloud (Autodesk Docs / Forma, "Path Type: Cloud"
+    in Manage Links). Such a link is NOT an external *file* reference, so
+    IsExternalFileReference() is False for it; it shows up here instead."""
+    try:
+        refs = cad_type.GetExternalResourceReferences()
+    except:
+        return False
+    if refs is None:
+        return False
+    try:
+        return refs.Count > 0
+    except:
+        try:
+            return len(refs) > 0
+        except:
+            return False
+
+
+def is_cad_link_type(cad_type):
+    """True when the CAD type itself shows it is a link - the only test
+    there is for a type with no instance left. Any of these is enough, and
+    an import (which embeds the geometry) keeps none of them:
+
+    - Element.IsExternalFileReference() - a .dwg on disk or a server;
+    - an external resource reference - a .dwg in the cloud (Autodesk Docs
+      / Forma). A cloud link is NOT an external file reference, so it
+      reports False above; going by IsExternalFileReference() alone is how
+      a cloud link used to be counted as an Import;
+    - an external file reference that resolves to a usable path. Any
+      non-null reference is NOT proof on its own; one carrying no usable
+      path is not a link.
+    """
+    if cad_type is None:
+        return False
+
+    try:
+        if cad_type.IsExternalFileReference():
+            return True
+    except:
+        pass
+
+    if has_external_resource(cad_type):
+        return True
+
+    try:
+        efr = cad_type.GetExternalFileReference()
+    except:
+        efr = None
+    if efr is not None:
+        try:
+            path = efr.GetAbsolutePath()
+            if path is not None and path.Empty:
+                return False
+        except:
+            pass
+        return True
+
+    return False
+
+
 def is_cad_link(doc, instance):
     """True for a CAD Link, False for a CAD Import (embedded geometry).
 
-    Asked in order of how definitive each answer is:
-
-    1) Element.IsExternalFileReference() on the CAD type. A Link keeps an
-       external .dwg on disk and reports True; a true Import embedded the
-       geometry at import time and has no external file, so it reports
-       False. This is the documented, version-stable way to ask, and it is
-       asked first precisely because (2) is not reliable everywhere.
-    2) ImportInstance.IsLinked, when (1) is unavailable - the instance
-       level property, which this suite's CadtoWall tool found missing on
-       some Revit 2026 builds.
-    3) An external file reference that actually resolves to a path. Any
-       non-null return here is NOT proof of a link on its own; a reference
-       carrying no usable path is not one.
+    1) ImportInstance.IsLinked - Revit's own answer for the instance, and
+       right for every kind of link: a .dwg on disk, on a server or in the
+       cloud (Autodesk Docs / Forma). Used whenever the build has it.
+    2) Only when IsLinked is missing (this suite's CadtoWall tool found it
+       missing on some Revit 2026 builds): what the CAD type shows - see
+       is_cad_link_type.
     """
-    cad_type = cad_type_of(doc, instance)
-
-    if cad_type is not None:
-        try:
-            return bool(cad_type.IsExternalFileReference())
-        except:
-            pass
-
     try:
         return bool(instance.IsLinked)
     except:
         pass
-
-    if cad_type is not None:
-        try:
-            efr = cad_type.GetExternalFileReference()
-        except:
-            efr = None
-        if efr is not None:
-            try:
-                path = efr.GetAbsolutePath()
-                if path is not None and path.Empty:
-                    return False
-            except:
-                pass
-            return True
-
-    return False
+    return is_cad_link_type(cad_type_of(doc, instance))
 
 
 def get_cad_instances(doc):
