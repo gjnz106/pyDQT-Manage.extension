@@ -22,9 +22,9 @@
   <div class="card">
     <h2>What it does</h2>
     <p class="lede">
-      Lists every Material in the model with how many elements use it, so
-      unused materials can be found and cleaned up, and batch-renames
-      materials in bulk.
+      Lists every Material in the model with whether it is in use and
+      where, so unused materials can be found and cleaned up, and
+      batch-renames materials in bulk.
     </p>
   </div>
 
@@ -40,17 +40,17 @@
   </div>
 
   <div class="card">
-    <h2>Usage/Types column</h2>
-    <p class="lede">
-      Informational only - it counts type-level references (compound
-      structure layers, single-material families) and under-counts on
-      purpose: it can't see a material painted directly onto an element
-      with the Paint tool, or set through an instance-level parameter
-      such as Structural Material. <b>In Use</b>/<b>Unused</b> and
-      <b>Select Unused</b> always go by the real Revit check instead, so
-      a painted-but-not-typed material is correctly kept as in-use even
-      though this column reads 0.
-    </p>
+    <h2>Columns</h2>
+    <dl class="kv">
+      <dt class="v-dark">Status</dt><dd><b>In use</b> / <b>Unused</b>, from Revit's own purge check - the same one the In Use / Unused cards, Select Unused and Delete go by, so it always agrees with the delete warning</dd>
+      <dt class="v-dark">Usage</dt><dd>how many things use the material: element types (in the type, in a wall / floor / roof / ceiling layer, or through a type parameter such as a family's Material), placed elements (their geometry - including instance parameters such as Structural Material - and faces painted with the Paint tool), and object styles (a category or subcategory, e.g. a family's subcategory material)</dd>
+      <dt class="v-dark">Usage %</dt><dd>its share of all those uses</dd>
+      <dt class="v-dark">Used By</dt><dd>the breakdown, e.g. <span class="code">2 types, 15 elements, 1 object style</span></dd>
+    </dl>
+    <p>A material can still be <b>In use</b> with Usage 0 - something the
+      tool cannot trace uses it, typically a family that is loaded but not
+      placed. Used By then says so; purge that family first and the
+      material becomes Unused.</p>
   </div>
 
   <div class="card">
@@ -71,6 +71,15 @@
       Sort or filter by the Unused stat first if the goal is cleanup - it
       surfaces exactly the materials safe to remove without checking each
       one manually.
+    </div>
+    <div class="box fixed">
+      <b>Usage read 0 for materials the delete warning called "in use".</b>
+      Usage only counted element types, through a test that misses most
+      of them, while the warning goes by Revit's purge check, which sees
+      every use. Usage now also counts wall/floor layers, type parameters,
+      placed elements (geometry and paint) and object styles, the new
+      Status column shows the purge check directly, and the delete
+      warning lists where each material is used.
     </div>
   </div>
 

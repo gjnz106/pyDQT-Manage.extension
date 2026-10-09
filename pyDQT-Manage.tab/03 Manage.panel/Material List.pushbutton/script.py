@@ -178,9 +178,15 @@ class MaterialItem(INotifyPropertyChanged):
 
         self._usage_count = 0
         self._usage_percentage = 0.0
+        # Where the material is used, e.g. "2 types, 15 elements" - see
+        # calculate_material_usage().
+        self._usage_detail = ""
         # Ground truth for "safe to delete" - see calculate_material_usage().
         # Defaults to False (never a purge candidate) until proven otherwise.
         self._is_really_unused = False
+        # False when Revit's purge check is not available (Revit 2023 and
+        # earlier): the Status column then says so instead of guessing.
+        self._purge_check_known = True
 
     # Properties
     @property
@@ -248,6 +254,32 @@ class MaterialItem(INotifyPropertyChanged):
     def is_really_unused(self, value):
         self._is_really_unused = value
         self.OnPropertyChanged("is_really_unused")
+        self.OnPropertyChanged("status")
+
+    @property
+    def purge_check_known(self):
+        return self._purge_check_known
+
+    @purge_check_known.setter
+    def purge_check_known(self, value):
+        self._purge_check_known = value
+        self.OnPropertyChanged("status")
+
+    @property
+    def status(self):
+        """In use / Unused, from Revit's own purge check."""
+        if not self._purge_check_known:
+            return "?"
+        return "Unused" if self._is_really_unused else "In use"
+
+    @property
+    def usage_detail(self):
+        return self._usage_detail
+
+    @usage_detail.setter
+    def usage_detail(self, value):
+        self._usage_detail = value
+        self.OnPropertyChanged("usage_detail")
 
     @property
     def usage_percentage(self):
@@ -279,34 +311,150 @@ class MaterialItem(INotifyPropertyChanged):
 # USAGE CALCULATION
 # ============================================================================
 
-def calculate_material_usage(doc, material_items):
-    """Calculate usage for materials, and - separately - whether each one is
-    actually safe to delete.
+USAGE_KINDS = (("types", "type", "types"),
+               ("elements", "element", "elements"),
+               ("styles", "object style", "object styles"))
 
-    usage_count is informational only: it counts how many element TYPES
-    reference each material via GetMaterialIds()/MATERIAL_ID_PARAM, so it
-    is a real positive signal when > 0 but an undercount when it reads 0.
-    It cannot see a material painted directly onto an element INSTANCE
-    with the Paint tool, or assigned through an INSTANCE parameter (e.g.
-    Structural Material on framing/columns is commonly instance-level,
-    not type-level) - both are everyday workflows, not edge cases.
+UNTRACED_DETAIL = ("in use, but not by a type, a placed element or an object "
+                   "style - e.g. inside a loaded family that is not placed")
+
+
+def _material_ids_of(element):
+    """Material ids in an element's geometry and painted faces
+    (GetMaterialIds(False) and (True)), as ints."""
+    found = []
+    for as_paint in (False, True):
+        try:
+            ids = element.GetMaterialIds(as_paint)
+        except:
+            ids = None
+        if ids:
+            for mid in ids:
+                found.append(_eid_int(mid))
+    return found
+
+
+def _compound_material_ids(elem_type):
+    """Materials of the layers of a wall / floor / roof / ceiling type."""
+    found = []
+    try:
+        structure = elem_type.GetCompoundStructure()
+    except:
+        structure = None
+    if structure is None:
+        return found
+    try:
+        for layer in structure.GetLayers():
+            try:
+                found.append(_eid_int(layer.MaterialId))
+            except:
+                continue
+    except:
+        pass
+    return found
+
+
+def _material_parameter_ids(element, material_ids):
+    """Every ElementId parameter of the element whose value is one of
+    `material_ids` - MATERIAL_ID_PARAM, a family's own Material type
+    parameter, mullion and railing materials and so on."""
+    found = []
+    try:
+        params = element.Parameters
+    except:
+        return found
+    for param in params:
+        try:
+            if param.StorageType != DB.StorageType.ElementId:
+                continue
+            value = _eid_int(param.AsElementId())
+        except:
+            continue
+        if value in material_ids:
+            found.append(value)
+    return found
+
+
+def _is_placed_model_element(element):
+    """A placed element of a model category - not a material, a view, an
+    annotation or an internal element."""
+    if isinstance(element, DB.Material):
+        return False
+    try:
+        category = element.Category
+        return (category is not None and
+                category.CategoryType == DB.CategoryType.Model)
+    except:
+        return False
+
+
+def _category_material_ids(doc):
+    """Materials set on categories and subcategories (Object Styles), one
+    entry per category / subcategory that has one."""
+    found = []
+    try:
+        categories = list(doc.Settings.Categories)
+    except:
+        return found
+    for category in categories:
+        members = [category]
+        try:
+            members.extend(list(category.SubCategories))
+        except:
+            pass
+        for member in members:
+            try:
+                material = member.Material
+                if material is not None:
+                    found.append(_eid_int(material.Id))
+            except:
+                continue
+    return found
+
+
+def usage_detail_text(counts):
+    """"2 types, 15 elements, 1 object style" from {"types": 2, ...}."""
+    parts = []
+    for key, singular, plural in USAGE_KINDS:
+        n = counts.get(key, 0)
+        if n:
+            parts.append("{} {}".format(n, singular if n == 1 else plural))
+    return ", ".join(parts)
+
+
+def calculate_material_usage(doc, material_items):
+    """Work out where each material is used, and - separately - whether it
+    is actually safe to delete.
+
+    usage_count / usage_detail count what uses the material:
+      - element TYPES: materials in the type (GetMaterialIds), the layers of
+        a wall/floor/roof/ceiling type, and any type parameter that points
+        at the material (a family's Material parameter, mullions...);
+      - placed ELEMENTS of model categories: materials in their geometry -
+        which includes instance parameters such as Structural Material -
+        and faces painted with the Paint tool;
+      - OBJECT STYLES: categories and subcategories that carry the material
+        (a family's subcategory material ends up here).
+    Each type, element or style counts once per material.
 
     is_really_unused is the one that gates deletion, and comes from
     Document.GetUnusedElements() - Revit's own dependency graph, the
-    same source the native Purge Unused dialog reads. It has none of the
-    blind spots above, since it does not care which mechanism made the
-    material "in use".
+    same source the native Purge Unused dialog reads. It also sees uses
+    none of the above can, such as a family that is loaded but not placed;
+    a material that is in use with nothing counted says so in usage_detail.
     """
 
     # Reset all counts
     for item in material_items:
         item.usage_count = 0
         item.usage_percentage = 0.0
+        item.usage_detail = ""
         item.is_really_unused = False
 
     real_unused_ids = get_real_unused_ids(doc)
-    if real_unused_ids is not None:
-        for item in material_items:
+    for item in material_items:
+        item.purge_check_known = real_unused_ids is not None
+        if real_unused_ids is not None:
             item.is_really_unused = item.id in real_unused_ids
 
     # Build lookup by material ID
@@ -314,57 +462,50 @@ def calculate_material_usage(doc, material_items):
     for item in material_items:
         material_lookup[item.id] = item
 
-    usage_dict = {}
+    usage = {}
 
-    def _bump(mat_id):
-        if mat_id in material_lookup:
-            usage_dict[mat_id] = usage_dict.get(mat_id, 0) + 1
+    def _count(mat_ids, kind):
+        """One reference per distinct material of one type/element/style."""
+        for mat_int in set(mat_ids):
+            if mat_int in material_lookup:
+                counts = usage.setdefault(mat_int, {})
+                counts[kind] = counts.get(kind, 0) + 1
 
     try:
-        type_collector = DB.FilteredElementCollector(doc).OfClass(DB.ElementType)
-
-        for elem_type in type_collector:
-            counted_this_type = set()
-
-            # 1 + 2) GetMaterialIds (structural + paint)
-            for as_paint in (False, True):
-                try:
-                    mat_ids = elem_type.GetMaterialIds(as_paint)
-                except:
-                    mat_ids = None
-
-                if mat_ids:
-                    for mid in mat_ids:
-                        mat_int = _eid_int(mid)
-                        if mat_int > 0 and mat_int not in counted_this_type:
-                            counted_this_type.add(mat_int)
-                            _bump(mat_int)
-
-            # 3) Fallback: simple single-material parameter
-            try:
-                mat_param = elem_type.get_Parameter(DB.BuiltInParameter.MATERIAL_ID_PARAM)
-                if mat_param:
-                    mat_id_value = mat_param.AsElementId()
-                    mat_int = _eid_int(mat_id_value)
-                    if mat_int > 0 and mat_int not in counted_this_type:
-                        counted_this_type.add(mat_int)
-                        _bump(mat_int)
-            except:
-                pass
-
+        for elem_type in DB.FilteredElementCollector(doc).OfClass(DB.ElementType):
+            _count(_material_ids_of(elem_type)
+                   + _compound_material_ids(elem_type)
+                   + _material_parameter_ids(elem_type, material_lookup),
+                   "types")
     except Exception as ex:
-        print("Error calculating material usage: {}".format(str(ex)))
+        print("Error counting material use by types: {}".format(str(ex)))
+
+    try:
+        for element in DB.FilteredElementCollector(doc) \
+                .WhereElementIsNotElementType() \
+                .WhereElementIsViewIndependent():
+            if _is_placed_model_element(element):
+                _count(_material_ids_of(element), "elements")
+    except Exception as ex:
+        print("Error counting material use by elements: {}".format(str(ex)))
+
+    for mat_int in _category_material_ids(doc):
+        _count([mat_int], "styles")
 
     # Calculate totals
-    total_refs = sum(usage_dict.values())
+    totals = dict((mat_id, sum(counts.values())) for mat_id, counts in usage.items())
+    total_refs = sum(totals.values())
 
     # Update items
     for item in material_items:
         mat_id = item.id
-        if mat_id in usage_dict:
-            item.usage_count = usage_dict[mat_id]
+        if mat_id in usage:
+            item.usage_count = totals[mat_id]
+            item.usage_detail = usage_detail_text(usage[mat_id])
             if total_refs > 0:
-                item.usage_percentage = (float(usage_dict[mat_id]) / total_refs) * 100
+                item.usage_percentage = (float(totals[mat_id]) / total_refs) * 100
+        elif item.purge_check_known and not item.is_really_unused:
+            item.usage_detail = UNTRACED_DETAIL
 
     return total_refs
 
@@ -1144,7 +1285,7 @@ class MaterialManagerWindow(Window):
 
     def _build_ui(self):
         self.Title = "Material Manager"
-        self.Width = 1200
+        self.Width = 1480
         self.Height = 700
         self.WindowStartupLocation = System.Windows.WindowStartupLocation.CenterScreen
         self.Background = _brush(Config.BACKGROUND_COLOR)
@@ -1482,17 +1623,31 @@ class MaterialManagerWindow(Window):
         col_trans.Width = DataGridLength(90)
         grid.Columns.Add(col_trans)
 
+        # Status comes from Revit's own purge check - the same one that
+        # gates Delete - so it is never out of step with the delete warning.
+        col_status = DataGridTextColumn()
+        col_status.Header = "Status"
+        col_status.Binding = Binding("status")
+        col_status.Width = DataGridLength(70)
+        grid.Columns.Add(col_status)
+
         col_usage = DataGridTextColumn()
         col_usage.Header = "Usage"
         col_usage.Binding = Binding("usage_count")
-        col_usage.Width = DataGridLength(70)
+        col_usage.Width = DataGridLength(60)
         grid.Columns.Add(col_usage)
 
         col_percent = DataGridTextColumn()
         col_percent.Header = "Usage %"
         col_percent.Binding = Binding("usage_percentage")
-        col_percent.Width = DataGridLength(80)
+        col_percent.Width = DataGridLength(70)
         grid.Columns.Add(col_percent)
+
+        col_used_by = DataGridTextColumn()
+        col_used_by.Header = "Used By"
+        col_used_by.Binding = Binding("usage_detail")
+        col_used_by.Width = DataGridLength(280)
+        grid.Columns.Add(col_used_by)
 
         col_id = DataGridTextColumn()
         col_id.Header = "ID"
@@ -1773,9 +1928,8 @@ class MaterialManagerWindow(Window):
             return
         MessageBox.Show(
             "Material Manager\n\n"
-            "Lists every Material in the model with how many element "
-            "types use it, so unused materials can be found and cleaned "
-            "up.\n\n"
+            "Lists every Material in the model with where it is used, so "
+            "unused materials can be found and cleaned up.\n\n"
             "STAT CARDS\n"
             "  TOTAL     - materials in the model\n"
             "  VISIBLE   - materials left after Search/Filter/Category\n"
@@ -1784,15 +1938,14 @@ class MaterialManagerWindow(Window):
             "(Document.GetUnusedElements) says are genuinely in use\n"
             "  UNUSED    - materials Revit itself has no use for right "
             "now - safe purge candidates\n\n"
-            "The Usage/Types column is informational only - it counts "
-            "type-level references (compound structure layers, single-"
-            "material families) and can under-count on purpose: it "
-            "cannot see a material painted directly onto an element with "
-            "the Paint tool, or set through an instance-level parameter "
-            "such as Structural Material. IN USE/UNUSED and Select "
-            "Unused always go by the real Revit check instead, so a "
-            "painted-but-not-typed material is correctly kept as "
-            "in-use.\n\n"
+            "COLUMNS\n"
+            "  Status  - In use / Unused, from Revit's own purge check "
+            "(the same one IN USE/UNUSED, Select Unused and Delete use)\n"
+            "  Usage   - how many element types, placed elements and "
+            "object styles use the material; Used By breaks it down\n"
+            "  A material can be In use with Usage 0: something the tool "
+            "cannot trace uses it, e.g. a family that is loaded but not "
+            "placed. Used By says so.\n\n"
             "WORKFLOW\n"
             "  Search / Filter by Usage / Filter by Category narrow the "
             "list.\n"
@@ -1921,20 +2074,16 @@ class MaterialManagerWindow(Window):
             return
 
         # Check usage - is_really_unused (Document.GetUnusedElements) is the
-        # authority; usage_count is only an informational undercount (it
-        # cannot see paint applied directly to an instance, or an instance-
-        # level material parameter such as Structural Material).
+        # authority, the same as the Status column; usage_detail says where
+        # the use is, when the tool can trace it.
         in_use = [item for item in selected if not item.is_really_unused]
         can_delete = [item for item in selected if item.is_really_unused]
 
         if in_use:
             msg = "WARNING: {} material(s) are IN USE:\n\n".format(len(in_use))
             for item in in_use[:5]:
-                if item.usage_count > 0:
-                    msg += "  - '{}': {} type(s)\n".format(item.name, item.usage_count)
-                else:
-                    msg += ("  - '{}': in use (e.g. painted onto an element, "
-                             "or an instance-level override)\n".format(item.name))
+                msg += "  - '{}': {}\n".format(
+                    item.name, item.usage_detail or UNTRACED_DETAIL)
             if len(in_use) > 5:
                 msg += "  ... and {} more\n".format(len(in_use) - 5)
             msg += "\nDeleting may affect existing elements. Continue?"
