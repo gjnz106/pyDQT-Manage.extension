@@ -4,6 +4,7 @@ tooltip: >-
   metrics listed by impact on model performance and stability:
   warnings, CAD imports, file size, in-place families, duplicates,
   CAD and RVT links, images, model groups, design options and more.
+  The Linked Models tab checks every loaded Revit link the same way.
   
   Copyright by Dang Quoc Truong - DQT
 author: Dang Quoc Truong (DQT)

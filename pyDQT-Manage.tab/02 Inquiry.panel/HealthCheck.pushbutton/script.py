@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Model Health Check v2.0 - DQT
+Model Health Check v2.1 - DQT
 Analyzes Revit model health with color-coded metrics dashboard.
 Features: Gauge dashboard, Select Elements, Weighted score, Purgeable elements.
 Pure code-behind WPF for IronPython stability.
@@ -8,6 +8,11 @@ Pure code-behind WPF for IronPython stability.
 v2.0: a 3-level RAG health scale (Green / Amber / Red) instead of the
 6-level one, and the metrics presented in order of their impact on model
 performance and stability (Critical / High / Moderate / Low impact).
+
+v2.1: a Linked Models tab - every Revit link checked with the same metrics
+and thresholds, one row per linked file, with its full dashboard on Open.
+A metric that cannot be measured (the file size of a cloud model, which
+has no local file) shows N/A and is left out of the score.
 
 Copyright (c) 2025 Dang Quoc Truong (DQT)
 All rights reserved.
@@ -133,6 +138,10 @@ RAG_SHORT = {RAG_GREEN: "Healthy", RAG_AMBER: "Needs Attention",
 RAG_TEXT_COLORS = {RAG_GREEN: "#FFFFFF", RAG_AMBER: DQT_TEXT, RAG_RED: "#FFFFFF"}
 # A metric's contribution to the weighted score.
 RAG_SCORES = {RAG_GREEN: 100, RAG_AMBER: 50, RAG_RED: 0}
+# A metric that could not be measured (value None) - shown, never scored.
+NOT_MEASURED = "N/A"
+NA_COLOR = "#E0E0E0"
+NA_MEANING = "not measured"
 # Overall result from the weighted score: Green from 90, Amber from 60
 # (the old grade A / grades B-C / grades D-F).
 OVERALL_GREEN_MIN = 90
@@ -458,14 +467,17 @@ class ModelHealthAnalyzer:
         self.element_ids[key] = ids
 
     def _file_size(self):
+        """Size of the model's file on disk; None (not measured) when there
+        is no local file to read - an unsaved model, or a cloud model, whose
+        path is not a path on this computer."""
         try:
             path = self.doc.PathName
-            if path and os.path.exists(path):
+            if path and os.path.isfile(path):
                 self.metrics["file_size_mb"] = round(os.path.getsize(path) / (1024.0 * 1024.0), 1)
             else:
-                self.metrics["file_size_mb"] = 0
+                self.metrics["file_size_mb"] = None
         except:
-            self.metrics["file_size_mb"] = 0
+            self.metrics["file_size_mb"] = None
 
     def _warnings(self):
         try:
@@ -683,16 +695,34 @@ class ModelHealthAnalyzer:
 # ============================================================
 def get_status_text(key, value):
     """The metric's RAG level: Green up to the Green value, Amber up to
-    the Amber value, Red above it ("N/A" for an unknown metric)."""
-    if key not in METRIC_THRESHOLDS:
-        return "N/A"
+    the Amber value, Red above it ("N/A" for an unknown metric, or one
+    that could not be measured)."""
+    if key not in METRIC_THRESHOLDS or value is None:
+        return NOT_MEASURED
     t = METRIC_THRESHOLDS[key]["thresholds"]
     if value <= t[0]: return RAG_GREEN
     elif value <= t[1]: return RAG_AMBER
     else: return RAG_RED
 
 def get_health_color(key, value):
-    return RAG_COLORS.get(get_status_text(key, value), "#FFFFFF")
+    return RAG_COLORS.get(get_status_text(key, value), NA_COLOR)
+
+def get_status_meaning(status):
+    return RAG_MEANING.get(status, NA_MEANING)
+
+def status_text_color(status):
+    """Colour for a status written on white: the RAG colour, a darker
+    amber (amber text on white is hard to read), grey when not measured."""
+    if status == RAG_AMBER:
+        return "#B07800"
+    return RAG_COLORS.get(status, "#888888")
+
+def format_value(key, value):
+    """"120.5 MB", "40", or "N/A" when not measured."""
+    if value is None:
+        return NOT_MEASURED
+    unit = METRIC_THRESHOLDS.get(key, {}).get("unit", "")
+    return "{}{}".format(value, " " + unit if unit else "")
 
 def get_text_color(key, value):
     """Text colour that reads on the metric's RAG colour."""
@@ -704,7 +734,7 @@ def get_health_score(metrics):
     weighted_total = 0
     weight_sum = 0
     for key, value in metrics.items():
-        if key in METRIC_THRESHOLDS:
+        if key in METRIC_THRESHOLDS and value is not None:
             w = METRIC_THRESHOLDS[key].get("weight", 1)
             weighted_total += RAG_SCORES[get_status_text(key, value)] * w
             weight_sum += w
@@ -719,10 +749,11 @@ def get_overall_status(score):
     return level, RAG_SHORT[level], RAG_COLORS[level]
 
 def count_statuses(metrics):
-    """{"Green": n, "Amber": n, "Red": n} over the known metrics."""
+    """{"Green": n, "Amber": n, "Red": n} over the known, measured
+    metrics."""
     counts = OrderedDict((level, 0) for level in RAG_LEVELS)
     for key, value in metrics.items():
-        if key in METRIC_THRESHOLDS:
+        if key in METRIC_THRESHOLDS and value is not None:
             counts[get_status_text(key, value)] += 1
     return counts
 
@@ -778,6 +809,133 @@ RECOMMENDATIONS = {
     "linked_dwg_not_pinned": "Pin all linked files to prevent accidental movement.",
     "duplicate_elements": "Review and delete overlapping duplicate elements. They cause double counting in schedules and visual artifacts.",
 }
+
+
+# ============================================================
+# LINKED MODELS - every Revit link, checked with the same metrics
+# ============================================================
+def _id_value(element_id):
+    """ElementId -> int across Revit 2024-2027 (.Value vs .IntegerValue)."""
+    try:
+        return element_id.Value
+    except AttributeError:
+        return element_id.IntegerValue
+
+
+def _html(text):
+    """Text made safe to drop into the HTML report."""
+    return (u"{}".format(text).replace("&", "&amp;").replace("<", "&lt;")
+            .replace(">", "&gt;"))
+
+
+def _element_name(element):
+    if element is None:
+        return ""
+    try:
+        return Element.Name.GetValue(element)
+    except:
+        pass
+    try:
+        return element.Name
+    except:
+        return ""
+
+
+class LinkedModel(object):
+    """One linked Revit file: its name, how many times it is placed, its
+    document (None when the link is not loaded) and, once analysed, its
+    metrics - or the error that stopped the analysis."""
+
+    def __init__(self, name):
+        self.name = name
+        self.instances = 0
+        self.doc = None
+        self.metrics = None
+        self.error = None
+
+    @property
+    def loaded(self):
+        return self.doc is not None
+
+
+def collect_linked_models(doc):
+    """[LinkedModel] - one per linked file (link type), however many times
+    it is placed, sorted by name. Cheap: nothing is analysed here."""
+    found = OrderedDict()
+    try:
+        instances = list(FilteredElementCollector(doc).OfClass(RevitLinkInstance)
+                         .WhereElementIsNotElementType())
+    except:
+        instances = []
+    for inst in instances:
+        try:
+            type_id = inst.GetTypeId()
+            key = _id_value(type_id)
+        except:
+            continue
+        model = found.get(key)
+        if model is None:
+            name = _element_name(doc.GetElement(type_id))
+            model = LinkedModel(name or "Link {}".format(key))
+            found[key] = model
+        model.instances += 1
+        if model.doc is None:
+            try:
+                model.doc = inst.GetLinkDocument()
+            except:
+                model.doc = None
+    return sorted(found.values(), key=lambda m: m.name.lower())
+
+
+def analyze_linked_model(model):
+    """Run the 12 metrics on a loaded link. A link that is not loaded is
+    left alone; an analysis that fails keeps its error for the table."""
+    model.metrics = None
+    model.error = None
+    if model.doc is None:
+        return model
+    try:
+        model.metrics = ModelHealthAnalyzer(model.doc).analyze()
+    except Exception as ex:
+        model.error = str(ex) or ex.__class__.__name__
+    return model
+
+
+def attention_text(metrics, limit=3):
+    """"Warnings (Red), CAD Links (Amber)" - the Red metrics first, then
+    the Amber ones, each in priority order, at most `limit` of them."""
+    keys = recommended_keys(metrics)
+    reds = [k for k in keys if get_status_text(k, metrics[k]) == RAG_RED]
+    ordered = reds + [k for k in keys if k not in reds]
+    parts = ["{} ({})".format(METRIC_THRESHOLDS[k]["label"],
+                              get_status_text(k, metrics[k]))
+             for k in ordered[:limit]]
+    if len(ordered) > limit:
+        parts.append("+{} more".format(len(ordered) - limit))
+    return ", ".join(parts)
+
+
+def link_row(model):
+    """What the Linked Models table and the report show for one link."""
+    row = {"name": model.name, "instances": model.instances,
+           "status": "Loaded" if model.loaded else "Not loaded",
+           "overall": "-", "score": "-", "red": "-", "amber": "-",
+           "color": None, "text_color": DQT_TEXT, "note": ""}
+    if not model.loaded:
+        row["note"] = "Not loaded - reload it in Manage Links to check it"
+    elif model.error:
+        row["note"] = "Could not be read: " + model.error
+    elif model.metrics is None:
+        row["note"] = "Not analyzed yet"
+    else:
+        score = get_health_score(model.metrics)
+        level, label, color = get_overall_status(score)
+        counts = count_statuses(model.metrics)
+        row.update(overall="{} - {}".format(level, label), score=str(score),
+                   red=str(counts[RAG_RED]), amber=str(counts[RAG_AMBER]),
+                   color=color, text_color=RAG_TEXT_COLORS[level],
+                   note=attention_text(model.metrics) or "All metrics Green")
+    return row
 
 
 # ============================================================
@@ -866,13 +1024,21 @@ def _create_arc_path(cx, cy, radius, start_angle, end_angle, color, stroke_width
 # WPF WINDOW
 # ============================================================
 class ModelHealthWindow(Window):
-    def __init__(self, doc, uidoc):
+    def __init__(self, doc, uidoc, link_name=None):
+        """The dashboard of the open model - or, with `link_name`, of one of
+        its Revit links (read-only: no Select, no Settings, no links tab)."""
         self.doc = doc
         self.uidoc = uidoc
         self.metrics = OrderedDict()
         self.analyzer = None
+        self.link_name = link_name
+        self.is_link = link_name is not None
+        self.linked_models = [] if self.is_link else collect_linked_models(doc)
+        self.links_stack = None
 
-        self.Title = "Model Health Check v2.0 - DQT"
+        self.Title = "Model Health Check v2.1 - DQT"
+        if self.is_link:
+            self.Title += u" - Linked model: {}".format(link_name)
         self.Height = 900
         self.Width = 1400
         self.MinHeight = 700
@@ -959,10 +1125,19 @@ class ModelHealthWindow(Window):
         self.tab_dashboard.Content = root
         self.tabs.Items.Add(self.tab_dashboard)
 
-        self.tab_settings = WPFControls.TabItem()
-        self.tab_settings.Header = self._make_tab_header(u"⚙ Settings")
-        self.tab_settings.Content = self._make_settings_tab()
-        self.tabs.Items.Add(self.tab_settings)
+        # A linked model's dashboard is read-only: thresholds are edited
+        # from the open model's window, and links are listed there.
+        if not self.is_link:
+            self.tab_links = WPFControls.TabItem()
+            self.tab_links.Header = self._make_tab_header(
+                u"Linked Models ({})".format(len(self.linked_models)))
+            self.tab_links.Content = self._make_links_tab()
+            self.tabs.Items.Add(self.tab_links)
+
+            self.tab_settings = WPFControls.TabItem()
+            self.tab_settings.Header = self._make_tab_header(u"⚙ Settings")
+            self.tab_settings.Content = self._make_settings_tab()
+            self.tabs.Items.Add(self.tab_settings)
 
         self.Content = self.tabs
 
@@ -1213,6 +1388,7 @@ class ModelHealthWindow(Window):
             self._update_score()
             self._build_heatmap()
             self._build_recommendations()
+        self._build_links_table()
 
         self.txt_settings_status.Text = "Saved and applied at {}.".format(
             datetime.datetime.now().strftime("%H:%M:%S"))
@@ -1237,8 +1413,226 @@ class ModelHealthWindow(Window):
             self._update_score()
             self._build_heatmap()
             self._build_recommendations()
+        self._build_links_table()
 
         self.txt_settings_status.Text = "Reset to built-in defaults."
+
+    # ---- LINKED MODELS TAB: one row per linked file ----
+    LINK_COLUMNS = [(u"LINKED MODEL", 300), (u"INSTANCES", 80),
+                    (u"STATUS", 95), (u"OVERALL", 190), (u"SCORE", 65),
+                    (u"RED", 50), (u"AMBER", 60), (u"NEEDS ATTENTION", 340),
+                    (u"DASHBOARD", 95)]
+
+    def _make_links_tab(self):
+        outer = WPFGrid()
+        outer.Margin = Thickness(14)
+        for h in [GridLength(1, GridUnitType.Auto),   # intro
+                  GridLength(1, GridUnitType.Star),   # table
+                  GridLength(1, GridUnitType.Auto)]:  # action bar
+            rd = RowDefinition()
+            rd.Height = h
+            outer.RowDefinitions.Add(rd)
+
+        intro = Border()
+        intro.Background = brush(DQT_PRIMARY)
+        intro.CornerRadius = WinCornerRadius(6)
+        intro.Padding = Thickness(16, 12, 16, 12)
+        intro.Margin = Thickness(0, 0, 0, 10)
+        intro_txt = TextBlock()
+        intro_txt.Text = (
+            u"Every Revit link in this model - one row per linked file - "
+            u"checked with the same 12 metrics and thresholds as the "
+            u"Dashboard. \u201cAnalyze Linked Models\u201d reads each "
+            u"loaded link, which can take a while when there are many. A "
+            u"link that is not loaded cannot be read: reload it in Manage "
+            u"Links first. \u201cOpen\u201d shows a link's full dashboard.")
+        intro_txt.FontSize = 13
+        intro_txt.TextWrapping = TextWrapping.Wrap
+        intro_txt.Foreground = brush(DQT_TEXT_DARK)
+        intro.Child = intro_txt
+        WPFGrid.SetRow(intro, 0)
+        outer.Children.Add(intro)
+
+        table_border = Border()
+        table_border.Background = brush("#FFFFFF")
+        table_border.BorderBrush = brush(DQT_BORDER)
+        table_border.BorderThickness = Thickness(1)
+        table_border.CornerRadius = WinCornerRadius(6)
+        table_border.Margin = Thickness(0, 0, 0, 10)
+        sv = ScrollViewer()
+        sv.VerticalScrollBarVisibility = ScrollBarVisibility.Auto
+        sv.HorizontalScrollBarVisibility = ScrollBarVisibility.Auto
+        self.links_stack = StackPanel()
+        sv.Content = self.links_stack
+        table_border.Child = sv
+        WPFGrid.SetRow(table_border, 1)
+        outer.Children.Add(table_border)
+
+        bar = WPFGrid()
+        c1 = ColumnDefinition()
+        c1.Width = GridLength(1, GridUnitType.Star)
+        c2 = ColumnDefinition()
+        c2.Width = GridLength(1, GridUnitType.Auto)
+        bar.ColumnDefinitions.Add(c1)
+        bar.ColumnDefinitions.Add(c2)
+        self.txt_links_status = TextBlock()
+        self.txt_links_status.FontSize = 12
+        self.txt_links_status.Foreground = brush("#888888")
+        self.txt_links_status.VerticalAlignment = VerticalAlignment.Center
+        WPFGrid.SetColumn(self.txt_links_status, 0)
+        bar.Children.Add(self.txt_links_status)
+
+        self.btn_analyze_links = Button()
+        self.btn_analyze_links.Content = u"\u27F3 Analyze Linked Models"
+        self.btn_analyze_links.Background = brush(DQT_PRIMARY)
+        self.btn_analyze_links.Foreground = brush(DQT_TEXT_DARK)
+        self.btn_analyze_links.FontWeight = FontWeights.SemiBold
+        self.btn_analyze_links.Padding = Thickness(16, 8, 16, 8)
+        self.btn_analyze_links.BorderBrush = brush(DQT_PRIMARY_DARK)
+        self.btn_analyze_links.BorderThickness = Thickness(1)
+        self.btn_analyze_links.Cursor = Cursors.Hand
+        self.btn_analyze_links.IsEnabled = any(m.loaded for m in self.linked_models)
+        self.btn_analyze_links.Click += self._on_analyze_links
+        WPFGrid.SetColumn(self.btn_analyze_links, 1)
+        bar.Children.Add(self.btn_analyze_links)
+        WPFGrid.SetRow(bar, 2)
+        outer.Children.Add(bar)
+
+        loaded = sum(1 for m in self.linked_models if m.loaded)
+        self.txt_links_status.Text = "{} linked file(s), {} loaded.".format(
+            len(self.linked_models), loaded)
+        self._build_links_table()
+        return outer
+
+    def _link_cell(self, table, row, col, text, background, foreground=DQT_TEXT,
+                   bold=False, center=False):
+        b = Border()
+        b.Background = brush(background)
+        b.BorderBrush = brush("#E8E0D0")
+        b.BorderThickness = Thickness(0, 0, 1, 1)
+        b.Padding = Thickness(10, 6, 10, 6)
+        t = TextBlock()
+        t.Text = text
+        t.FontSize = 12
+        t.Foreground = brush(foreground)
+        t.VerticalAlignment = VerticalAlignment.Center
+        t.TextWrapping = TextWrapping.Wrap
+        if bold:
+            t.FontWeight = FontWeights.SemiBold
+        if center:
+            t.HorizontalAlignment = HorizontalAlignment.Center
+        b.Child = t
+        WPFGrid.SetRow(b, row)
+        WPFGrid.SetColumn(b, col)
+        table.Children.Add(b)
+        return b
+
+    def _build_links_table(self):
+        """(Re)draw the Linked Models table from self.linked_models - called
+        after an analysis and whenever the thresholds change."""
+        if self.links_stack is None:
+            return
+        self.links_stack.Children.Clear()
+        if not self.linked_models:
+            none = TextBlock()
+            none.Text = "This model has no Revit links."
+            none.FontSize = 13
+            none.Foreground = brush("#888888")
+            none.Margin = Thickness(14)
+            self.links_stack.Children.Add(none)
+            return
+
+        table = WPFGrid()
+        for _, width in self.LINK_COLUMNS:
+            cd = ColumnDefinition()
+            cd.Width = GridLength(width)
+            table.ColumnDefinitions.Add(cd)
+        rd = RowDefinition()
+        rd.Height = GridLength(36)
+        table.RowDefinitions.Add(rd)
+        for ci, (title, _) in enumerate(self.LINK_COLUMNS):
+            cell = self._link_cell(table, 0, ci, title, DQT_PRIMARY,
+                                   DQT_TEXT_DARK, bold=True)
+            cell.BorderBrush = brush(DQT_PRIMARY_DARK)
+            cell.BorderThickness = Thickness(0, 0, 1, 2)
+
+        for index, model in enumerate(self.linked_models):
+            r = index + 1
+            rd = RowDefinition()
+            rd.Height = GridLength(1, GridUnitType.Auto)
+            rd.MinHeight = 40
+            table.RowDefinitions.Add(rd)
+            row = link_row(model)
+            bg = "#FFFFFF" if r % 2 == 0 else "#FAF8F0"
+            self._link_cell(table, r, 0, row["name"], bg, bold=True)
+            self._link_cell(table, r, 1, str(row["instances"]), bg, center=True)
+            self._link_cell(table, r, 2, row["status"], bg,
+                            DQT_TEXT if model.loaded else HEALTH_RED)
+            self._link_cell(table, r, 3, row["overall"], row["color"] or bg,
+                            row["text_color"], bold=row["color"] is not None,
+                            center=True)
+            self._link_cell(table, r, 4, row["score"], bg, center=True)
+            self._link_cell(table, r, 5, row["red"], bg,
+                            HEALTH_RED if row["red"] not in ("-", "0") else DQT_TEXT,
+                            center=True)
+            self._link_cell(table, r, 6, row["amber"], bg,
+                            "#B07800" if row["amber"] not in ("-", "0") else DQT_TEXT,
+                            center=True)
+            self._link_cell(table, r, 7, row["note"], bg, "#666666")
+
+            action = Border()
+            action.Background = brush(bg)
+            action.BorderBrush = brush("#E8E0D0")
+            action.BorderThickness = Thickness(0, 0, 0, 1)
+            action.Padding = Thickness(4)
+            btn = Button()
+            btn.Content = u"Open \u25B8"
+            btn.FontSize = 11
+            btn.Padding = Thickness(10, 4, 10, 4)
+            btn.Background = brush("#FFFFFF")
+            btn.Foreground = brush(DQT_TEXT_DARK)
+            btn.BorderBrush = brush(DQT_PRIMARY_DARK)
+            btn.BorderThickness = Thickness(1)
+            btn.Cursor = Cursors.Hand
+            btn.HorizontalAlignment = HorizontalAlignment.Center
+            btn.VerticalAlignment = VerticalAlignment.Center
+            btn.IsEnabled = model.loaded
+            btn.Tag = index
+            btn.Click += self._on_open_link
+            action.Child = btn
+            WPFGrid.SetRow(action, r)
+            WPFGrid.SetColumn(action, 8)
+            table.Children.Add(action)
+
+        self.links_stack.Children.Add(table)
+
+    def _on_analyze_links(self, sender, args):
+        for model in self.linked_models:
+            analyze_linked_model(model)
+        self._build_links_table()
+        analyzed = sum(1 for m in self.linked_models if m.metrics is not None)
+        not_loaded = sum(1 for m in self.linked_models if not m.loaded)
+        failed = sum(1 for m in self.linked_models if m.error)
+        text = "Analyzed {} linked model(s) at {}.".format(
+            analyzed, datetime.datetime.now().strftime("%H:%M:%S"))
+        if not_loaded:
+            text += " {} not loaded.".format(not_loaded)
+        if failed:
+            text += " {} could not be read.".format(failed)
+        self.txt_links_status.Text = text
+
+    def _on_open_link(self, sender, args):
+        try:
+            model = self.linked_models[int(sender.Tag)]
+        except Exception:
+            return
+        if not model.loaded:
+            return
+        try:
+            ModelHealthWindow(model.doc, self.uidoc, link_name=model.name).ShowDialog()
+        except Exception as ex:
+            MessageBox.Show("Could not open the linked model's dashboard:\n{}".format(ex),
+                            "Linked Models", MessageBoxButton.OK, MessageBoxImage.Error)
 
     # ---- HEADER ----
     def _make_header(self):
@@ -1499,6 +1893,9 @@ class ModelHealthWindow(Window):
             proj_name = proj.Name if proj else "Untitled"
             file_name = os.path.basename(self.doc.PathName) if self.doc.PathName else "Unsaved"
             self.txt_project.Text = "Project: {}  |  File: {}".format(proj_name, file_name)
+            if self.is_link:
+                self.txt_project.Text = u"Linked model: {}  |  {}".format(
+                    self.link_name, self.txt_project.Text)
 
             self.analyzer = ModelHealthAnalyzer(self.doc)
             self.metrics = self.analyzer.analyze()
@@ -1641,7 +2038,10 @@ class ModelHealthWindow(Window):
         h_color = get_health_color(key, value)
         thresholds = config["thresholds"]
         row_bg = "#FFFFFF" if row_idx % 2 == 0 else "#FAF8F0"
-        is_selectable = config.get("selectable", False) and value > 0
+        measured = value is not None
+        # Elements of a linked model cannot be selected in the host
+        is_selectable = (config.get("selectable", False) and measured
+                         and value > 0 and not self.is_link)
 
         # Col 0: Name
         b0 = Border()
@@ -1668,8 +2068,7 @@ class ModelHealthWindow(Window):
         b1.BorderThickness = Thickness(0, 0, 1, 1)
         b1.Padding = Thickness(8, 6, 8, 6)
         t1 = TextBlock()
-        unit = config.get("unit", "")
-        t1.Text = "{}{}".format(value, " " + unit if unit else "")
+        t1.Text = format_value(key, value)
         t1.FontSize = 13
         t1.FontWeight = FontWeights.Bold
         t1.Foreground = brush(get_text_color(key, value))
@@ -1705,8 +2104,8 @@ class ModelHealthWindow(Window):
         
         # Fill bar
         max_t = bar_scale(thresholds)
-        ratio = min(value / max_t, 1.0)
-        fill_w = max(int(ratio * BAR_W), 3) if value > 0 else 0
+        ratio = min(value / max_t, 1.0) if measured else 0
+        fill_w = max(int(ratio * BAR_W), 3) if measured and value > 0 else 0
         if fill_w > 0:
             bar_fill = Border()
             bar_fill.Width = fill_w
@@ -1751,10 +2150,10 @@ class ModelHealthWindow(Window):
         weight_stars = u"\u2605" * weight + u"\u2606" * (5 - weight)
 
         st = TextBlock()
-        st.Text = u"Status: {} - {}".format(status, RAG_MEANING.get(status, ""))
+        st.Text = u"Status: {} - {}".format(status, get_status_meaning(status))
         st.FontSize = 11
         st.FontWeight = FontWeights.SemiBold
-        st.Foreground = brush(h_color if status != RAG_AMBER else "#B07800")
+        st.Foreground = brush(status_text_color(status))
         st.TextWrapping = TextWrapping.Wrap
         info_sp.Children.Add(st)
 
@@ -1871,6 +2270,11 @@ class ModelHealthWindow(Window):
     # SELECT ELEMENTS
     # ----------------------------------------------------------
     def _on_select_elements(self, sender, args):
+        if self.is_link:
+            MessageBox.Show("Elements of a linked model cannot be selected "
+                            "from the host model.", "Select Elements",
+                            MessageBoxButton.OK, MessageBoxImage.Information)
+            return
         try:
             metric_key = sender.Tag
             if not self.analyzer or metric_key not in self.analyzer.element_ids:
@@ -1930,6 +2334,12 @@ class ModelHealthWindow(Window):
             "  Each row in the recommendations list can Select Elements to "
             "select the offending elements straight in Revit.\n"
             "  Export Report saves the dashboard as a report file.\n\n"
+            "LINKED MODELS TAB\n"
+            "  One row per Revit link. Analyze Linked Models checks every "
+            "loaded link with the same metrics and thresholds; Open shows "
+            "a link's full dashboard (read-only). A link that is not loaded "
+            "must be reloaded in Manage Links first. A cloud model's file "
+            "size cannot be measured and shows N/A.\n\n"
             "SETTINGS TAB\n"
             "  Edit each metric's Green and Amber values and weight (1-5) "
             "before running an analysis. Save & Apply writes them to "
@@ -1941,6 +2351,36 @@ class ModelHealthWindow(Window):
 
     def _on_refresh(self, sender, args):
         self._run_analysis()
+
+    def _links_report_html(self):
+        """The report's Linked Models section - empty for a linked model's
+        own report, or when the model has no links."""
+        if self.is_link or not self.linked_models:
+            return ""
+        if not any(m.metrics is not None or m.error for m in self.linked_models):
+            return ('<div class="rec-box"><h3>LINKED MODELS</h3>'
+                    '<div style="color:#888;">{} linked file(s) - not analyzed. Use '
+                    'Linked Models &gt; Analyze Linked Models before exporting to '
+                    'include them.</div></div>').format(len(self.linked_models))
+        rows = ""
+        for i, model in enumerate(self.linked_models):
+            row = link_row(model)
+            bg = "#FFFFFF" if i % 2 == 0 else "#FAF8F0"
+            overall_style = ("background:{};color:{};font-weight:700;".format(row["color"], row["text_color"])
+                             if row["color"] else "")
+            rows += (u'<tr style="background:{bg};"><td style="padding:6px 10px;font-weight:600;">{name}</td>'
+                     u'<td style="text-align:center;">{inst}</td><td>{status}</td>'
+                     u'<td style="text-align:center;{ostyle}">{overall}</td>'
+                     u'<td style="text-align:center;">{score}</td><td style="text-align:center;">{red}</td>'
+                     u'<td style="text-align:center;">{amber}</td><td style="color:#666;">{note}</td></tr>').format(
+                bg=bg, name=_html(row["name"]), inst=row["instances"], status=row["status"],
+                ostyle=overall_style, overall=row["overall"], score=row["score"],
+                red=row["red"], amber=row["amber"], note=_html(row["note"]))
+        return (u'<div class="rec-box"><h3>LINKED MODELS</h3><table>'
+                u'<tr><th>LINKED MODEL</th><th style="text-align:center;">INSTANCES</th><th>STATUS</th>'
+                u'<th style="text-align:center;">OVERALL</th><th style="text-align:center;">SCORE</th>'
+                u'<th style="text-align:center;">RED</th><th style="text-align:center;">AMBER</th>'
+                u'<th>NEEDS ATTENTION</th></tr>{}</table></div>').format(rows)
 
     def _on_export(self, sender, args):
         """Export report as PDF using HTML rendering"""
@@ -1974,14 +2414,13 @@ class ModelHealthWindow(Window):
                     status = get_status_text(key, value)
                     weight = config.get("weight", 1)
                     weight_stars = "&#9733;" * weight + "&#9734;" * (5 - weight)
-                    unit = config.get("unit", "")
-                    val_str = "{}{}".format(value, " " + unit if unit else "")
+                    val_str = format_value(key, value)
                     row_bg = "#FFFFFF" if i % 2 == 0 else "#FAF8F0"
                     i += 1
                 
                     # Bar width as a percentage of the bar's scale
                     max_t = bar_scale(thresholds)
-                    bar_pct = min(value / max_t * 100, 100) if value > 0 else 0
+                    bar_pct = min(value / max_t * 100, 100) if value is not None and value > 0 else 0
                     empty_pct = 100 - bar_pct
                 
                     rows_html += """
@@ -2003,8 +2442,8 @@ class ModelHealthWindow(Window):
                         bg=row_bg, label="{}. {}".format(number, config["label"]), color=h_color,
                         tcolor=text_color, val=val_str,
                         pct=round(bar_pct, 1), epct=round(empty_pct, 1),
-                        scolor=h_color if status != RAG_AMBER else "#B07800",
-                        status=status, meaning=RAG_MEANING[status],
+                        scolor=status_text_color(status),
+                        status=status, meaning=get_status_meaning(status),
                         impact=config.get("impact", ""), stars=weight_stars, w=weight,
                         thresholds=thresholds_text(thresholds).replace(u"\u2264", "&le;").replace(">", "&gt;"))
             
@@ -2020,6 +2459,8 @@ class ModelHealthWindow(Window):
                     h_color, metric_label, value, get_status_text(key, value), rec)
             if not rec_keys:
                 rec_html = '<div style="color:#4CAF50;font-weight:600;">All metrics are Green. No action required.</div>'
+
+            links_html = self._links_report_html()
             
             # Full HTML
             html = u"""<!DOCTYPE html>
@@ -2060,7 +2501,7 @@ class ModelHealthWindow(Window):
             <div style="font-size:9px;opacity:0.7;">Copyright by Dang Quoc Truong - DQT</div>
         </div>
         <div style="clear:both;"></div>
-        <div class="sub">Project: {proj} &nbsp;|&nbsp; File: {file}</div>
+        <div class="sub">{link_note}Project: {proj} &nbsp;|&nbsp; File: {file}</div>
     </div>
 
     <div class="score-card">
@@ -2097,6 +2538,8 @@ class ModelHealthWindow(Window):
         {recs}
     </div>
 
+    {links}
+
     <div class="footer">Copyright by Dang Quoc Truong - DQT &copy; 2025</div>
 </body>
 </html>""".format(
@@ -2110,7 +2553,9 @@ class ModelHealthWindow(Window):
                         RAG_COLORS[lv], RAG_TEXT_COLORS[lv], lv, RAG_MEANING[lv])
                     for lv in RAG_LEVELS),
                 date=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                rows=rows_html, recs=rec_html)
+                rows=rows_html, recs=rec_html, links=links_html,
+                link_note=(u"Linked model: {} &nbsp;|&nbsp; ".format(_html(self.link_name))
+                           if self.is_link else ""))
             
             # Save HTML with UTF-8 encoding
             html_path = os.path.join(desktop, "ModelHealth_{}_{}.html".format(fname, ts))
