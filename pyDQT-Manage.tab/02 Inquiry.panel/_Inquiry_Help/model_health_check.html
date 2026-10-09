@@ -22,8 +22,9 @@
   <div class="card">
     <h2>What it does</h2>
     <p class="lede">
-      Analyzes the model against 12 metrics, grades each one Green, Amber or
-      Red, and combines them into one weighted health score. The metrics are
+      Analyzes the model - and, on the Linked Models tab, each of its Revit
+      links - against 12 metrics, grades each one Green, Amber or Red, and
+      combines them into one weighted health score. The metrics are
       listed by their impact on model performance and stability, so the
       dashboard shows first what hurts the model most.
     </p>
@@ -75,11 +76,45 @@
   </div>
 
   <div class="card">
+    <h2>Linked Models</h2>
+    <p>The <b>Linked Models</b> tab lists every Revit link in the model -
+      one row per linked file, however many times it is placed - and checks
+      each one with the same 12 metrics and thresholds as the Dashboard.</p>
+    <ol class="steps">
+      <li>Open the <b>Linked Models</b> tab: every link is listed with its
+        number of instances and whether it is <b>Loaded</b>.</li>
+      <li>Click <b>Analyze Linked Models</b>. Each loaded link is read and
+        graded - it can take a while when there are many links.</li>
+      <li>Read the table: <b>Overall</b> (Green / Amber / Red), <b>Score</b>,
+        how many metrics are <b>Red</b> and <b>Amber</b>, and <b>Needs
+        Attention</b> - the Red metrics first, then the Amber ones.</li>
+      <li><b>Open</b> on a row shows that link's full dashboard.</li>
+      <li><b>Export Report</b> adds a Linked Models section once the links
+        have been analysed.</li>
+    </ol>
+  </div>
+
+  <div class="card">
     <h2>Good to know</h2>
     <div class="box tip">
       This tool only reads the model - fixing a flagged metric (purging
       unused content, resolving warnings, converting in-place families,
       etc.) means switching to the matching tool elsewhere in pyDQT.
+    </div>
+    <div class="box warn">
+      <b>Linked models.</b> A link that is not loaded cannot be read -
+      reload it in Manage Links first; its row says so. A linked model's
+      dashboard is read-only: elements inside a link cannot be selected
+      from the host model, and thresholds are edited from the host's
+      Settings tab (the links are re-graded straight away when they change).
+      Links nested inside another link are included only when Revit shows
+      them in this model.
+    </div>
+    <div class="box tip">
+      <b>N/A.</b> A cloud model (Autodesk Docs / Forma) has no file on this
+      computer, so its <b>File Size</b> cannot be measured: it shows N/A and
+      is left out of the score instead of reading 0 MB and counting as
+      Green. The same goes for a model that has never been saved.
     </div>
     <div class="box fixed">
       <b>New in v2.0.</b> The 6-level scale (Good / Acceptable / Warning /
