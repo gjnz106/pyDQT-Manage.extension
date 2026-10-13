@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Model Health Check v2.2 - DQT
+Model Health Check v2.3 - DQT
 Analyzes Revit model health with color-coded metrics dashboard.
 Features: Gauge dashboard, Select Elements, Weighted score, Purgeable elements.
 Pure code-behind WPF for IronPython stability.
@@ -19,6 +19,12 @@ first to tick the links to check; then the open model and every ticked
 link are analysed together and shown in one window - an Overview tab with
 all of them, one dashboard tab per model, and Settings. Export Report puts
 every checked model in one file.
+
+v2.3: Export Report asks where to save first - PDF (default) or HTML. The
+PDF is printed straight away by Microsoft Edge (or Chrome) running hidden,
+A4 landscape, with the whole report: the Overview, then every checked
+model on a page of its own. If neither browser can be used, the full
+report is saved as HTML next to it instead.
 
 Copyright (c) 2025 Dang Quoc Truong (DQT)
 All rights reserved.
@@ -71,7 +77,7 @@ from System.Windows.Media import (
     PenLineCap
 )
 from System.Windows.Shapes import Path, Ellipse
-from System.Windows.Input import Cursors
+from System.Windows.Input import Cursors, Mouse
 
 from Autodesk.Revit.DB import *
 from Autodesk.Revit.UI import *
@@ -80,12 +86,15 @@ from pyrevit import script
 from dqt_cad_utils import is_cad_link, is_cad_link_type, get_unused_cad_types
 
 WPFGrid = WPFControls.Grid
+import Microsoft.Win32 as Win32   # SaveFileDialog (WPF), Registry
 
 import os
 import datetime
 import codecs
 import copy
 import json
+import shutil
+import tempfile
 from collections import OrderedDict
 
 
@@ -1083,7 +1092,7 @@ class LinkPickerWindow(Window):
         self.result = None
         self._boxes = []
 
-        self.Title = "Model Health Check v2.2 - DQT"
+        self.Title = "Model Health Check v2.3 - DQT"
         self.Width = 820
         self.Height = 620
         self.MinWidth = 640
@@ -2099,67 +2108,57 @@ class ModelDashboard(object):
         grade, label, grade_color = get_overall_status(score)
         counts = count_statuses(self.metrics)
 
-        # Build metric rows HTML - priority order, one header per impact tier
-        rows_html = ""
+        # Metric rows - priority order, one header per impact tier
+        rows_html = u""
         i = 0
         for tier, items in metrics_by_impact(self.metrics):
-            rows_html += """
-              <tr class="tier"><td colspan="4"><strong>{name} IMPACT</strong> &nbsp;-&nbsp; {desc}</td></tr>""".format(
+            rows_html += u"""
+            <tr class="tier"><td colspan="4"><strong>{name} IMPACT</strong> &nbsp;-&nbsp; {desc}</td></tr>""".format(
                 name=tier.upper(), desc=IMPACT_TIERS[tier]["description"])
             for number, key in items:
                 value = self.metrics[key]
                 config = METRIC_THRESHOLDS[key]
                 h_color = get_health_color(key, value)
-                text_color = get_text_color(key, value)
-                thresholds = config["thresholds"]
                 status = get_status_text(key, value)
                 weight = config.get("weight", 1)
-                weight_stars = "&#9733;" * weight + "&#9734;" * (5 - weight)
-                val_str = format_value(key, value)
                 row_bg = "#FFFFFF" if i % 2 == 0 else "#FAF8F0"
                 i += 1
-            
                 # Bar width as a percentage of the bar's scale
-                max_t = bar_scale(thresholds)
+                max_t = bar_scale(config["thresholds"])
                 bar_pct = min(value / max_t * 100, 100) if value is not None and value > 0 else 0
-                empty_pct = 100 - bar_pct
-            
-                rows_html += """
-                <tr style="background:{bg};">
-                    <td style="padding:8px 10px;font-weight:600;border-bottom:1px solid #E8E0D0;">{label}</td>
-                    <td style="padding:8px;text-align:center;background:{color};color:{tcolor};font-weight:700;border-bottom:1px solid #E8E0D0;">{val}</td>
-                    <td style="padding:8px 10px;border-bottom:1px solid #E8E0D0;">
-                        <table style="width:100%;border-collapse:collapse;height:14px;table-layout:fixed;"><tr>
-                            <td style="width:{pct}%;background:{color};border-radius:3px 0 0 3px;height:14px;padding:0;"></td>
-                            <td style="width:{epct}%;background:#E0DDD5;border-radius:0 3px 3px 0;height:14px;padding:0;"></td>
-                        </tr></table>
-                    </td>
-                    <td style="padding:6px 10px;border-bottom:1px solid #E8E0D0;">
-                        <div style="color:{scolor};font-weight:600;font-size:11px;">Status: {status} - {meaning}</div>
-                        <div style="color:#888;font-size:9px;">Impact: {impact} &nbsp;|&nbsp; Weight: {stars} ({w}/5)</div>
-                        <div style="color:#AAA;font-size:8px;">{thresholds}</div>
-                    </td>
-                </tr>""".format(
-                    bg=row_bg, label="{}. {}".format(number, config["label"]), color=h_color,
-                    tcolor=text_color, val=val_str,
-                    pct=round(bar_pct, 1), epct=round(empty_pct, 1),
+                rows_html += u"""
+            <tr style="background:{bg};">
+                <td class="m-label">{label}</td>
+                <td class="m-val" style="background:{color};color:{tcolor};font-weight:700;">{val}</td>
+                <td class="m-bar"><table class="bar"><tr>
+                    <td style="width:{pct}%;background:{color};"></td>
+                    <td style="width:{epct}%;background:#E0DDD5;"></td>
+                </tr></table></td>
+                <td class="m-status">
+                    <div class="st" style="color:{scolor};">Status: {status} - {meaning}</div>
+                    <div class="det">Impact: {impact} &nbsp;|&nbsp; Weight: {stars} ({w}/5) &nbsp;|&nbsp; {thresholds}</div>
+                </td>
+            </tr>""".format(
+                    bg=row_bg, label=u"{}. {}".format(number, config["label"]), color=h_color,
+                    tcolor=get_text_color(key, value), val=format_value(key, value),
+                    pct=round(bar_pct, 1), epct=round(100 - bar_pct, 1),
                     scolor=status_text_color(status),
                     status=status, meaning=get_status_meaning(status),
-                    impact=config.get("impact", ""), stars=weight_stars, w=weight,
-                    thresholds=thresholds_text(thresholds).replace(u"\u2264", "&le;").replace(">", "&gt;"))
-        
-        # Build recommendations HTML - Amber and Red, in priority order
-        rec_html = ""
+                    impact=config.get("impact", ""),
+                    stars="&#9733;" * weight + "&#9734;" * (5 - weight), w=weight,
+                    thresholds=thresholds_text(config["thresholds"]).replace(u"\u2264", "&le;").replace(">", "&gt;"))
+
+        # Recommendations - Amber and Red, in priority order
+        rec_html = u""
         rec_keys = recommended_keys(self.metrics)
         for key in rec_keys:
             value = self.metrics[key]
-            h_color = get_health_color(key, value)
-            metric_label = METRIC_THRESHOLDS[key]["label"]
-            rec = RECOMMENDATIONS.get(key, "Review and optimize.")
-            rec_html += '<div style="margin:4px 0;"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:{};margin-right:8px;vertical-align:middle;"></span><strong>{} ({}) - {}:</strong> <span style="color:#666;">{}</span></div>'.format(
-                h_color, metric_label, value, get_status_text(key, value), rec)
+            rec_html += (u'<div class="rec-item"><span class="dot" style="background:{};"></span>'
+                         u'<strong>{} ({}) - {}:</strong> <span style="color:#666;">{}</span></div>').format(
+                get_health_color(key, value), METRIC_THRESHOLDS[key]["label"], value,
+                get_status_text(key, value), RECOMMENDATIONS.get(key, "Review and optimize."))
         if not rec_keys:
-            rec_html = '<div style="color:#4CAF50;font-weight:600;">All metrics are Green. No action required.</div>'
+            rec_html = u'<div class="rec-item" style="color:#4CAF50;font-weight:600;">All metrics are Green. No action required.</div>'
 
         return u"""
     <div class="model">
@@ -2178,14 +2177,16 @@ class ModelDashboard(object):
         <div style="clear:both;"></div>
     </div>
 
-    <table>
-        <tr>
-            <th style="width:160px;">METRIC</th>
-            <th style="width:70px;text-align:center;">VALUE</th>
-            <th style="width:250px;">HEALTH INDICATOR</th>
+    <table class="metrics">
+        <colgroup><col style="width:20%;"><col style="width:9%;"><col style="width:25%;"><col></colgroup>
+        <thead><tr>
+            <th>METRIC</th>
+            <th style="text-align:center;">VALUE</th>
+            <th>HEALTH INDICATOR</th>
             <th>STATUS</th>
-        </tr>
-        {rows}
+        </tr></thead>
+        <tbody>{rows}
+        </tbody>
     </table>
 
     <div class="rec-box">
@@ -2201,6 +2202,153 @@ class ModelDashboard(object):
 
 
 # ============================================================
+# REPORT FILE - ask where to save it, then write a PDF or HTML
+# ============================================================
+REPORT_FILTER = "PDF report (*.pdf)|*.pdf|HTML report (*.html)|*.html"
+PDF_TIMEOUT_MS = 180000
+
+
+def _export_config():
+    """pyRevit's per-tool settings, where the last export folder is kept."""
+    try:
+        return script.get_config()
+    except Exception:
+        return None
+
+
+def _export_folder():
+    """The folder of the last export, else the Desktop."""
+    cfg = _export_config()
+    try:
+        folder = cfg.get_option("export_folder", "") if cfg is not None else ""
+    except Exception:
+        folder = ""
+    if folder and os.path.isdir(folder):
+        return folder
+    return Environment.GetFolderPath(Environment.SpecialFolder.Desktop)
+
+
+def _remember_export_folder(folder):
+    cfg = _export_config()
+    if cfg is None:
+        return
+    try:
+        cfg.export_folder = folder
+        script.save_config()
+    except Exception:
+        pass
+
+
+def ask_report_path(default_stem, owner=None):
+    """Save dialog for the report - PDF (default) or HTML. Returns the
+    chosen path, always ending .pdf or .html, or None when cancelled."""
+    dlg = Win32.SaveFileDialog()
+    dlg.Title = "Export Model Health Report"
+    dlg.Filter = REPORT_FILTER
+    dlg.FilterIndex = 1
+    dlg.DefaultExt = ".pdf"
+    dlg.AddExtension = True
+    dlg.OverwritePrompt = True
+    dlg.InitialDirectory = _export_folder()
+    dlg.FileName = default_stem + ".pdf"
+    ok = dlg.ShowDialog(owner) if owner is not None else dlg.ShowDialog()
+    if ok != True:
+        return None
+    path = dlg.FileName
+    ext = os.path.splitext(path)[1].lower()
+    if ext == ".htm":
+        return path
+    if ext not in (".pdf", ".html"):
+        path += ".html" if dlg.FilterIndex == 2 else ".pdf"
+    return path
+
+
+def _find_pdf_browser():
+    """Microsoft Edge (on every Windows 10/11 machine), else Google Chrome:
+    their print engine turns the HTML report into the PDF."""
+    names = [("Microsoft", "Edge", "msedge.exe"), ("Google", "Chrome", "chrome.exe")]
+    for vendor, app, exe in names:
+        for env in ("ProgramFiles(x86)", "ProgramFiles", "LOCALAPPDATA"):
+            base = os.environ.get(env)
+            if not base:
+                continue
+            path = os.path.join(base, vendor, app, "Application", exe)
+            if os.path.isfile(path):
+                return path
+        try:
+            key = Win32.Registry.LocalMachine.OpenSubKey(
+                "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\" + exe)
+            if key is not None:
+                path = key.GetValue("")
+                if path and os.path.isfile(str(path)):
+                    return str(path)
+        except Exception:
+            pass
+    return None
+
+
+def _cmd_arg(arg):
+    return u'"{}"'.format(arg) if (u" " in arg or u"\t" in arg) else arg
+
+
+def html_to_pdf(html, pdf_path, timeout_ms=PDF_TIMEOUT_MS):
+    """Print the report to `pdf_path` with Edge / Chrome running headless
+    (A4 landscape, every page, no browser header or footer). Returns None
+    on success, else why the browser could not make it. Writing the PDF
+    itself (e.g. the file is open in a viewer) raises."""
+    browser = _find_pdf_browser()
+    if not browser:
+        return "Microsoft Edge or Google Chrome was not found"
+    work = tempfile.mkdtemp(prefix="dqt_health_")
+    try:
+        html_path = os.path.join(work, "report.html")
+        with codecs.open(html_path, "w", "utf-8") as f:
+            f.write(html)
+        tmp_pdf = os.path.join(work, "report.pdf")
+        args = [u"--headless", u"--disable-gpu", u"--no-first-run",
+                u"--no-default-browser-check", u"--disable-extensions",
+                u"--user-data-dir=" + os.path.join(work, "profile"),
+                u"--no-pdf-header-footer", u"--print-to-pdf-no-header",
+                u"--print-to-pdf=" + tmp_pdf, System.Uri(html_path).AbsoluteUri]
+        psi = System.Diagnostics.ProcessStartInfo(browser, u" ".join(_cmd_arg(a) for a in args))
+        psi.UseShellExecute = False
+        psi.CreateNoWindow = True
+        proc = System.Diagnostics.Process.Start(psi)
+        if not proc.WaitForExit(timeout_ms):
+            try:
+                proc.Kill()
+            except Exception:
+                pass
+            return "the browser did not finish in time"
+        if not os.path.isfile(tmp_pdf) or os.path.getsize(tmp_pdf) == 0:
+            return "the browser did not write the PDF"
+        shutil.copyfile(tmp_pdf, pdf_path)
+        return None
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def _write_text(path, text):
+    with codecs.open(path, "w", "utf-8") as f:
+        f.write(text)
+
+
+def _open_file(path):
+    """Open a saved file in its default app; False if Windows would not."""
+    try:
+        os.startfile(path)
+        return True
+    except Exception:
+        pass
+    try:
+        psi = System.Diagnostics.ProcessStartInfo(path)
+        psi.UseShellExecute = True
+        System.Diagnostics.Process.Start(psi)
+        return True
+    except Exception:
+        return False
+
+# ============================================================
 # WPF WINDOW - Overview, one dashboard tab per model, Settings
 # ============================================================
 class ModelHealthWindow(Window):
@@ -2214,7 +2362,7 @@ class ModelHealthWindow(Window):
                               else linked_models)
         self.overview_stack = None
 
-        self.Title = "Model Health Check v2.2 - DQT"
+        self.Title = "Model Health Check v2.3 - DQT"
         self.Height = 900
         self.Width = 1400
         self.MinHeight = 700
@@ -2804,55 +2952,58 @@ class ModelHealthWindow(Window):
 
     # ---- REPORT: everything in one file ----
     def _overview_report_html(self):
-        rows = ""
+        rows = u""
         for i, (row, _) in enumerate(self.overview_rows()):
             bg = "#FFFFFF" if i % 2 == 0 else "#FAF8F0"
             overall_style = ("background:{};color:{};font-weight:700;".format(row["color"], row["text_color"])
                              if row["color"] else "")
-            rows += (u'<tr style="background:{bg};"><td style="padding:6px 10px;font-weight:600;">{name}</td>'
-                     u'<td>{kind}</td><td style="text-align:center;">{inst}</td><td>{status}</td>'
-                     u'<td style="text-align:center;{ostyle}">{overall}</td>'
-                     u'<td style="text-align:center;">{score}</td><td style="text-align:center;">{red}</td>'
-                     u'<td style="text-align:center;">{amber}</td><td style="color:#666;">{note}</td></tr>').format(
+            rows += (u'<tr style="background:{bg};"><td style="font-weight:600;">{name}</td>'
+                     u'<td>{kind}</td><td class="c">{inst}</td><td>{status}</td>'
+                     u'<td class="c" style="{ostyle}">{overall}</td>'
+                     u'<td class="c">{score}</td><td class="c">{red}</td>'
+                     u'<td class="c">{amber}</td><td style="color:#666;">{note}</td></tr>').format(
                 bg=bg, name=_html(row["name"]), kind=row["kind"], inst=row["instances"],
                 status=row["status"], ostyle=overall_style, overall=row["overall"],
                 score=row["score"], red=row["red"], amber=row["amber"], note=_html(row["note"]))
-        return (u'<div class="rec-box"><h3>OVERVIEW</h3><table>'
-                u'<tr><th>MODEL</th><th>TYPE</th><th style="text-align:center;">INSTANCES</th><th>STATUS</th>'
-                u'<th style="text-align:center;">OVERALL</th><th style="text-align:center;">SCORE</th>'
-                u'<th style="text-align:center;">RED</th><th style="text-align:center;">AMBER</th>'
-                u'<th>NEEDS ATTENTION</th></tr>{}</table></div>').format(rows)
+        return (u'<div class="rec-box"><h3>OVERVIEW</h3><table class="overview">'
+                u'<colgroup><col style="width:24%;"><col style="width:9%;"><col style="width:7%;">'
+                u'<col style="width:8%;"><col style="width:12%;"><col style="width:6%;">'
+                u'<col style="width:5%;"><col style="width:6%;"><col></colgroup>'
+                u'<thead><tr><th>MODEL</th><th>TYPE</th><th class="c">INSTANCES</th><th>STATUS</th>'
+                u'<th class="c">OVERALL</th><th class="c">SCORE</th>'
+                u'<th class="c">RED</th><th class="c">AMBER</th>'
+                u'<th>NEEDS ATTENTION</th></tr></thead><tbody>{}</tbody></table></div>').format(rows)
 
-    def export_report(self):
-        """One HTML report with everything: the Overview, then every
-        checked model's score card, metrics and recommendations."""
-        try:
-            desktop = Environment.GetFolderPath(Environment.SpecialFolder.Desktop)
-            fname = os.path.basename(self.doc.PathName).replace(".rvt", "") if self.doc.PathName else "Model"
-            fname = fname.replace(" ", "_")
-            ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    def report_file_stem(self):
+        """ModelHealth_<file name>_<date time> - the suggested file name."""
+        name = os.path.basename(self.doc.PathName) if self.doc.PathName else "Model"
+        name = os.path.splitext(name)[0].replace(" ", "_") or "Model"
+        return "ModelHealth_{}_{}".format(name, datetime.datetime.now().strftime("%Y%m%d_%H%M%S"))
 
-            proj = self.doc.ProjectInformation
-            proj_name = proj.Name if proj else "Untitled"
-            file_name = os.path.basename(self.doc.PathName) if self.doc.PathName else "Unsaved"
-
-            sections = "\n".join(d.report_section_html() for d in self.dashboards)
-
-            html = u"""<!DOCTYPE html>
+    def report_html(self):
+        """The whole report as one HTML page: the Overview, then every
+        checked model's score card, metrics and recommendations, each
+        model on a page of its own when printed."""
+        proj = self.doc.ProjectInformation
+        proj_name = proj.Name if proj else "Untitled"
+        file_name = os.path.basename(self.doc.PathName) if self.doc.PathName else "Unsaved"
+        sections = u"\n".join(d.report_section_html() for d in self.dashboards)
+        return u"""<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
 <title>Model Health Check Report - DQT</title>
 <style>
-    @page {{ size: A4 landscape; margin: 12mm; }}
+    @page {{ size: A4 landscape; margin: 10mm; }}
     * {{ -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; color-adjust: exact !important; }}
     body {{ font-family: Segoe UI, Arial, sans-serif; margin: 0; padding: 15px; background: #FEF8E7; color: #333; font-size: 11px; }}
+    td, th, h1, h2, h3, .sub, .counts {{ overflow-wrap: anywhere; word-break: break-word; }}
     .header {{ background: #F0CC88; padding: 16px 20px; border-radius: 6px; margin-bottom: 15px; overflow: hidden; }}
     .header h1 {{ margin: 0; font-size: 22px; color: #5D4E37; float: left; }}
     .header .right {{ float: right; text-align: right; color: #5D4E37; }}
     .header .sub {{ font-size: 11px; color: #5D4E37; margin-top: 4px; }}
-    .model {{ margin-top: 22px; page-break-before: always; }}
-    .model-title {{ font-size: 16px; color: #5D4E37; border-bottom: 2px solid #D4B87A; padding-bottom: 4px; }}
+    .model {{ margin-top: 22px; page-break-before: always; break-before: page; }}
+    .model-title {{ font-size: 16px; color: #5D4E37; border-bottom: 2px solid #D4B87A; padding-bottom: 4px; page-break-after: avoid; break-after: avoid; }}
     .score-card {{ background: #FFF; border: 1px solid #D4B87A; border-radius: 6px; padding: 15px 20px; margin-bottom: 15px; overflow: hidden; }}
     .gauge {{ float: left; width: 90px; height: 90px; border-radius: 50%; text-align: center; margin-right: 20px; }}
     .gauge .grade {{ font-size: 22px; font-weight: bold; margin-top: 24px; }}
@@ -2861,13 +3012,54 @@ class ModelHealthWindow(Window):
     .score-text .summary {{ color: #666; font-size: 12px; }}
     .score-text .counts {{ color: #888; font-size: 10px; margin-top: 4px; }}
     .legend {{ background: #FFF; border: 1px solid #D4B87A; border-radius: 6px; padding: 8px 15px; margin-bottom: 15px; text-align: center; }}
-    .legend span {{ display: inline-block; padding: 3px 10px; border-radius: 3px; color: #FFF; font-size: 10px; font-weight: 600; margin: 0 2px; -webkit-print-color-adjust: exact; }}
-    table {{ width: 100%; border-collapse: collapse; background: #FFF; border: 1px solid #D4B87A; }}
+    .legend span {{ display: inline-block; padding: 3px 10px; border-radius: 3px; color: #FFF; font-size: 10px; font-weight: 600; margin: 0 2px; }}
+    table {{ width: 100%; border-collapse: collapse; background: #FFF; border: 1px solid #D4B87A; table-layout: fixed; }}
+    thead {{ display: table-header-group; }}
+    tr {{ page-break-inside: avoid; break-inside: avoid; }}
     th {{ background: #F0CC88 !important; color: #5D4E37; padding: 8px 10px; text-align: left; font-size: 11px; border-bottom: 2px solid #D4B87A; }}
+    .c {{ text-align: center; }}
+    table.overview td {{ padding: 6px 8px; border-bottom: 1px solid #E8E0D0; vertical-align: middle; }}
     tr.tier td {{ background: #F6EBD2; color: #5D4E37; padding: 6px 10px; font-size: 11px; border-bottom: 1px solid #D4B87A; }}
+    td.m-label {{ padding: 7px 10px; font-weight: 600; border-bottom: 1px solid #E8E0D0; }}
+    td.m-val {{ padding: 7px 6px; text-align: center; border-bottom: 1px solid #E8E0D0; }}
+    td.m-bar {{ padding: 7px 10px; border-bottom: 1px solid #E8E0D0; }}
+    td.m-status {{ padding: 5px 10px; border-bottom: 1px solid #E8E0D0; }}
+    td.m-status .st {{ font-weight: 600; font-size: 11px; }}
+    td.m-status .det {{ color: #999; font-size: 9px; margin-top: 1px; }}
+    table.bar {{ width: 100%; height: 12px; border: none; background: transparent; }}
+    table.bar td {{ height: 12px; padding: 0; border: none; }}
+    table.bar td:first-child {{ border-radius: 3px 0 0 3px; }}
+    table.bar td:last-child {{ border-radius: 0 3px 3px 0; }}
     .rec-box {{ background: #FFF; border: 1px solid #D4B87A; border-radius: 6px; padding: 12px 15px; margin-top: 15px; }}
-    .rec-box h3 {{ margin: 0 0 8px 0; color: #5D4E37; font-size: 13px; }}
-    .footer {{ background: #F0CC88; border-radius: 4px; padding: 8px; text-align: center; margin-top: 15px; font-size: 10px; color: #5D4E37; }}
+    .rec-box h3 {{ margin: 0 0 8px 0; color: #5D4E37; font-size: 13px; page-break-after: avoid; break-after: avoid; }}
+    .rec-item {{ margin: 4px 0; page-break-inside: avoid; break-inside: avoid; }}
+    .rec-item .dot {{ display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; vertical-align: middle; }}
+    .score-card, .legend, .header {{ page-break-inside: avoid; break-inside: avoid; }}
+    .footer {{ background: #F0CC88; border-radius: 4px; padding: 8px; text-align: center; margin-top: 15px; font-size: 10px; color: #5D4E37; page-break-inside: avoid; break-inside: avoid; }}
+    @media print {{
+        body {{ background: #FFFFFF; padding: 0; font-size: 10px; }}
+        .header {{ padding: 10px 14px; margin-bottom: 8px; }}
+        .header h1 {{ font-size: 18px; }}
+        .legend {{ padding: 5px 10px; margin-bottom: 8px; }}
+        .model {{ margin-top: 0; }}
+        .model-title {{ font-size: 14px; margin: 0 0 6px 0; }}
+        .score-card {{ padding: 8px 14px; margin-bottom: 8px; }}
+        .gauge {{ width: 62px; height: 62px; margin-right: 14px; }}
+        .gauge .grade {{ font-size: 16px; margin-top: 14px; }}
+        .gauge .num {{ font-size: 10px; }}
+        .score-text h3 {{ font-size: 15px; margin-bottom: 2px; }}
+        .score-text .counts {{ margin-top: 2px; }}
+        th {{ padding: 5px 8px; font-size: 10px; }}
+        tr.tier td {{ padding: 3px 10px; font-size: 10px; }}
+        td.m-label, td.m-val, td.m-bar {{ padding-top: 3px; padding-bottom: 3px; }}
+        td.m-status {{ padding-top: 2px; padding-bottom: 2px; }}
+        td.m-status .st {{ font-size: 10px; }}
+        td.m-status .det {{ font-size: 8px; margin-top: 0; }}
+        table.overview td {{ padding: 4px 6px; }}
+        .rec-box {{ padding: 8px 12px; margin-top: 8px; }}
+        .rec-item {{ margin: 2px 0; }}
+        .footer {{ margin-top: 8px; padding: 5px; }}
+    }}
 </style>
 </head>
 <body>
@@ -2893,33 +3085,61 @@ class ModelHealthWindow(Window):
     <div class="footer">Dang Quoc Truong - DQT (c) 2026</div>
 </body>
 </html>""".format(
-                proj=_html(proj_name), file=_html(file_name),
-                legend="\n        ".join(
-                    '<span style="background:{};color:{};">{} - {}</span>'.format(
-                        RAG_COLORS[lv], RAG_TEXT_COLORS[lv], lv, RAG_MEANING[lv])
-                    for lv in RAG_LEVELS),
-                date=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                overview=self._overview_report_html(), sections=sections)
+            proj=_html(proj_name), file=_html(file_name),
+            legend=u"\n        ".join(
+                u'<span style="background:{};color:{};">{} - {}</span>'.format(
+                    RAG_COLORS[lv], RAG_TEXT_COLORS[lv], lv, RAG_MEANING[lv])
+                for lv in RAG_LEVELS),
+            date=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            overview=self._overview_report_html(), sections=sections)
 
-            html_path = os.path.join(desktop, "ModelHealth_{}_{}.html".format(fname, ts))
-            with codecs.open(html_path, 'w', 'utf-8') as f:
-                f.write(html)
-
-            try:
-                System.Diagnostics.Process.Start(html_path)
-            except:
-                pass
-
-            MessageBox.Show(
-                "Report exported!\n\n{}\n\nFile opened in browser.\nUse Ctrl+P > Save as PDF to create PDF.".format(html_path),
-                "Export Complete",
-                MessageBoxButton.OK,
-                MessageBoxImage.Information)
-
+    def export_report(self):
+        """Ask where to save the report first - PDF (default) or HTML -
+        then write it with everything in it: the Overview and every
+        checked model."""
+        try:
+            path = ask_report_path(self.report_file_stem(), self)
         except Exception as ex:
-            MessageBox.Show("Export error:\n{}".format(str(ex)),
+            MessageBox.Show("Could not open the Save dialog:\n{}".format(ex),
+                "Export Report", MessageBoxButton.OK, MessageBoxImage.Error)
+            return None
+        if not path:
+            return None
+        try:
+            html = self.report_html()
+            if path.lower().endswith(".pdf"):
+                Mouse.OverrideCursor = Cursors.Wait
+                try:
+                    problem = html_to_pdf(html, path)
+                finally:
+                    Mouse.OverrideCursor = None
+                if problem:
+                    html_path = os.path.splitext(path)[0] + ".html"
+                    _write_text(html_path, html)
+                    _remember_export_folder(os.path.dirname(html_path))
+                    opened = _open_file(html_path)
+                    MessageBox.Show(
+                        u"The PDF could not be created: {}.\n\nThe full report was saved "
+                        u"as HTML instead:\n{}\n\n{}".format(
+                            problem, html_path,
+                            u"It is open in your browser - use Ctrl+P > Save as PDF."
+                            if opened else u"Open it in a browser and use Ctrl+P > Save as PDF."),
+                        "Export Report", MessageBoxButton.OK, MessageBoxImage.Warning)
+                    return html_path
+            else:
+                _write_text(path, html)
+            _remember_export_folder(os.path.dirname(path))
+            opened = _open_file(path)
+            MessageBox.Show(
+                u"Report exported!\n\n{}{}".format(path, u"\n\nThe file is now open." if opened else u""),
+                "Export Complete", MessageBoxButton.OK, MessageBoxImage.Information)
+            return path
+        except Exception as ex:
+            MessageBox.Show(
+                u"Export error:\n{}\n\nIf the file is open in another program "
+                u"(a PDF viewer), close it and export again.".format(ex),
                 "Error", MessageBoxButton.OK, MessageBoxImage.Error)
-
+            return None
 
 # ============================================================
 # HELP + ENTRY POINT
@@ -2946,7 +3166,8 @@ def show_help():
         "  Re-Analyze re-runs all metrics against the current model.\n"
         "  Each row in the recommendations list can Select Elements to "
         "select the offending elements straight in Revit.\n"
-        "  Export Report saves every checked model in one report file.\n\n"
+        "  Export Report asks where to save the report - PDF or HTML - "
+        "and puts every checked model in it.\n\n"
         "LINKED MODELS\n"
         "  When the model has Revit links, a list comes up first: tick "
         "the links to check with the open model. Every checked model "

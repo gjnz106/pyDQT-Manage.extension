@@ -78,9 +78,12 @@
       <li><b>Re-Analyze</b> on a tab re-reads that model;
         <b>Re-Analyze All</b> on the Overview re-reads every checked
         model.</li>
-      <li><b>Export Report</b> - on the Overview or any model's tab - saves
-        one HTML report with the Overview and every checked model, each on
-        its own page (print it to PDF from the browser).</li>
+      <li><b>Export Report</b> - on the Overview or any model's tab - first
+        asks <b>where to save</b> the report and in which format:
+        <b>PDF</b> (the default) or <b>HTML</b>. The report holds everything:
+        the Overview, then every checked model's score card, metrics and
+        recommendations, each model on a page of its own. It opens as soon as
+        it is saved, and the next export starts in the same folder.</li>
     </ol>
   </div>
 
@@ -123,10 +126,32 @@
       model.
     </div>
     <div class="box tip">
+      <b>PDF export.</b> The PDF is printed by Microsoft Edge - already on
+      every Windows 10 / 11 computer - running hidden in the background
+      (Google Chrome is used when Edge is missing), A4 landscape, without the
+      browser's date / file-path header and footer. It takes a few seconds;
+      the cursor shows it is working. If neither browser can be used, the
+      full report is saved as <span class="code">.html</span> next to the
+      chosen file instead and opened in your browser - print it from there
+      with <span class="code">Ctrl+P</span> &rsaquo; Save as PDF. If the
+      export says the file cannot be written, close it in your PDF viewer
+      and export again.
+    </div>
+    <div class="box tip">
       <b>N/A.</b> A cloud model (Autodesk Docs / Forma) has no file on this
       computer, so its <b>File Size</b> cannot be measured: it shows N/A and
       is left out of the score instead of reading 0 MB and counting as
       Green. The same goes for a model that has never been saved.
+    </div>
+    <div class="box fixed">
+      <b>New in v2.3 - choose where to save, PDF straight away.</b> Export
+      Report used to drop an HTML file on the Desktop and leave the PDF to
+      Ctrl+P. It now asks where to save first and writes the PDF itself. The
+      PDF shows the whole report: table headers repeat when a table runs
+      onto the next page, a row is never cut in half, and long file names
+      (e.g. <span class="code">TBS_WHE_ARC_B_ZZ_ZZ_M3_W_0001</span>) wrap
+      inside their column instead of pushing the page wider or shrinking
+      it.
     </div>
     <div class="box fixed">
       <b>New in v2.2 - everything at once.</b> The Linked Models tab, where
