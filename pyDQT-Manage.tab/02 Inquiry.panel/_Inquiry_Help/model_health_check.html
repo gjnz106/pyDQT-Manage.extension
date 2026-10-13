@@ -22,7 +22,7 @@
   <div class="card">
     <h2>What it does</h2>
     <p class="lede">
-      Analyzes the model - and the Revit links you tick - against 12
+      Analyzes the model - and the Revit links you tick - against 15
       metrics, grades each one Green, Amber or Red, and combines them into
       one weighted health score per model. Everything is shown at once: an
       Overview of every model, and one dashboard tab per model. The metrics
@@ -49,12 +49,32 @@
     <h2>Metrics by impact</h2>
     <dl class="kv">
       <dt class="v-dark">Critical impact</dt><dd>1. Warnings &middot; 2. CAD Imports &middot; 3. File Size &middot; 4. In-Place Families - the most likely to cause performance issues, instability, file bloat and user frustration</dd>
-      <dt class="v-dark">High impact</dt><dd>5. Duplicate Elements &middot; 6. CAD Links &middot; 7. RVT Links - affect manageability, model quality and long-term maintainability</dd>
-      <dt class="v-dark">Moderate impact</dt><dd>8. Imported Images &middot; 9. Model Groups &middot; 10. Design Options</dd>
-      <dt class="v-dark">Low impact</dt><dd>11. Unplaced Rooms &middot; 12. Unpinned Links - model housekeeping rather than performance issues</dd>
+      <dt class="v-dark">High impact</dt><dd>5. Duplicate Elements &middot; 6. CAD Links &middot; 7. Unused Families &amp; Types - affect manageability, model quality and long-term maintainability</dd>
+      <dt class="v-dark">Moderate impact</dt><dd>8. Imported Images &middot; 9. Design Options &middot; 10. Materials</dd>
+      <dt class="v-dark">Low impact</dt><dd>11. Line Styles &middot; 12. Line Patterns &middot; 13. Fill Patterns &middot; 14. Unplaced Rooms &middot; 15. Unpinned Links - model housekeeping rather than performance issues</dd>
     </dl>
     <p>Each metric's default weight in the overall score follows its impact:
       Critical 5, High 4, Moderate 3, Low 2.</p>
+    <dl class="kv">
+      <dt class="v-dark">Unused Families &amp; Types</dt><dd>the families and types Revit's own
+        <b>Purge Unused</b> would remove (Green up to 100, Amber up to 300). Read with
+        <span class="code">GetUnusedElements</span> on Revit 2025+,
+        <span class="code">GetAllUnusedElements</span> on 2024, and Revit's Performance
+        Adviser rule "Project contains unused families and types" on older versions;
+        the note under it splits families and types.</dd>
+      <dt class="v-dark">Materials</dt><dd>every material in the model (Green up to 200, Amber up to 400);
+        the note says how many are not used anywhere.</dd>
+      <dt class="v-dark">Line Styles</dt><dd>the subcategories of Lines - what the Line Styles dialog lists
+        (Green up to 100, Amber up to 200).</dd>
+      <dt class="v-dark">Line Patterns</dt><dd>every line pattern (Green up to 50, Amber up to 100); the
+        note says how many came in with CAD imports (named <span class="code">IMPORT-...</span>)
+        and how many are unused.</dd>
+      <dt class="v-dark">Fill Patterns</dt><dd>every drafting and model fill pattern (Green up to 150,
+        Amber up to 300); the note splits drafting / model and counts the unused ones.</dd>
+    </dl>
+    <p>The "unused" counts in the notes come from the same Purge Unused list
+      (Revit 2024+); on older versions only the families and types are
+      available. All the values can be changed on the <b>Settings</b> tab.</p>
   </div>
 
   <div class="card">
@@ -91,7 +111,7 @@
     <h2>Overview tab</h2>
     <p>One table with every model of the check: the open model first, then
       every Revit link in the model - one row per linked file, however many
-      times it is placed - all graded with the same 12 metrics and
+      times it is placed - all graded with the same 15 metrics and
       thresholds.</p>
     <dl class="kv">
       <dt class="v-dark">Type / Instances</dt><dd>open model or linked model, and how many times a link is placed</dd>
@@ -157,6 +177,16 @@
       which.
     </div>
     <div class="box fixed">
+      <b>New in v2.5 - metrics changed.</b> <b>Model Groups</b> and
+      <b>RVT Links</b> are no longer graded (linked models are still listed
+      on the Overview, and unpinned RVT links still count under Unpinned
+      Links). Five metrics are added: <b>Unused Families &amp; Types</b>
+      (High), <b>Materials</b> (Moderate), <b>Line Styles</b>,
+      <b>Line Patterns</b> and <b>Fill Patterns</b> (Low). A settings file
+      saved before keeps its values for the other metrics; the new ones
+      start at their defaults.
+    </div>
+    <div class="box fixed">
       <b>New in v2.4 - File Size of ACC models.</b> Models on ACC used to show
       N/A for File Size, because the tool only read a model's own file on
       disk. It now measures the copy in Revit's collaboration cache, so cloud
@@ -200,7 +230,7 @@
       model from the last analysis. <span class="code">Reset to Defaults</span>
       restores the built-in values and deletes that file. A row with an
       invalid value (not a number, or Green above Amber) blocks the whole
-      save rather than silently accepting the other 11. A settings file
+      save rather than silently accepting the others. A settings file
       saved by v1.x is converted on the fly: its old thresholds become
       Green / Amber the same way as above, and weights left at their old
       default take the new impact-based default.

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Model Health Check v2.4 - DQT
+Model Health Check v2.5 - DQT
 Analyzes Revit model health with color-coded metrics dashboard.
 Features: Gauge dashboard, Select Elements, Weighted score, Purgeable elements.
 Pure code-behind WPF for IronPython stability.
@@ -31,6 +31,10 @@ copy Revit keeps in its collaboration cache (the Options > Cloud Model
 location, else %LOCALAPPDATA%), found by the model's GUID - instead of N/A.
 The dashboard and report say so under the metric.
 
+v2.5: Model Groups and RVT Links are no longer graded; five metrics are
+added - Unused Families & Types (High: Revit's own Purge Unused list),
+Materials (Moderate), Line Styles, Line Patterns and Fill Patterns (Low).
+
 Copyright (c) 2025 Dang Quoc Truong (DQT)
 All rights reserved.
 """
@@ -54,7 +58,7 @@ clr.AddReference('RevitAPIUI')
 import System
 import System.Diagnostics
 from System import Environment, Math
-from System.Collections.Generic import List
+from System.Collections.Generic import List, HashSet
 from System.Windows import (
     Window, Thickness, HorizontalAlignment, VerticalAlignment,
     WindowStartupLocation, Visibility, TextWrapping, FontWeights, FontStyles,
@@ -247,13 +251,13 @@ METRIC_THRESHOLDS = OrderedDict([
         "selectable": True,
         "weight": 4
     }),
-    ("rvt_links", {
-        "label": "RVT Links",
+    ("unused_families_types", {
+        "label": "Unused Families & Types",
         "impact": "High",
-        "thresholds": [20, 35],
-        "tooltip": "Linked Revit files. Too many = slow performance.",
+        "thresholds": [100, 300],
+        "tooltip": "Families and types loaded but not used anywhere - what Purge Unused would remove. They bloat the file and slow opening and syncing.",
         "unit": "",
-        "selectable": True,
+        "selectable": False,
         "weight": 4
     }),
     # ---- Moderate impact ----
@@ -262,15 +266,6 @@ METRIC_THRESHOLDS = OrderedDict([
         "impact": "Moderate",
         "thresholds": [15, 30],
         "tooltip": "Embedded raster images. Each one bloats file size and can go missing if the source file moves.",
-        "unit": "",
-        "selectable": True,
-        "weight": 3
-    }),
-    ("groups", {
-        "label": "Model Groups",
-        "impact": "Moderate",
-        "thresholds": [50, 100],
-        "tooltip": "Model groups placed in the model. Many or large groups slow editing and regeneration.",
         "unit": "",
         "selectable": True,
         "weight": 3
@@ -284,7 +279,43 @@ METRIC_THRESHOLDS = OrderedDict([
         "selectable": True,
         "weight": 3
     }),
+    ("materials", {
+        "label": "Materials",
+        "impact": "Moderate",
+        "thresholds": [200, 400],
+        "tooltip": "Materials in the model. Imported and copied content brings in many, often duplicated - they bloat the file and clutter the Material Browser.",
+        "unit": "",
+        "selectable": False,
+        "weight": 3
+    }),
     # ---- Low impact ----
+    ("line_styles", {
+        "label": "Line Styles",
+        "impact": "Low",
+        "thresholds": [100, 200],
+        "tooltip": "Line styles (subcategories of Lines). Many usually come from copied or imported content and make the standard hard to keep.",
+        "unit": "",
+        "selectable": False,
+        "weight": 2
+    }),
+    ("line_patterns", {
+        "label": "Line Patterns",
+        "impact": "Low",
+        "thresholds": [50, 100],
+        "tooltip": "Line patterns. Every CAD import adds its own (named IMPORT-...).",
+        "unit": "",
+        "selectable": False,
+        "weight": 2
+    }),
+    ("fill_patterns", {
+        "label": "Fill Patterns",
+        "impact": "Low",
+        "thresholds": [150, 300],
+        "tooltip": "Drafting and model fill patterns. Imported and copied content adds many unused ones.",
+        "unit": "",
+        "selectable": False,
+        "weight": 2
+    }),
     ("rooms_unplaced", {
         "label": "Unplaced Rooms",
         "impact": "Low",
@@ -311,8 +342,8 @@ METRIC_THRESHOLDS = OrderedDict([
 # impact-based default is used instead.
 LEGACY_DEFAULT_WEIGHTS = {
     "file_size_mb": 4, "warnings": 5, "cad_imports": 5,
-    "in_place_families": 4, "rvt_links": 2, "cad_links": 3,
-    "imported_images": 3, "groups": 3, "design_options": 1,
+    "in_place_families": 4, "cad_links": 3,
+    "imported_images": 3, "design_options": 1,
     "rooms_unplaced": 2, "linked_dwg_not_pinned": 2,
     "duplicate_elements": 4,
 }
@@ -471,6 +502,13 @@ NOTE_CLOUD_CACHED = (u"Cloud model: measured on Revit's local cached copy - "
 NOTE_CLOUD_NO_CACHE = u"Cloud model: no local cached copy found on this computer."
 NOTE_UNSAVED = u"The model has never been saved."
 
+# Purge Unused, as the API sees it
+PURGE_API = "api"
+PURGE_ADVISER = "adviser"
+# Performance Adviser rule "Project contains unused families and types"
+PURGE_RULE_GUID = "e8c63650-70b7-435a-9010-ec97660c1bda"
+NOTE_PURGE_UNAVAILABLE = u"Could not be checked in this Revit version."
+
 
 def _megabytes(path):
     return round(os.path.getsize(path) / (1024.0 * 1024.0), 1)
@@ -601,14 +639,17 @@ class ModelHealthAnalyzer:
         self._warnings()
         self._cad_imports()
         self._in_place_families()
-        self._rvt_links()
+        self._duplicate_elements()
         self._cad_links()
+        self._unused_families_types()
         self._imported_images()
-        self._groups()
         self._design_options()
+        self._materials()
+        self._line_styles()
+        self._line_patterns()
+        self._fill_patterns()
         self._unplaced_rooms()
         self._unpinned_links()
-        self._duplicate_elements()
         return self.metrics
 
     def _store_ids(self, key, elements):
@@ -706,15 +747,6 @@ class ModelHealthAnalyzer:
         except:
             self.metrics["in_place_families"] = 0
 
-    def _rvt_links(self):
-        try:
-            col = FilteredElementCollector(self.doc).OfClass(RevitLinkInstance).WhereElementIsNotElementType()
-            elems = list(col)
-            self.metrics["rvt_links"] = len(elems)
-            self._store_ids("rvt_links", elems)
-        except:
-            self.metrics["rvt_links"] = 0
-
     def _cad_links(self):
         try:
             col = FilteredElementCollector(self.doc).OfClass(ImportInstance).WhereElementIsNotElementType()
@@ -770,16 +802,117 @@ class ModelHealthAnalyzer:
         except:
             self.metrics["imported_images"] = 0
 
-    def _groups(self):
-        # Model groups only - detail groups are view annotation, not part
-        # of the model's performance picture.
+    # ---- what Purge Unused would remove, read once for several metrics ----
+    def _purgeable(self):
+        """(unused ElementIds, set of their id values, how they were found) - Revit's
+        own Purge Unused list: GetUnusedElements (Revit 2025+) or
+        GetAllUnusedElements (2024), else the Performance Adviser's
+        "Project contains unused families and types" rule (families and
+        types only). (None, None, None) when none of them can be used."""
+        if hasattr(self, "_purge_cache"):
+            return self._purge_cache
+        found, source = None, None
+        for method in ("GetUnusedElements", "GetAllUnusedElements"):
+            try:
+                found = list(getattr(self.doc, method)(HashSet[ElementId]()))
+                source = PURGE_API
+                break
+            except Exception:
+                continue
+        if found is None:
+            try:
+                adviser = PerformanceAdviser.GetPerformanceAdviser()
+                rule_guid = System.Guid(PURGE_RULE_GUID)
+                rules = List[PerformanceAdviserRuleId]()
+                for rule_id in adviser.GetAllRuleIds():
+                    if rule_id.Guid.Equals(rule_guid):
+                        rules.Add(rule_id)
+                if rules.Count:
+                    found = []
+                    for message in adviser.ExecuteRules(self.doc, rules):
+                        found.extend(message.GetFailingElements())
+                    source = PURGE_ADVISER
+            except Exception:
+                found, source = None, None
+        values = set(_id_value(i) for i in found) if found is not None else None
+        self._purge_cache = (found, values, source)
+        return self._purge_cache
+
+    def _unused_note(self, key, elements, prefix=u""):
+        """Add "N not used anywhere" to a metric's note when Revit's purge
+        list covers that kind of element (not with the Performance Adviser,
+        which only lists families and types)."""
+        _, unused, source = self._purgeable()
+        parts = [prefix] if prefix else []
+        if unused is not None and source == PURGE_API:
+            n = sum(1 for e in elements if _id_value(e.Id) in unused)
+            parts.append(u"{} not used anywhere (Purge Unused)".format(n))
+        if parts:
+            self.notes[key] = u" - ".join(parts)
+
+    def _unused_families_types(self):
+        key = "unused_families_types"
+        ids, values, source = self._purgeable()
+        if ids is None:
+            self.metrics[key] = None
+            self.notes[key] = NOTE_PURGE_UNAVAILABLE
+            return
+        families = types = 0
+        for eid in ids:
+            try:
+                element = self.doc.GetElement(eid)
+            except Exception:
+                element = None
+            if isinstance(element, Family):
+                families += 1
+            elif isinstance(element, ElementType):
+                types += 1
+        self.metrics[key] = families + types
+        self.notes[key] = u"{} families and {} types that Purge Unused would remove{}".format(
+            families, types, u" (Revit Performance Adviser)" if source == PURGE_ADVISER else u"")
+
+    def _materials(self):
         try:
-            col = FilteredElementCollector(self.doc).OfCategory(BuiltInCategory.OST_IOSModelGroups).WhereElementIsNotElementType()
-            elems = list(col)
-            self.metrics["groups"] = len(elems)
-            self._store_ids("groups", elems)
-        except:
-            self.metrics["groups"] = 0
+            elems = list(FilteredElementCollector(self.doc).OfClass(Material))
+            self.metrics["materials"] = len(elems)
+            self._unused_note("materials", elems)
+        except Exception:
+            self.metrics["materials"] = 0
+
+    def _line_styles(self):
+        try:
+            lines = self.doc.Settings.Categories.get_Item(BuiltInCategory.OST_Lines)
+            self.metrics["line_styles"] = len(list(lines.SubCategories)) if lines is not None else 0
+        except Exception:
+            self.metrics["line_styles"] = 0
+
+    def _line_patterns(self):
+        try:
+            elems = list(FilteredElementCollector(self.doc).OfClass(LinePatternElement))
+            self.metrics["line_patterns"] = len(elems)
+            imported = sum(1 for e in elems if _element_name(e).upper().startswith(u"IMPORT-"))
+            self._unused_note("line_patterns", elems,
+                              u"{} imported from CAD (IMPORT-...)".format(imported) if imported else u"")
+        except Exception:
+            self.metrics["line_patterns"] = 0
+
+    def _fill_patterns(self):
+        try:
+            elems = list(FilteredElementCollector(self.doc).OfClass(FillPatternElement))
+            self.metrics["fill_patterns"] = len(elems)
+            drafting = model = 0
+            for e in elems:
+                try:
+                    if e.GetFillPattern().Target == FillPatternTarget.Model:
+                        model += 1
+                    else:
+                        drafting += 1
+                except Exception:
+                    pass
+            self._unused_note("fill_patterns", elems,
+                              u"{} drafting, {} model".format(drafting, model) if elems else u"")
+        except Exception:
+            self.metrics["fill_patterns"] = 0
 
     def _design_options(self):
         try:
@@ -974,10 +1107,13 @@ RECOMMENDATIONS = {
     "warnings": "Review and resolve warnings. Start with most frequent types.",
     "cad_imports": "Delete imported CAD and purge CAD types left with no instances (CAD Import Manager > Purge Unused Types). Use linked CAD instead.",
     "in_place_families": "Convert In-Place to loadable families.",
-    "rvt_links": "Review if all RVT links are necessary. Unload unused.",
+    "unused_families_types": "Purge unused families and types (Manage > Purge Unused, or pyDQT Purge Families). Run it more than once - purging frees more.",
     "cad_links": "Minimize CAD links. Convert to native Revit elements.",
     "imported_images": "Delete unused imported images. Link large raster files instead of embedding them.",
-    "groups": "Ungroup where possible. Use families instead.",
+    "materials": "Purge unused materials and merge duplicates (pyDQT Material Manager).",
+    "line_styles": "Delete unused and duplicate line styles; keep to the office standard (pyDQT Line Style Manager).",
+    "line_patterns": "Delete unused line patterns, starting with the IMPORT-... ones CAD imports brought in (pyDQT Line Pattern Manager).",
+    "fill_patterns": "Purge unused fill patterns and merge duplicates (pyDQT Fill Pattern Manager).",
     "design_options": "Finalize and accept primary design options.",
     "rooms_unplaced": "Place or delete unplaced rooms.",
     "linked_dwg_not_pinned": "Pin all linked files to prevent accidental movement.",
@@ -1065,7 +1201,7 @@ def collect_linked_models(doc):
 
 
 def analyze_linked_model(model):
-    """Run the 12 metrics on a loaded link. A link that is not loaded is
+    """Run every metric on a loaded link. A link that is not loaded is
     left alone; an analysis that fails keeps its error for the table."""
     model.metrics = None
     model.error = None
@@ -1251,7 +1387,7 @@ class LinkPickerWindow(Window):
         self.result = None
         self._boxes = []
 
-        self.Title = "Model Health Check v2.4 - DQT"
+        self.Title = "Model Health Check v2.5 - DQT"
         self.Width = 820
         self.Height = 620
         self.MinWidth = 640
@@ -1805,7 +1941,7 @@ class ModelDashboard(object):
     # ANALYSIS
     # ----------------------------------------------------------
     def run_analysis(self):
-        """Run the 12 metrics; a failure is kept in self.error (and on the
+        """Run every metric; a failure is kept in self.error (and on the
         linked model, for the Overview) rather than raised."""
         self.error = None
         try:
@@ -2317,7 +2453,7 @@ class ModelDashboard(object):
                     <div class="det">Impact: {impact} &nbsp;|&nbsp; Weight: {stars} ({w}/5) &nbsp;|&nbsp; {thresholds}</div>{note}
                 </td>
             </tr>""".format(
-                    bg=row_bg, label=u"{}. {}".format(number, config["label"]), color=h_color,
+                    bg=row_bg, label=_html(u"{}. {}".format(number, config["label"])), color=h_color,
                     tcolor=get_text_color(key, value), val=format_value(key, value),
                     pct=round(bar_pct, 1), epct=round(100 - bar_pct, 1),
                     scolor=status_text_color(status),
@@ -2335,7 +2471,7 @@ class ModelDashboard(object):
             value = self.metrics[key]
             rec_html += (u'<div class="rec-item"><span class="dot" style="background:{};"></span>'
                          u'<strong>{} ({}) - {}:</strong> <span style="color:#666;">{}</span></div>').format(
-                get_health_color(key, value), METRIC_THRESHOLDS[key]["label"], value,
+                get_health_color(key, value), _html(METRIC_THRESHOLDS[key]["label"]), value,
                 get_status_text(key, value), RECOMMENDATIONS.get(key, "Review and optimize."))
         if not rec_keys:
             rec_html = u'<div class="rec-item" style="color:#4CAF50;font-weight:600;">All metrics are Green. No action required.</div>'
@@ -2542,7 +2678,7 @@ class ModelHealthWindow(Window):
                               else linked_models)
         self.overview_stack = None
 
-        self.Title = "Model Health Check v2.4 - DQT"
+        self.Title = "Model Health Check v2.5 - DQT"
         self.Height = 900
         self.Width = 1400
         self.MinHeight = 700
@@ -2835,7 +2971,7 @@ class ModelHealthWindow(Window):
     def _on_save_thresholds(self, sender, args):
         """Validate every row, then apply + persist in one all-or-nothing
         step - a bad value in one metric must never silently save the
-        other 11 while leaving that one row's edit lost."""
+        others while leaving that one row's edit lost."""
         new_values = {}
         for key, refs in self._threshold_boxes.items():
             label = METRIC_THRESHOLDS[key]["label"]
@@ -2921,10 +3057,10 @@ class ModelHealthWindow(Window):
         intro_txt = TextBlock()
         intro_txt.Text = (
             u"Every model of this check in one table: the open model and each "
-            u"linked model ticked at start, graded with the same 12 metrics and "
+            u"linked model ticked at start, graded with the same {} metrics and "
             u"thresholds. Each one has its own dashboard tab - \u201cView\u201d "
             u"opens it. Links that were not ticked, or are not loaded, are "
-            u"listed too; run the tool again to include them.")
+            u"listed too; run the tool again to include them.".format(len(METRIC_THRESHOLDS)))
         intro_txt.FontSize = 13
         intro_txt.TextWrapping = TextWrapping.Wrap
         intro_txt.Foreground = brush(DQT_TEXT_DARK)
@@ -3330,13 +3466,13 @@ def show_help():
         return
     MessageBox.Show(
         "Model Health Check\n\n"
-        "Analyzes the model against 12 metrics and combines them into "
+        "Analyzes the model against {} metrics and combines them into "
         "one weighted score. The metrics are listed by their impact on "
-        "model performance and stability:\n"
-        "  Critical: Warnings, CAD Imports, File Size, In-Place Families\n"
-        "  High: Duplicate Elements, CAD Links, RVT Links\n"
-        "  Moderate: Imported Images, Model Groups, Design Options\n"
-        "  Low: Unplaced Rooms, Unpinned Links\n\n"
+        "model performance and stability:\n{}\n\n".format(
+            len(METRIC_THRESHOLDS),
+            "\n".join("  {}: {}".format(tier, ", ".join(
+                cfg["label"] for cfg in METRIC_THRESHOLDS.values() if cfg["impact"] == tier))
+                for tier in IMPACT_TIERS)) +
         "HEALTH SCALE (RAG)\n"
         "  Green - healthy, meeting expectations\n"
         "  Amber - needs attention, improvement recommended\n"
