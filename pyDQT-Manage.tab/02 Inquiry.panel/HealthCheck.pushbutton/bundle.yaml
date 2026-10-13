@@ -3,7 +3,8 @@ tooltip: >-
   Analyze model health on a Green / Amber / Red scale, with the
   metrics listed by impact on model performance and stability:
   warnings, CAD imports, file size, in-place families, duplicates,
-  CAD and RVT links, images, model groups, design options and more.
+  CAD links, unused families and types, images, design options,
+  materials, line styles, line and fill patterns and more.
   Tick the Revit links to check first; the open model and every
   ticked link are then shown at once - an Overview and one dashboard
   tab per model. Export Report saves it all as a PDF or HTML
