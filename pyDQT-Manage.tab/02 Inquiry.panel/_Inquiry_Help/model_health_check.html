@@ -138,10 +138,29 @@
       and export again.
     </div>
     <div class="box tip">
-      <b>N/A.</b> A cloud model (Autodesk Docs / Forma) has no file on this
-      computer, so its <b>File Size</b> cannot be measured: it shows N/A and
-      is left out of the score instead of reading 0 MB and counting as
-      Green. The same goes for a model that has never been saved.
+      <b>File Size of a cloud model (ACC / BIM 360 / Forma).</b> A cloud model
+      has no file of its own on this computer, so its size is read from the
+      copy Revit keeps in its <b>collaboration cache</b> - the folder set under
+      <b>Options &rsaquo; Cloud Model</b>, else
+      <span class="code">%LOCALAPPDATA%\Autodesk\Revit\Autodesk Revit &lt;version&gt;\CollaborationCache</span>.
+      The tool finds the model by its GUID and measures the cached central
+      copy (else the local copy, or the cached copy of a link). The dashboard
+      and report say so in a note under File Size - hover the note to see
+      the file that was measured. ACC can show a slightly different size,
+      since it reports the uploaded file.
+    </div>
+    <div class="box tip">
+      <b>N/A.</b> File Size shows N/A, and is left out of the score, only
+      when there is no file to measure: a model that has never been saved,
+      or a cloud model with no cached copy on this computer (open it, or
+      reload the link, so Revit downloads it). The note under the metric says
+      which.
+    </div>
+    <div class="box fixed">
+      <b>New in v2.4 - File Size of ACC models.</b> Models on ACC used to show
+      N/A for File Size, because the tool only read a model's own file on
+      disk. It now measures the copy in Revit's collaboration cache, so cloud
+      models are graded on File Size like local ones.
     </div>
     <div class="box fixed">
       <b>New in v2.3 - choose where to save, PDF straight away.</b> Export

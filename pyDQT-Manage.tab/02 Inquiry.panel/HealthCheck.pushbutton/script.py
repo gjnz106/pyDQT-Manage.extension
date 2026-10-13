@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Model Health Check v2.3 - DQT
+Model Health Check v2.4 - DQT
 Analyzes Revit model health with color-coded metrics dashboard.
 Features: Gauge dashboard, Select Elements, Weighted score, Purgeable elements.
 Pure code-behind WPF for IronPython stability.
@@ -25,6 +25,11 @@ PDF is printed straight away by Microsoft Edge (or Chrome) running hidden,
 A4 landscape, with the whole report: the Overview, then every checked
 model on a page of its own. If neither browser can be used, the full
 report is saved as HTML next to it instead.
+
+v2.4: File Size of a cloud model (ACC / BIM 360 / Forma) is measured on the
+copy Revit keeps in its collaboration cache (the Options > Cloud Model
+location, else %LOCALAPPDATA%), found by the model's GUID - instead of N/A.
+The dashboard and report say so under the metric.
 
 Copyright (c) 2025 Dang Quoc Truong (DQT)
 All rights reserved.
@@ -52,7 +57,7 @@ from System import Environment, Math
 from System.Collections.Generic import List
 from System.Windows import (
     Window, Thickness, HorizontalAlignment, VerticalAlignment,
-    WindowStartupLocation, Visibility, TextWrapping, FontWeights,
+    WindowStartupLocation, Visibility, TextWrapping, FontWeights, FontStyles,
     GridLength, GridUnitType, MessageBox, MessageBoxButton, MessageBoxImage,
     MessageBoxResult, CornerRadius as WinCornerRadius, Point
 )
@@ -449,6 +454,138 @@ _apply_threshold_overrides()
 
 
 # ============================================================
+# CLOUD MODELS (ACC / BIM 360 / Forma) - no file on this computer
+# except the copy Revit keeps in its collaboration cache
+# ============================================================
+# <cache root>\<account>\<project>\<model GUID>.rvt        local copy
+#                              \CentralCache\<GUID>.rvt   cached central
+#                              \LinkedModels\<GUID>.rvt   cached link
+COLLAB_CACHE_DEFAULT = os.path.join("%LOCALAPPDATA%", "Autodesk", "Revit",
+                                    "Autodesk Revit {version}", "CollaborationCache")
+REVIT_INI_PATH = os.path.join("%APPDATA%", "Autodesk", "Revit",
+                              "Autodesk Revit {version}", "Revit.ini")
+CACHE_SUBFOLDERS = ("CentralCache", "", "LinkedModels")   # closest to the ACC file first
+
+NOTE_CLOUD_CACHED = (u"Cloud model: measured on Revit's local cached copy - "
+                     u"ACC may show a slightly different size.")
+NOTE_CLOUD_NO_CACHE = u"Cloud model: no local cached copy found on this computer."
+NOTE_UNSAVED = u"The model has never been saved."
+
+
+def _megabytes(path):
+    return round(os.path.getsize(path) / (1024.0 * 1024.0), 1)
+
+
+def _read_text_any(path):
+    """A small text file in UTF-16 (how Revit writes Revit.ini), UTF-8 or ANSI."""
+    with open(path, "rb") as f:
+        raw = f.read()
+    for bom, enc in ((codecs.BOM_UTF16_LE, "utf-16-le"), (codecs.BOM_UTF16_BE, "utf-16-be"),
+                     (codecs.BOM_UTF8, "utf-8")):
+        if raw.startswith(bom):
+            return raw[len(bom):].decode(enc, "replace")
+    if b"\x00" in raw[:200]:
+        return raw.decode("utf-16-le", "replace")
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return raw.decode("latin-1")
+
+
+def ini_value(text, section, key):
+    """One key's value in one [section] of .ini text, or None."""
+    current = None
+    for line in text.splitlines():
+        line = line.strip()
+        if line.startswith("[") and line.endswith("]"):
+            current = line[1:-1].strip().lower()
+        elif current == section.lower() and "=" in line:
+            k, v = line.split("=", 1)
+            if k.strip().lower() == key.lower():
+                return v.strip()
+    return None
+
+
+def revit_version(doc):
+    try:
+        return str(doc.Application.VersionNumber)
+    except Exception:
+        return None
+
+
+def collaboration_cache_roots(version):
+    """Where Revit keeps its copies of cloud models: the Cache Location set
+    under Options > Cloud Model (Revit.ini, Revit 2024+), then the default
+    CollaborationCache folder. Only folders that exist."""
+    if not version:
+        return []
+    roots = []
+    try:
+        ini = os.path.expandvars(REVIT_INI_PATH.format(version=version))
+        if os.path.isfile(ini):
+            custom = ini_value(_read_text_any(ini), "CloudModelCache", "CacheLocation")
+            if custom:
+                custom = os.path.normpath(os.path.expandvars(custom.strip().strip('"')))
+                roots += [custom, os.path.join(custom, "CollaborationCache")]
+    except Exception:
+        pass
+    roots.append(os.path.normpath(os.path.expandvars(COLLAB_CACHE_DEFAULT.format(version=version))))
+    found = []
+    for root in roots:
+        if os.path.isdir(root) and root not in found:
+            found.append(root)
+    return found
+
+
+def _subfolders(folder):
+    try:
+        return [os.path.join(folder, n) for n in os.listdir(folder)
+                if os.path.isdir(os.path.join(folder, n))]
+    except Exception:
+        return []
+
+
+def cached_cloud_model_file(model_guid, project_guid, roots):
+    """The cached copy of a cloud model in the collaboration cache - the
+    cached central first (closest to the file on ACC), then the local copy,
+    then a cached link; in the model's own project folder first."""
+    if not model_guid:
+        return None
+    name = u"{}.rvt".format(model_guid)
+    project_guid = (project_guid or u"").lower()
+    for root in roots:
+        projects = []
+        for account in _subfolders(root):
+            projects.append(account)            # a project folder straight under the root
+            projects += _subfolders(account)
+        projects.sort(key=lambda f: os.path.basename(f).lower() != project_guid)
+        for project in projects:
+            for sub in CACHE_SUBFOLDERS:
+                path = os.path.join(project, sub, name) if sub else os.path.join(project, name)
+                if os.path.isfile(path):
+                    return path
+    return None
+
+
+def cloud_model_ids(doc):
+    """(model GUID, project GUID) of a cloud model, as lower-case text;
+    None when the model is not in the cloud."""
+    try:
+        if not doc.IsModelInCloud:
+            return None
+    except AttributeError:
+        pass                                    # older Revit: ask for the cloud path directly
+    except Exception:
+        return None
+    try:
+        cloud_path = doc.GetCloudModelPath()
+        return (str(cloud_path.GetModelGUID()).lower(),
+                str(cloud_path.GetProjectGUID()).lower())
+    except Exception:
+        return None
+
+
+# ============================================================
 # MODEL HEALTH ANALYZER
 # ============================================================
 class ModelHealthAnalyzer:
@@ -456,6 +593,8 @@ class ModelHealthAnalyzer:
         self.doc = doc
         self.metrics = OrderedDict()
         self.element_ids = {}
+        self.notes = {}       # metric key -> how it was measured (or why not)
+        self.sources = {}     # metric key -> the file that was measured
 
     def analyze(self):
         self._file_size()
@@ -482,17 +621,37 @@ class ModelHealthAnalyzer:
         self.element_ids[key] = ids
 
     def _file_size(self):
-        """Size of the model's file on disk; None (not measured) when there
-        is no local file to read - an unsaved model, or a cloud model, whose
-        path is not a path on this computer."""
+        """Size of the model's file. A local model: its file on disk. A cloud
+        model (ACC / BIM 360 / Forma) has no file on this computer except
+        the copy Revit keeps in its collaboration cache, which is measured
+        instead. None (not measured) when there is no file to read."""
+        key = "file_size_mb"
+        self.metrics[key] = None
+        path = None
         try:
             path = self.doc.PathName
             if path and os.path.isfile(path):
-                self.metrics["file_size_mb"] = round(os.path.getsize(path) / (1024.0 * 1024.0), 1)
-            else:
-                self.metrics["file_size_mb"] = None
-        except:
-            self.metrics["file_size_mb"] = None
+                self.metrics[key] = _megabytes(path)
+                self.sources[key] = path
+                return
+        except Exception:
+            pass
+        ids = cloud_model_ids(self.doc)
+        if ids is None:
+            if not path:
+                self.notes[key] = NOTE_UNSAVED
+            return
+        try:
+            cached = cached_cloud_model_file(
+                ids[0], ids[1], collaboration_cache_roots(revit_version(self.doc)))
+            if cached:
+                self.metrics[key] = _megabytes(cached)
+                self.sources[key] = cached
+                self.notes[key] = NOTE_CLOUD_CACHED
+                return
+        except Exception:
+            pass
+        self.notes[key] = NOTE_CLOUD_NO_CACHE
 
     def _warnings(self):
         try:
@@ -1092,7 +1251,7 @@ class LinkPickerWindow(Window):
         self.result = None
         self._boxes = []
 
-        self.Title = "Model Health Check v2.3 - DQT"
+        self.Title = "Model Health Check v2.4 - DQT"
         self.Width = 820
         self.Height = 620
         self.MinWidth = 640
@@ -1673,6 +1832,12 @@ class ModelDashboard(object):
             self.linked_model.error = self.error
         return self
 
+    def metric_note(self, key):
+        """(how a metric was measured or why it could not be, the file read)."""
+        notes = getattr(self.analyzer, "notes", None) or {}
+        sources = getattr(self.analyzer, "sources", None) or {}
+        return notes.get(key), (sources.get(key) if notes.get(key) else None)
+
     def regrade(self):
         """Re-score and re-draw from the metrics already collected - after
         an analysis, or when the thresholds change."""
@@ -1945,6 +2110,19 @@ class ModelDashboard(object):
         tt.Margin = Thickness(0, 2, 0, 0)
         info_sp.Children.Add(tt)
 
+        note, source = self.metric_note(key)
+        if note:
+            nt = TextBlock()
+            nt.Text = note
+            nt.FontSize = 9
+            nt.FontStyle = FontStyles.Italic
+            nt.Foreground = brush("#8A6D3B")
+            nt.TextWrapping = TextWrapping.Wrap
+            nt.Margin = Thickness(0, 2, 0, 0)
+            if source:
+                nt.ToolTip = source
+            info_sp.Children.Add(nt)
+
         b3.Child = info_sp
         WPFGrid.SetRow(b3, row_idx)
         WPFGrid.SetColumn(b3, 3)
@@ -2136,7 +2314,7 @@ class ModelDashboard(object):
                 </tr></table></td>
                 <td class="m-status">
                     <div class="st" style="color:{scolor};">Status: {status} - {meaning}</div>
-                    <div class="det">Impact: {impact} &nbsp;|&nbsp; Weight: {stars} ({w}/5) &nbsp;|&nbsp; {thresholds}</div>
+                    <div class="det">Impact: {impact} &nbsp;|&nbsp; Weight: {stars} ({w}/5) &nbsp;|&nbsp; {thresholds}</div>{note}
                 </td>
             </tr>""".format(
                     bg=row_bg, label=u"{}. {}".format(number, config["label"]), color=h_color,
@@ -2146,7 +2324,9 @@ class ModelDashboard(object):
                     status=status, meaning=get_status_meaning(status),
                     impact=config.get("impact", ""),
                     stars="&#9733;" * weight + "&#9734;" * (5 - weight), w=weight,
-                    thresholds=thresholds_text(config["thresholds"]).replace(u"\u2264", "&le;").replace(">", "&gt;"))
+                    thresholds=thresholds_text(config["thresholds"]).replace(u"\u2264", "&le;").replace(">", "&gt;"),
+                    note=(u'<div class="note">{}</div>'.format(_html(self.metric_note(key)[0]))
+                          if self.metric_note(key)[0] else u""))
 
         # Recommendations - Amber and Red, in priority order
         rec_html = u""
@@ -2362,7 +2542,7 @@ class ModelHealthWindow(Window):
                               else linked_models)
         self.overview_stack = None
 
-        self.Title = "Model Health Check v2.3 - DQT"
+        self.Title = "Model Health Check v2.4 - DQT"
         self.Height = 900
         self.Width = 1400
         self.MinHeight = 700
@@ -3026,6 +3206,7 @@ class ModelHealthWindow(Window):
     td.m-status {{ padding: 5px 10px; border-bottom: 1px solid #E8E0D0; }}
     td.m-status .st {{ font-weight: 600; font-size: 11px; }}
     td.m-status .det {{ color: #999; font-size: 9px; margin-top: 1px; }}
+    td.m-status .note {{ color: #8A6D3B; font-size: 9px; font-style: italic; margin-top: 1px; }}
     table.bar {{ width: 100%; height: 12px; border: none; background: transparent; }}
     table.bar td {{ height: 12px; padding: 0; border: none; }}
     table.bar td:first-child {{ border-radius: 3px 0 0 3px; }}
@@ -3054,7 +3235,7 @@ class ModelHealthWindow(Window):
         td.m-label, td.m-val, td.m-bar {{ padding-top: 3px; padding-bottom: 3px; }}
         td.m-status {{ padding-top: 2px; padding-bottom: 2px; }}
         td.m-status .st {{ font-size: 10px; }}
-        td.m-status .det {{ font-size: 8px; margin-top: 0; }}
+        td.m-status .det, td.m-status .note {{ font-size: 8px; margin-top: 0; }}
         table.overview td {{ padding: 4px 6px; }}
         .rec-box {{ padding: 8px 12px; margin-top: 8px; }}
         .rec-item {{ margin: 2px 0; }}
@@ -3173,8 +3354,8 @@ def show_help():
         "the links to check with the open model. Every checked model "
         "gets its own dashboard tab, and the Overview tab lists all of "
         "them. A link that is not loaded must be reloaded in Manage "
-        "Links first. A cloud model's file size cannot be measured and "
-        "shows N/A.\n\n"
+        "Links first. A cloud model's (ACC) file size is measured on "
+        "the copy Revit keeps in its collaboration cache.\n\n"
         "SETTINGS TAB\n"
         "  Edit each metric's Green and Amber values and weight (1-5) "
         "before running an analysis. Save & Apply writes them to "
