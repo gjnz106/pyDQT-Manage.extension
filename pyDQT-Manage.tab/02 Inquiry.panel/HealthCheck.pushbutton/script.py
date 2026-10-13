@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Model Health Check v2.5 - DQT
+Model Health Check v2.6 - DQT
 Analyzes Revit model health with color-coded metrics dashboard.
 Features: Gauge dashboard, Select Elements, Weighted score, Purgeable elements.
 Pure code-behind WPF for IronPython stability.
@@ -34,6 +34,10 @@ The dashboard and report say so under the metric.
 v2.5: Model Groups and RVT Links are no longer graded; five metrics are
 added - Unused Families & Types (High: Revit's own Purge Unused list),
 Materials (Moderate), Line Styles, Line Patterns and Fill Patterns (Low).
+
+v2.6: File Size of a cloud model is no longer graded on Revit's cache copy
+(never compacted - 740 MB for a model ACC lists at 95 MB). It shows N/A,
+left out of the score, with the cache copy's size in the note for reference.
 
 Copyright (c) 2025 Dang Quoc Truong (DQT)
 All rights reserved.
@@ -497,9 +501,15 @@ REVIT_INI_PATH = os.path.join("%APPDATA%", "Autodesk", "Revit",
                               "Autodesk Revit {version}", "Revit.ini")
 CACHE_SUBFOLDERS = ("CentralCache", "", "LinkedModels")   # closest to the ACC file first
 
-NOTE_CLOUD_CACHED = (u"Cloud model: measured on Revit's local cached copy - "
-                     u"ACC may show a slightly different size.")
-NOTE_CLOUD_NO_CACHE = u"Cloud model: no local cached copy found on this computer."
+# A cloud model's File Size is not graded: ACC lists the size of the last
+# PUBLISHED version, and the only file on this computer - Revit's cached
+# copy - is never compacted, so it runs many times larger (740 MB in the
+# cache for a model ACC lists at 95 MB). Its size is shown for reference.
+NOTE_CLOUD_CACHED = (u"Cloud model - not graded: ACC lists the size of the last published "
+                     u"version. Revit's local cache copy is {size} MB, but it is never "
+                     u"compacted, so it runs far larger than the file on ACC.")
+NOTE_CLOUD_NO_CACHE = (u"Cloud model - not graded: ACC lists the size of the last published "
+                       u"version (no local cache copy found on this computer).")
 NOTE_UNSAVED = u"The model has never been saved."
 
 # Purge Unused, as the API sees it
@@ -662,10 +672,11 @@ class ModelHealthAnalyzer:
         self.element_ids[key] = ids
 
     def _file_size(self):
-        """Size of the model's file. A local model: its file on disk. A cloud
-        model (ACC / BIM 360 / Forma) has no file on this computer except
-        the copy Revit keeps in its collaboration cache, which is measured
-        instead. None (not measured) when there is no file to read."""
+        """Size of the model's file on disk. None (N/A, not graded) when there
+        is no file to read: a model never saved, or a cloud model (ACC /
+        BIM 360 / Forma) - its only file here is Revit's cache copy, whose
+        size is shown in the note for reference but not graded (see
+        NOTE_CLOUD_CACHED)."""
         key = "file_size_mb"
         self.metrics[key] = None
         path = None
@@ -686,9 +697,8 @@ class ModelHealthAnalyzer:
             cached = cached_cloud_model_file(
                 ids[0], ids[1], collaboration_cache_roots(revit_version(self.doc)))
             if cached:
-                self.metrics[key] = _megabytes(cached)
                 self.sources[key] = cached
-                self.notes[key] = NOTE_CLOUD_CACHED
+                self.notes[key] = NOTE_CLOUD_CACHED.format(size=_megabytes(cached))
                 return
         except Exception:
             pass
@@ -1387,7 +1397,7 @@ class LinkPickerWindow(Window):
         self.result = None
         self._boxes = []
 
-        self.Title = "Model Health Check v2.5 - DQT"
+        self.Title = "Model Health Check v2.6 - DQT"
         self.Width = 820
         self.Height = 620
         self.MinWidth = 640
@@ -2678,7 +2688,7 @@ class ModelHealthWindow(Window):
                               else linked_models)
         self.overview_stack = None
 
-        self.Title = "Model Health Check v2.5 - DQT"
+        self.Title = "Model Health Check v2.6 - DQT"
         self.Height = 900
         self.Width = 1400
         self.MinHeight = 700
@@ -3490,8 +3500,9 @@ def show_help():
         "the links to check with the open model. Every checked model "
         "gets its own dashboard tab, and the Overview tab lists all of "
         "them. A link that is not loaded must be reloaded in Manage "
-        "Links first. A cloud model's (ACC) file size is measured on "
-        "the copy Revit keeps in its collaboration cache.\n\n"
+        "Links first. A cloud model's (ACC) file size is not graded: "
+        "ACC lists the published file, and Revit's local cache copy "
+        "is never compacted (its size is shown for reference).\n\n"
         "SETTINGS TAB\n"
         "  Edit each metric's Green and Amber values and weight (1-5) "
         "before running an analysis. Save & Apply writes them to "

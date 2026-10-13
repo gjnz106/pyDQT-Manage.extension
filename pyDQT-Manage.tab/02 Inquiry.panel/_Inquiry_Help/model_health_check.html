@@ -158,23 +158,30 @@
       and export again.
     </div>
     <div class="box tip">
-      <b>File Size of a cloud model (ACC / BIM 360 / Forma).</b> A cloud model
-      has no file of its own on this computer, so its size is read from the
-      copy Revit keeps in its <b>collaboration cache</b> - the folder set under
-      <b>Options &rsaquo; Cloud Model</b>, else
-      <span class="code">%LOCALAPPDATA%\Autodesk\Revit\Autodesk Revit &lt;version&gt;\CollaborationCache</span>.
-      The tool finds the model by its GUID and measures the cached central
-      copy (else the local copy, or the cached copy of a link). The dashboard
-      and report say so in a note under File Size - hover the note to see
-      the file that was measured. ACC can show a slightly different size,
-      since it reports the uploaded file.
+      <b>File Size of a cloud model (ACC / BIM 360 / Forma) is not graded.</b>
+      ACC's Size column shows the size of the last <b>published</b> version -
+      a clean copy written when the model is published, so it does not change
+      with syncs until someone publishes again. The only file of a cloud model
+      on this computer is the copy Revit keeps in its <b>collaboration
+      cache</b> (the folder set under <b>Options &rsaquo; Cloud Model</b>, else
+      <span class="code">%LOCALAPPDATA%\Autodesk\Revit\Autodesk Revit &lt;version&gt;\CollaborationCache</span>),
+      and that copy is never compacted: it grows with every sync and can be many
+      times larger - 740 MB in the cache for a model ACC lists at 95 MB. So
+      File Size shows <b>N/A</b> and is left out of the score; the note under it
+      gives the cache copy's size for reference (hover it to see the file).
+      For the real size, use ACC's Size column after a fresh publish.
     </div>
     <div class="box tip">
-      <b>N/A.</b> File Size shows N/A, and is left out of the score, only
-      when there is no file to measure: a model that has never been saved,
-      or a cloud model with no cached copy on this computer (open it, or
-      reload the link, so Revit downloads it). The note under the metric says
-      which.
+      <b>N/A.</b> A metric shows N/A, and is left out of the score, when it
+      cannot be measured or graded fairly: File Size of a model that has never
+      been saved or of a cloud model, and Unused Families &amp; Types on a
+      Revit version without a purge list. The note under the metric says why.
+    </div>
+    <div class="box fixed">
+      <b>New in v2.6 - ACC File Size no longer graded on the cache.</b> v2.4
+      graded a cloud model's File Size on Revit's cache copy, which is never
+      compacted - a model ACC lists at 95 MB was graded Red at 740 MB. It now
+      shows N/A, out of the score, with the cache size in the note only.
     </div>
     <div class="box fixed">
       <b>New in v2.5 - metrics changed.</b> <b>Model Groups</b> and
@@ -187,10 +194,9 @@
       start at their defaults.
     </div>
     <div class="box fixed">
-      <b>New in v2.4 - File Size of ACC models.</b> Models on ACC used to show
-      N/A for File Size, because the tool only read a model's own file on
-      disk. It now measures the copy in Revit's collaboration cache, so cloud
-      models are graded on File Size like local ones.
+      <b>v2.4 - File Size of ACC models.</b> Read the copy in Revit's
+      collaboration cache by the model's GUID. Since v2.6 that size is shown
+      for reference only (see above).
     </div>
     <div class="box fixed">
       <b>New in v2.3 - choose where to save, PDF straight away.</b> Export
