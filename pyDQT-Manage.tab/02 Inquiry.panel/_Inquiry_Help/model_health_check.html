@@ -22,11 +22,12 @@
   <div class="card">
     <h2>What it does</h2>
     <p class="lede">
-      Analyzes the model - and, on the Linked Models tab, each of its Revit
-      links - against 12 metrics, grades each one Green, Amber or Red, and
-      combines them into one weighted health score. The metrics are
-      listed by their impact on model performance and stability, so the
-      dashboard shows first what hurts the model most.
+      Analyzes the model - and the Revit links you tick - against 12
+      metrics, grades each one Green, Amber or Red, and combines them into
+      one weighted health score per model. Everything is shown at once: an
+      Overview of every model, and one dashboard tab per model. The metrics
+      are listed by their impact on model performance and stability, so
+      each dashboard shows first what hurts the model most.
     </p>
   </div>
 
@@ -59,39 +60,48 @@
   <div class="card">
     <h2>Workflow</h2>
     <ol class="steps">
-      <li>(Optional) Open the <b>Settings</b> tab first to adjust any
-        metric's Green / Amber values or weight to match your own standards,
-        before running an analysis.</li>
-      <li><b>Re-Analyze</b> re-runs all 12 metrics against the current
-        model.</li>
-      <li>Read the overall result under the gauge, then go down the
-        dashboard: it is grouped Critical, High, Moderate, Low impact, so
-        the Red and Amber rows at the top matter most.</li>
+      <li>Start the tool. When the model has Revit links, a list comes up
+        first: the open model is always checked; <b>tick the links</b> to
+        check with it (<b>Select All</b> / <b>Clear All</b> help with long
+        lists), then click <b>Run Check</b>. <b>Cancel</b> stops here. A
+        model without links goes straight to its dashboard.</li>
+      <li>Every checked model is analysed straight away and the window
+        shows them all at once: the <b>Overview</b> tab, one
+        <b>dashboard tab</b> per model - its dot is the model's overall
+        colour - and <b>Settings</b>.</li>
+      <li>On a model's tab, read the overall result under the gauge, then go
+        down the dashboard: it is grouped Critical, High, Moderate, Low
+        impact, so the Red and Amber rows at the top matter most.</li>
       <li>The recommendations list every Amber and Red metric, in the same
-        priority order. <b>Select</b> on a row selects the offending elements
-        straight in Revit.</li>
-      <li><b>Export Report</b> saves the dashboard as an HTML report (print
-        it to PDF from the browser).</li>
+        priority order. On the open model's tab, <b>Select</b> on a row
+        selects the offending elements straight in Revit.</li>
+      <li><b>Re-Analyze</b> on a tab re-reads that model;
+        <b>Re-Analyze All</b> on the Overview re-reads every checked
+        model.</li>
+      <li><b>Export Report</b> - on the Overview or any model's tab - saves
+        one HTML report with the Overview and every checked model, each on
+        its own page (print it to PDF from the browser).</li>
     </ol>
   </div>
 
   <div class="card">
-    <h2>Linked Models</h2>
-    <p>The <b>Linked Models</b> tab lists every Revit link in the model -
-      one row per linked file, however many times it is placed - and checks
-      each one with the same 12 metrics and thresholds as the Dashboard.</p>
-    <ol class="steps">
-      <li>Open the <b>Linked Models</b> tab: every link is listed with its
-        number of instances and whether it is <b>Loaded</b>.</li>
-      <li>Click <b>Analyze Linked Models</b>. Each loaded link is read and
-        graded - it can take a while when there are many links.</li>
-      <li>Read the table: <b>Overall</b> (Green / Amber / Red), <b>Score</b>,
-        how many metrics are <b>Red</b> and <b>Amber</b>, and <b>Needs
-        Attention</b> - the Red metrics first, then the Amber ones.</li>
-      <li><b>Open</b> on a row shows that link's full dashboard.</li>
-      <li><b>Export Report</b> adds a Linked Models section once the links
-        have been analysed.</li>
-    </ol>
+    <h2>Overview tab</h2>
+    <p>One table with every model of the check: the open model first, then
+      every Revit link in the model - one row per linked file, however many
+      times it is placed - all graded with the same 12 metrics and
+      thresholds.</p>
+    <dl class="kv">
+      <dt class="v-dark">Type / Instances</dt><dd>open model or linked model, and how many times a link is placed</dd>
+      <dt class="v-green">Checked</dt><dd>analysed in this check - it has its own tab</dd>
+      <dt class="v-gold">Not checked</dt><dd>loaded, but not ticked at start - run the tool again and tick it</dd>
+      <dt class="v-red">Not loaded</dt><dd>cannot be read - reload it in Manage Links first</dd>
+    </dl>
+    <p>For a checked model: <b>Overall</b> (Green / Amber / Red),
+      <b>Score</b>, how many metrics are <b>Red</b> and <b>Amber</b>, and
+      <b>Needs Attention</b> - the Red metrics first, then the Amber ones.
+      <b>View</b> on a row opens that model's tab. When only the open model
+      is checked, the window opens on its dashboard instead of the
+      Overview.</p>
   </div>
 
   <div class="card">
@@ -102,19 +112,29 @@
       etc.) means switching to the matching tool elsewhere in pyDQT.
     </div>
     <div class="box warn">
-      <b>Linked models.</b> A link that is not loaded cannot be read -
-      reload it in Manage Links first; its row says so. A linked model's
-      dashboard is read-only: elements inside a link cannot be selected
-      from the host model, and thresholds are edited from the host's
-      Settings tab (the links are re-graded straight away when they change).
-      Links nested inside another link are included only when Revit shows
-      them in this model.
+      <b>Linked models.</b> Each ticked link is read like a model of its
+      own, so ticking many large links makes the check take longer - tick
+      only the ones you need. A link that is not loaded cannot be ticked:
+      reload it in Manage Links first. A linked model's dashboard is
+      read-only: elements inside a link cannot be selected from the host
+      model. The Settings tab grades every checked model - they are all
+      re-graded straight away when a threshold changes. Links nested
+      inside another link are included only when Revit shows them in this
+      model.
     </div>
     <div class="box tip">
       <b>N/A.</b> A cloud model (Autodesk Docs / Forma) has no file on this
       computer, so its <b>File Size</b> cannot be measured: it shows N/A and
       is left out of the score instead of reading 0 MB and counting as
       Green. The same goes for a model that has never been saved.
+    </div>
+    <div class="box fixed">
+      <b>New in v2.2 - everything at once.</b> The Linked Models tab, where
+      each link had to be analysed and then opened in a window of its own,
+      is replaced: tick the links to check before the check runs, and
+      every checked model is shown at once - the Overview, one dashboard
+      tab per model and Settings. Export Report now puts every checked
+      model in one report.
     </div>
     <div class="box fixed">
       <b>New in v2.0.</b> The 6-level scale (Good / Acceptable / Warning /
@@ -129,11 +149,11 @@
     <div class="box fixed">
       <b>Settings tab.</b> Every metric's Green value, Amber value and
       weight (1-5, how much it counts toward the overall score) can be
-      edited directly, right next to the Dashboard tab.
+      edited directly on its own tab.
       <span class="code">Save & Apply</span> writes the change to
       <span class="code">threshold_config.json</span> next to this tool - so
-      it survives closing Revit - and immediately re-scores the dashboard
-      from the last analysis. <span class="code">Reset to Defaults</span>
+      it survives closing Revit - and immediately re-scores every checked
+      model from the last analysis. <span class="code">Reset to Defaults</span>
       restores the built-in values and deletes that file. A row with an
       invalid value (not a number, or Green above Amber) blocks the whole
       save rather than silently accepting the other 11. A settings file

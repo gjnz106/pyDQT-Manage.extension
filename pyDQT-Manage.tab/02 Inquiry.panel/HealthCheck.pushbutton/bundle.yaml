@@ -4,7 +4,9 @@ tooltip: >-
   metrics listed by impact on model performance and stability:
   warnings, CAD imports, file size, in-place families, duplicates,
   CAD and RVT links, images, model groups, design options and more.
-  The Linked Models tab checks every loaded Revit link the same way.
+  Tick the Revit links to check first; the open model and every
+  ticked link are then shown at once - an Overview and one dashboard
+  tab per model.
   
   Copyright by Dang Quoc Truong - DQT
 author: Dang Quoc Truong (DQT)

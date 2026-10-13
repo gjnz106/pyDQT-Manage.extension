@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Model Health Check v2.1 - DQT
+Model Health Check v2.2 - DQT
 Analyzes Revit model health with color-coded metrics dashboard.
 Features: Gauge dashboard, Select Elements, Weighted score, Purgeable elements.
 Pure code-behind WPF for IronPython stability.
@@ -13,6 +13,12 @@ v2.1: a Linked Models tab - every Revit link checked with the same metrics
 and thresholds, one row per linked file, with its full dashboard on Open.
 A metric that cannot be measured (the file size of a cloud model, which
 has no local file) shows N/A and is left out of the score.
+
+v2.2: everything at once. When the model has Revit links, a list comes up
+first to tick the links to check; then the open model and every ticked
+link are analysed together and shown in one window - an Overview tab with
+all of them, one dashboard tab per model, and Settings. Export Report puts
+every checked model in one file.
 
 Copyright (c) 2025 Dang Quoc Truong (DQT)
 All rights reserved.
@@ -852,6 +858,9 @@ class LinkedModel(object):
         self.doc = None
         self.metrics = None
         self.error = None
+        # Ticked in the picker shown before the check runs - only a loaded
+        # link that is still ticked gets analysed and its own dashboard tab.
+        self.selected = True
 
     @property
     def loaded(self):
@@ -915,26 +924,67 @@ def attention_text(metrics, limit=3):
     return ", ".join(parts)
 
 
-def link_row(model):
-    """What the Linked Models table and the report show for one link."""
-    row = {"name": model.name, "instances": model.instances,
-           "status": "Loaded" if model.loaded else "Not loaded",
-           "overall": "-", "score": "-", "red": "-", "amber": "-",
+def model_title(doc):
+    """The model's name for tabs and headings: its title, else its file
+    name, else just "Model" (a model that has never been saved)."""
+    try:
+        title = doc.Title
+        if title:
+            return title
+    except:
+        pass
+    try:
+        path = doc.PathName
+        if path:
+            return os.path.splitext(os.path.basename(path))[0]
+    except:
+        pass
+    return "Model"
+
+
+def short_name(name, limit=30):
+    """A long link name cut down to fit a tab header."""
+    name = u"{}".format(name)
+    if len(name) <= limit:
+        return name
+    return name[:limit - 1].rstrip() + u"\u2026"
+
+
+def summary_fields(metrics, error=None):
+    """Overall result, score, Red / Amber counts and a note for one checked
+    model - what an Overview row and the report show for it."""
+    row = {"overall": "-", "score": "-", "red": "-", "amber": "-",
            "color": None, "text_color": DQT_TEXT, "note": ""}
-    if not model.loaded:
-        row["note"] = "Not loaded - reload it in Manage Links to check it"
-    elif model.error:
-        row["note"] = "Could not be read: " + model.error
-    elif model.metrics is None:
+    if error:
+        row["note"] = "Could not be read: " + error
+    elif metrics is None:
         row["note"] = "Not analyzed yet"
     else:
-        score = get_health_score(model.metrics)
+        score = get_health_score(metrics)
         level, label, color = get_overall_status(score)
-        counts = count_statuses(model.metrics)
+        counts = count_statuses(metrics)
         row.update(overall="{} - {}".format(level, label), score=str(score),
                    red=str(counts[RAG_RED]), amber=str(counts[RAG_AMBER]),
                    color=color, text_color=RAG_TEXT_COLORS[level],
-                   note=attention_text(model.metrics) or "All metrics Green")
+                   note=attention_text(metrics) or "All metrics Green")
+    return row
+
+
+LINK_NOT_LOADED_NOTE = "Not loaded - reload it in Manage Links to check it"
+LINK_NOT_TICKED_NOTE = "Not ticked for this check - run the tool again and tick it"
+
+
+def link_row(model):
+    """What the Overview table and the report show for one link."""
+    row = {"name": model.name, "instances": model.instances}
+    if not model.loaded:
+        row.update(summary_fields(None), status="Not loaded",
+                   note=LINK_NOT_LOADED_NOTE)
+    elif not model.selected:
+        row.update(summary_fields(None), status="Not checked",
+                   note=LINK_NOT_TICKED_NOTE)
+    else:
+        row.update(summary_fields(model.metrics, model.error), status="Checked")
     return row
 
 
@@ -1021,35 +1071,256 @@ def _create_arc_path(cx, cy, radius, start_angle, end_angle, color, stroke_width
 
 
 # ============================================================
-# WPF WINDOW
+# STARTUP - tick the linked models to check
 # ============================================================
-class ModelHealthWindow(Window):
-    def __init__(self, doc, uidoc, link_name=None):
-        """The dashboard of the open model - or, with `link_name`, of one of
-        its Revit links (read-only: no Select, no Settings, no links tab)."""
-        self.doc = doc
-        self.uidoc = uidoc
-        self.metrics = OrderedDict()
-        self.analyzer = None
-        self.link_name = link_name
-        self.is_link = link_name is not None
-        self.linked_models = [] if self.is_link else collect_linked_models(doc)
-        self.links_stack = None
+class LinkPickerWindow(Window):
+    """Shown before the check when the model has Revit links: the open
+    model is always checked; tick the links to check with it. `result` is
+    the ticked LinkedModels, or None when cancelled."""
 
-        self.Title = "Model Health Check v2.1 - DQT"
-        if self.is_link:
-            self.Title += u" - Linked model: {}".format(link_name)
-        self.Height = 900
-        self.Width = 1400
-        self.MinHeight = 700
-        self.MinWidth = 1100
+    def __init__(self, host_title, linked_models):
+        self.linked_models = linked_models
+        self.result = None
+        self._boxes = []
+
+        self.Title = "Model Health Check v2.2 - DQT"
+        self.Width = 820
+        self.Height = 620
+        self.MinWidth = 640
+        self.MinHeight = 420
         self.WindowStartupLocation = WindowStartupLocation.CenterScreen
         self.Background = brush(DQT_BACKGROUND)
 
-        self._build_ui()
-        self._run_analysis()
+        root = WPFGrid()
+        root.Margin = Thickness(14)
+        for h in [GridLength(1, GridUnitType.Auto),   # header
+                  GridLength(1, GridUnitType.Auto),   # intro
+                  GridLength(1, GridUnitType.Star),   # list
+                  GridLength(1, GridUnitType.Auto),   # buttons
+                  GridLength(1, GridUnitType.Auto)]:  # footer
+            rd = RowDefinition()
+            rd.Height = h
+            root.RowDefinitions.Add(rd)
 
-    def _build_ui(self):
+        header = Border()
+        header.Background = brush(DQT_PRIMARY)
+        header.CornerRadius = WinCornerRadius(6)
+        header.Padding = Thickness(16, 12, 16, 12)
+        header.Margin = Thickness(0, 0, 0, 10)
+        hs = StackPanel()
+        t = TextBlock()
+        t.Text = "MODEL HEALTH CHECK"
+        t.FontSize = 20
+        t.FontWeight = FontWeights.Bold
+        t.Foreground = brush(DQT_TEXT_DARK)
+        hs.Children.Add(t)
+        sub = TextBlock()
+        sub.Text = "Choose the linked models to check"
+        sub.FontSize = 12
+        sub.Foreground = brush(DQT_TEXT_DARK)
+        hs.Children.Add(sub)
+        header.Child = hs
+        WPFGrid.SetRow(header, 0)
+        root.Children.Add(header)
+
+        intro = TextBlock()
+        intro.Text = (
+            u"The open model is always checked. Tick the Revit links to check "
+            u"with it - every model gets its own tab in the dashboard, plus an "
+            u"Overview of all of them. Each link is read like a model of its "
+            u"own, so checking many large links takes longer. A link that is "
+            u"not loaded cannot be checked: reload it in Manage Links first.")
+        intro.FontSize = 12
+        intro.TextWrapping = TextWrapping.Wrap
+        intro.Foreground = brush(DQT_TEXT)
+        intro.Margin = Thickness(2, 0, 2, 10)
+        WPFGrid.SetRow(intro, 1)
+        root.Children.Add(intro)
+
+        list_border = Border()
+        list_border.Background = brush("#FFFFFF")
+        list_border.BorderBrush = brush(DQT_BORDER)
+        list_border.BorderThickness = Thickness(1)
+        list_border.CornerRadius = WinCornerRadius(6)
+        list_border.Padding = Thickness(10, 8, 10, 8)
+        list_border.Margin = Thickness(0, 0, 0, 10)
+        sv = ScrollViewer()
+        sv.VerticalScrollBarVisibility = ScrollBarVisibility.Auto
+        items = StackPanel()
+
+        host_box = WPFControls.CheckBox()
+        host_box.Content = self._box_text(u"Open model: {}".format(host_title),
+                                          u"always checked")
+        host_box.IsChecked = True
+        host_box.IsEnabled = False
+        host_box.Margin = Thickness(0, 4, 0, 8)
+        items.Children.Add(host_box)
+
+        for model in linked_models:
+            box = WPFControls.CheckBox()
+            detail = u"{} instance(s)  \u00B7  {}".format(
+                model.instances,
+                "Loaded" if model.loaded else "Not loaded - reload it in Manage Links to check it")
+            box.Content = self._box_text(model.name, detail)
+            box.IsChecked = model.loaded and model.selected
+            box.IsEnabled = model.loaded
+            box.Margin = Thickness(0, 4, 0, 4)
+            box.Click += self._on_box_click
+            items.Children.Add(box)
+            self._boxes.append((model, box))
+
+        sv.Content = items
+        list_border.Child = sv
+        WPFGrid.SetRow(list_border, 2)
+        root.Children.Add(list_border)
+
+        bar = WPFGrid()
+        for w in (GridLength(1, GridUnitType.Auto), GridLength(1, GridUnitType.Star),
+                  GridLength(1, GridUnitType.Auto)):
+            cd = ColumnDefinition()
+            cd.Width = w
+            bar.ColumnDefinitions.Add(cd)
+        left = StackPanel()
+        left.Orientation = Orientation.Horizontal
+        self.btn_all = self._button(u"Select All", primary=False)
+        self.btn_all.Click += self._on_select_all
+        left.Children.Add(self.btn_all)
+        self.btn_none = self._button(u"Clear All", primary=False)
+        self.btn_none.Click += self._on_clear_all
+        left.Children.Add(self.btn_none)
+        WPFGrid.SetColumn(left, 0)
+        bar.Children.Add(left)
+        self.txt_count = TextBlock()
+        self.txt_count.FontSize = 12
+        self.txt_count.Foreground = brush("#888888")
+        self.txt_count.VerticalAlignment = VerticalAlignment.Center
+        self.txt_count.Margin = Thickness(12, 0, 12, 0)
+        WPFGrid.SetColumn(self.txt_count, 1)
+        bar.Children.Add(self.txt_count)
+        right = StackPanel()
+        right.Orientation = Orientation.Horizontal
+        self.btn_run = self._button(u"\u25B6 Run Check", primary=True)
+        self.btn_run.Click += self._on_run
+        right.Children.Add(self.btn_run)
+        self.btn_cancel = self._button(u"Cancel", primary=False)
+        self.btn_cancel.Click += self._on_cancel
+        right.Children.Add(self.btn_cancel)
+        WPFGrid.SetColumn(right, 2)
+        bar.Children.Add(right)
+        bar.Margin = Thickness(0, 0, 0, 10)
+        WPFGrid.SetRow(bar, 3)
+        root.Children.Add(bar)
+
+        footer = Border()
+        footer.Background = brush(DQT_PRIMARY)
+        footer.CornerRadius = WinCornerRadius(4)
+        footer.Padding = Thickness(10, 6, 10, 6)
+        ft = TextBlock()
+        ft.Text = u"Dang Quoc Truong - DQT (c) 2026"
+        ft.FontSize = 10
+        ft.Foreground = brush(DQT_TEXT_DARK)
+        ft.HorizontalAlignment = HorizontalAlignment.Center
+        footer.Child = ft
+        WPFGrid.SetRow(footer, 4)
+        root.Children.Add(footer)
+
+        self.Content = root
+        self._update_count()
+
+    def _box_text(self, name, detail):
+        sp = StackPanel()
+        n = TextBlock()
+        n.Text = name
+        n.FontSize = 13
+        n.FontWeight = FontWeights.SemiBold
+        n.Foreground = brush(DQT_TEXT)
+        n.TextWrapping = TextWrapping.Wrap
+        sp.Children.Add(n)
+        d = TextBlock()
+        d.Text = detail
+        d.FontSize = 11
+        d.Foreground = brush("#888888")
+        sp.Children.Add(d)
+        return sp
+
+    def _button(self, text, primary):
+        b = Button()
+        b.Content = text
+        b.Background = brush(DQT_PRIMARY if primary else "#FFFFFF")
+        b.Foreground = brush(DQT_TEXT_DARK)
+        if primary:
+            b.FontWeight = FontWeights.SemiBold
+        b.Padding = Thickness(14, 7, 14, 7)
+        b.Margin = Thickness(0, 0, 8, 0)
+        b.BorderBrush = brush(DQT_PRIMARY_DARK)
+        b.BorderThickness = Thickness(1)
+        b.Cursor = Cursors.Hand
+        return b
+
+    def _ticked(self):
+        return [model for model, box in self._boxes if box.IsChecked == True]
+
+    def _update_count(self):
+        loaded = sum(1 for model, _ in self._boxes if model.loaded)
+        self.txt_count.Text = u"{} of {} loaded link(s) ticked".format(
+            len(self._ticked()), loaded)
+
+    def _on_box_click(self, sender, args):
+        self._update_count()
+
+    def _on_select_all(self, sender, args):
+        for model, box in self._boxes:
+            if model.loaded:
+                box.IsChecked = True
+        self._update_count()
+
+    def _on_clear_all(self, sender, args):
+        for _, box in self._boxes:
+            box.IsChecked = False
+        self._update_count()
+
+    def _on_run(self, sender, args):
+        ticked = self._ticked()
+        for model in self.linked_models:
+            model.selected = model in ticked
+        self.result = ticked
+        self.Close()
+
+    def _on_cancel(self, sender, args):
+        self.result = None
+        self.Close()
+
+
+# ============================================================
+# ONE MODEL'S DASHBOARD - a tab of the main window
+# ============================================================
+class ModelDashboard(object):
+    """The dashboard of one model - the open model, or (with `linked_model`)
+    one of its Revit links. A linked model's dashboard is read-only:
+    elements inside a link cannot be selected from the host model."""
+
+    def __init__(self, window, doc, linked_model=None):
+        self.window = window
+        self.doc = doc
+        self.uidoc = window.uidoc
+        self.linked_model = linked_model
+        self.is_link = linked_model is not None
+        self.link_name = linked_model.name if linked_model else None
+        self.metrics = OrderedDict()
+        self.analyzer = None
+        self.error = None
+        self.tab = None
+        self.root = self._build()
+
+    @property
+    def title(self):
+        return self.link_name if self.is_link else model_title(self.doc)
+
+    @property
+    def kind(self):
+        return "Linked model" if self.is_link else "Open model"
+
+    def _build(self):
         root = WPFGrid()
         root.Margin = Thickness(14)
 
@@ -1114,527 +1385,8 @@ class ModelHealthWindow(Window):
         WPFGrid.SetRow(footer, 5)
         root.Children.Add(footer)
 
-        # ---- Tabs: the dashboard above, plus Settings to edit the
-        # thresholds/weights BEFORE running an analysis, per request. ----
-        self.tabs = WPFControls.TabControl()
-        self.tabs.Background = brush(DQT_BACKGROUND)
-        self.tabs.BorderThickness = Thickness(0)
+        return root
 
-        self.tab_dashboard = WPFControls.TabItem()
-        self.tab_dashboard.Header = self._make_tab_header("Dashboard")
-        self.tab_dashboard.Content = root
-        self.tabs.Items.Add(self.tab_dashboard)
-
-        # A linked model's dashboard is read-only: thresholds are edited
-        # from the open model's window, and links are listed there.
-        if not self.is_link:
-            self.tab_links = WPFControls.TabItem()
-            self.tab_links.Header = self._make_tab_header(
-                u"Linked Models ({})".format(len(self.linked_models)))
-            self.tab_links.Content = self._make_links_tab()
-            self.tabs.Items.Add(self.tab_links)
-
-            self.tab_settings = WPFControls.TabItem()
-            self.tab_settings.Header = self._make_tab_header(u"⚙ Settings")
-            self.tab_settings.Content = self._make_settings_tab()
-            self.tabs.Items.Add(self.tab_settings)
-
-        self.Content = self.tabs
-
-    def _make_tab_header(self, text):
-        tb = TextBlock()
-        tb.Text = text
-        tb.FontSize = 13
-        tb.FontWeight = FontWeights.SemiBold
-        tb.Foreground = brush(DQT_TEXT_DARK)
-        tb.Padding = Thickness(8, 3, 8, 3)
-        return tb
-
-    # ---- SETTINGS TAB: edit threshold bands + weight per metric ----
-    def _make_settings_tab(self):
-        outer = WPFGrid()
-        outer.Margin = Thickness(14)
-        for h in [GridLength(1, GridUnitType.Auto),   # intro
-                  GridLength(1, GridUnitType.Star),   # table
-                  GridLength(1, GridUnitType.Auto)]:  # save bar
-            rd = RowDefinition()
-            rd.Height = h
-            outer.RowDefinitions.Add(rd)
-
-        intro = Border()
-        intro.Background = brush(DQT_PRIMARY)
-        intro.CornerRadius = WinCornerRadius(6)
-        intro.Padding = Thickness(16, 12, 16, 12)
-        intro.Margin = Thickness(0, 0, 0, 10)
-        intro_txt = TextBlock()
-        intro_txt.Text = (
-            u"Set the thresholds and weight used to grade each metric, "
-            u"then “Save & Apply” before running Re-Analyze. "
-            u"Each metric is Green up to its Green value, Amber up to its "
-            u"Amber value, and Red above that. Weight (1-5) is how much "
-            u"the metric counts toward the overall weighted score; by "
-            u"default it follows the metric's impact (Critical 5, High 4, "
-            u"Moderate 3, Low 2). Metrics are listed by impact, most "
-            u"impact first.")
-        intro_txt.FontSize = 13
-        intro_txt.TextWrapping = TextWrapping.Wrap
-        intro_txt.Foreground = brush(DQT_TEXT_DARK)
-        intro.Child = intro_txt
-        WPFGrid.SetRow(intro, 0)
-        outer.Children.Add(intro)
-
-        table_border = Border()
-        table_border.Background = brush("#FFFFFF")
-        table_border.BorderBrush = brush(DQT_BORDER)
-        table_border.BorderThickness = Thickness(1)
-        table_border.CornerRadius = WinCornerRadius(6)
-        table_border.Margin = Thickness(0, 0, 0, 10)
-        sv = ScrollViewer()
-        sv.VerticalScrollBarVisibility = ScrollBarVisibility.Auto
-        sv.HorizontalScrollBarVisibility = ScrollBarVisibility.Auto
-
-        # Column widths and cell padding/margins sized for FontSize 13 -
-        # the same size the Dashboard's heatmap uses for its own row
-        # content (metric label / value), so the two tabs read as one
-        # consistent tool rather than Settings looking like a squeezed-in
-        # afterthought.
-        table = WPFGrid()
-        table.Margin = Thickness(10)
-        col_widths = [230, 110, 120, 120, 120]
-        for w in col_widths:
-            cd = ColumnDefinition()
-            cd.Width = GridLength(w)
-            table.ColumnDefinitions.Add(cd)
-
-        headers = [u"Metric", u"Impact", u"Green ≤", u"Amber ≤",
-                   u"Weight (1-5)"]
-        header_row = RowDefinition()
-        header_row.Height = GridLength(1, GridUnitType.Auto)
-        table.RowDefinitions.Add(header_row)
-        for ci, htext in enumerate(headers):
-            htb = TextBlock()
-            htb.Text = htext
-            htb.FontSize = 13
-            htb.FontWeight = FontWeights.Bold
-            htb.Foreground = brush(DQT_TEXT_DARK)
-            htb.Margin = Thickness(6, 8, 6, 8)
-            htb.TextWrapping = TextWrapping.Wrap
-            WPFGrid.SetRow(htb, 0)
-            WPFGrid.SetColumn(htb, ci)
-            table.Children.Add(htb)
-
-        self._threshold_boxes = OrderedDict()
-        row_i = 1
-        for key, cfg in METRIC_THRESHOLDS.items():
-            rd = RowDefinition()
-            rd.Height = GridLength(1, GridUnitType.Auto)
-            table.RowDefinitions.Add(rd)
-            row_bg = brush("#FAF6EC") if row_i % 2 == 0 else brush("#FFFFFF")
-
-            lbl = TextBlock()
-            lbl.Text = cfg["label"]
-            lbl.FontSize = 13
-            lbl.FontWeight = FontWeights.SemiBold
-            lbl.Foreground = brush(DQT_TEXT)
-            lbl.VerticalAlignment = VerticalAlignment.Center
-            lbl.Margin = Thickness(6, 6, 6, 6)
-            lbl.Background = row_bg
-            tip = cfg.get("tooltip", "")
-            if tip:
-                lbl.ToolTip = tip
-            WPFGrid.SetRow(lbl, row_i)
-            WPFGrid.SetColumn(lbl, 0)
-            table.Children.Add(lbl)
-
-            impact = cfg.get("impact", "")
-            itb = TextBlock()
-            itb.Text = impact
-            itb.FontSize = 13
-            itb.Foreground = brush(DQT_TEXT_DARK)
-            itb.VerticalAlignment = VerticalAlignment.Center
-            itb.Margin = Thickness(6, 6, 6, 6)
-            itb.ToolTip = IMPACT_TIERS.get(impact, {}).get("description", "")
-            WPFGrid.SetRow(itb, row_i)
-            WPFGrid.SetColumn(itb, 1)
-            table.Children.Add(itb)
-
-            boxes = []
-            for ci in range(2):
-                tb = WPFControls.TextBox()
-                tb.Text = str(cfg["thresholds"][ci])
-                tb.FontSize = 13
-                tb.Padding = Thickness(6, 5, 6, 5)
-                tb.Margin = Thickness(4, 4, 4, 4)
-                tb.HorizontalContentAlignment = HorizontalAlignment.Center
-                tb.BorderBrush = brush(DQT_BORDER)
-                tb.Background = brush("#FFFFFF")
-                WPFGrid.SetRow(tb, row_i)
-                WPFGrid.SetColumn(tb, ci + 2)
-                table.Children.Add(tb)
-                boxes.append(tb)
-
-            wtb = WPFControls.TextBox()
-            wtb.Text = str(cfg.get("weight", 1))
-            wtb.FontSize = 13
-            wtb.Padding = Thickness(6, 5, 6, 5)
-            wtb.Margin = Thickness(4, 4, 4, 4)
-            wtb.HorizontalContentAlignment = HorizontalAlignment.Center
-            wtb.BorderBrush = brush(DQT_BORDER)
-            wtb.Background = brush("#FFFFFF")
-            WPFGrid.SetRow(wtb, row_i)
-            WPFGrid.SetColumn(wtb, 4)
-            table.Children.Add(wtb)
-
-            self._threshold_boxes[key] = {"boxes": boxes, "weight_box": wtb}
-            row_i += 1
-
-        sv.Content = table
-        table_border.Child = sv
-        WPFGrid.SetRow(table_border, 1)
-        outer.Children.Add(table_border)
-
-        # Save bar: status text (left) + Reset/Save buttons (right)
-        status_bar = WPFGrid()
-        c1 = ColumnDefinition()
-        c1.Width = GridLength(1, GridUnitType.Star)
-        c2 = ColumnDefinition()
-        c2.Width = GridLength(1, GridUnitType.Auto)
-        status_bar.ColumnDefinitions.Add(c1)
-        status_bar.ColumnDefinitions.Add(c2)
-
-        self.txt_settings_status = TextBlock()
-        self.txt_settings_status.FontSize = 12
-        self.txt_settings_status.Foreground = brush("#888888")
-        self.txt_settings_status.VerticalAlignment = VerticalAlignment.Center
-        WPFGrid.SetColumn(self.txt_settings_status, 0)
-        status_bar.Children.Add(self.txt_settings_status)
-
-        btn_group = StackPanel()
-        btn_group.Orientation = Orientation.Horizontal
-
-        self.btn_reset_thresholds = Button()
-        self.btn_reset_thresholds.Content = u"↺ Reset to Defaults"
-        self.btn_reset_thresholds.Background = brush("#FFFFFF")
-        self.btn_reset_thresholds.Foreground = brush(DQT_TEXT_DARK)
-        self.btn_reset_thresholds.Padding = Thickness(12, 8, 12, 8)
-        self.btn_reset_thresholds.BorderBrush = brush(DQT_PRIMARY_DARK)
-        self.btn_reset_thresholds.BorderThickness = Thickness(1)
-        self.btn_reset_thresholds.Margin = Thickness(0, 0, 8, 0)
-        self.btn_reset_thresholds.Cursor = Cursors.Hand
-        self.btn_reset_thresholds.Click += self._on_reset_thresholds
-        btn_group.Children.Add(self.btn_reset_thresholds)
-
-        self.btn_save_thresholds = Button()
-        self.btn_save_thresholds.Content = "Save & Apply"
-        self.btn_save_thresholds.Background = brush(DQT_PRIMARY)
-        self.btn_save_thresholds.Foreground = brush(DQT_TEXT_DARK)
-        self.btn_save_thresholds.FontWeight = FontWeights.SemiBold
-        self.btn_save_thresholds.Padding = Thickness(16, 8, 16, 8)
-        self.btn_save_thresholds.BorderBrush = brush(DQT_PRIMARY_DARK)
-        self.btn_save_thresholds.BorderThickness = Thickness(1)
-        self.btn_save_thresholds.Cursor = Cursors.Hand
-        self.btn_save_thresholds.Click += self._on_save_thresholds
-        btn_group.Children.Add(self.btn_save_thresholds)
-
-        WPFGrid.SetColumn(btn_group, 1)
-        status_bar.Children.Add(btn_group)
-
-        WPFGrid.SetRow(status_bar, 2)
-        outer.Children.Add(status_bar)
-
-        return outer
-
-    def _on_save_thresholds(self, sender, args):
-        """Validate every row, then apply + persist in one all-or-nothing
-        step - a bad value in one metric must never silently save the
-        other 11 while leaving that one row's edit lost."""
-        new_values = {}
-        for key, refs in self._threshold_boxes.items():
-            label = METRIC_THRESHOLDS[key]["label"]
-            try:
-                t = [_parse_threshold_number(tb.Text) for tb in refs["boxes"]]
-            except ValueError as ex:
-                MessageBox.Show(
-                    u"{}: {}".format(label, ex),
-                    "Invalid Value", MessageBoxButton.OK, MessageBoxImage.Warning)
-                return
-            if not _valid_thresholds_list(t):
-                MessageBox.Show(
-                    u"{}: the Amber value cannot be smaller than the Green "
-                    u"value\n(Green ≤ Amber).".format(label),
-                    "Invalid Thresholds", MessageBoxButton.OK, MessageBoxImage.Warning)
-                return
-            w_text = (refs["weight_box"].Text or "").strip()
-            try:
-                w = int(w_text)
-                is_int = float(w_text) == w
-            except Exception:
-                is_int = False
-            if not is_int or not (1 <= w <= 5):
-                MessageBox.Show(
-                    u"{}: Weight must be a whole number from 1 to 5.".format(label),
-                    "Invalid Weight", MessageBoxButton.OK, MessageBoxImage.Warning)
-                return
-            new_values[key] = (t, w)
-
-        for key, (t, w) in new_values.items():
-            METRIC_THRESHOLDS[key]["thresholds"] = t
-            METRIC_THRESHOLDS[key]["weight"] = w
-        _save_threshold_overrides()
-
-        # Re-score/re-render from the metrics already collected - no need
-        # to re-query Revit, only the grading policy changed.
-        if self.metrics:
-            self._update_score()
-            self._build_heatmap()
-            self._build_recommendations()
-        self._build_links_table()
-
-        self.txt_settings_status.Text = "Saved and applied at {}.".format(
-            datetime.datetime.now().strftime("%H:%M:%S"))
-        self.tabs.SelectedItem = self.tab_dashboard
-
-    def _on_reset_thresholds(self, sender, args):
-        result = MessageBox.Show(
-            "Reset every metric's thresholds and weight to the built-in "
-            "defaults?\n\nThis also deletes the saved settings file.",
-            "Reset to Defaults", MessageBoxButton.YesNo, MessageBoxImage.Question)
-        if result != MessageBoxResult.Yes:
-            return
-
-        _reset_threshold_overrides()
-        for key, refs in self._threshold_boxes.items():
-            cfg = METRIC_THRESHOLDS[key]
-            for ci, tb in enumerate(refs["boxes"]):
-                tb.Text = str(cfg["thresholds"][ci])
-            refs["weight_box"].Text = str(cfg.get("weight", 1))
-
-        if self.metrics:
-            self._update_score()
-            self._build_heatmap()
-            self._build_recommendations()
-        self._build_links_table()
-
-        self.txt_settings_status.Text = "Reset to built-in defaults."
-
-    # ---- LINKED MODELS TAB: one row per linked file ----
-    LINK_COLUMNS = [(u"LINKED MODEL", 300), (u"INSTANCES", 80),
-                    (u"STATUS", 95), (u"OVERALL", 190), (u"SCORE", 65),
-                    (u"RED", 50), (u"AMBER", 60), (u"NEEDS ATTENTION", 340),
-                    (u"DASHBOARD", 95)]
-
-    def _make_links_tab(self):
-        outer = WPFGrid()
-        outer.Margin = Thickness(14)
-        for h in [GridLength(1, GridUnitType.Auto),   # intro
-                  GridLength(1, GridUnitType.Star),   # table
-                  GridLength(1, GridUnitType.Auto)]:  # action bar
-            rd = RowDefinition()
-            rd.Height = h
-            outer.RowDefinitions.Add(rd)
-
-        intro = Border()
-        intro.Background = brush(DQT_PRIMARY)
-        intro.CornerRadius = WinCornerRadius(6)
-        intro.Padding = Thickness(16, 12, 16, 12)
-        intro.Margin = Thickness(0, 0, 0, 10)
-        intro_txt = TextBlock()
-        intro_txt.Text = (
-            u"Every Revit link in this model - one row per linked file - "
-            u"checked with the same 12 metrics and thresholds as the "
-            u"Dashboard. \u201cAnalyze Linked Models\u201d reads each "
-            u"loaded link, which can take a while when there are many. A "
-            u"link that is not loaded cannot be read: reload it in Manage "
-            u"Links first. \u201cOpen\u201d shows a link's full dashboard.")
-        intro_txt.FontSize = 13
-        intro_txt.TextWrapping = TextWrapping.Wrap
-        intro_txt.Foreground = brush(DQT_TEXT_DARK)
-        intro.Child = intro_txt
-        WPFGrid.SetRow(intro, 0)
-        outer.Children.Add(intro)
-
-        table_border = Border()
-        table_border.Background = brush("#FFFFFF")
-        table_border.BorderBrush = brush(DQT_BORDER)
-        table_border.BorderThickness = Thickness(1)
-        table_border.CornerRadius = WinCornerRadius(6)
-        table_border.Margin = Thickness(0, 0, 0, 10)
-        sv = ScrollViewer()
-        sv.VerticalScrollBarVisibility = ScrollBarVisibility.Auto
-        sv.HorizontalScrollBarVisibility = ScrollBarVisibility.Auto
-        self.links_stack = StackPanel()
-        sv.Content = self.links_stack
-        table_border.Child = sv
-        WPFGrid.SetRow(table_border, 1)
-        outer.Children.Add(table_border)
-
-        bar = WPFGrid()
-        c1 = ColumnDefinition()
-        c1.Width = GridLength(1, GridUnitType.Star)
-        c2 = ColumnDefinition()
-        c2.Width = GridLength(1, GridUnitType.Auto)
-        bar.ColumnDefinitions.Add(c1)
-        bar.ColumnDefinitions.Add(c2)
-        self.txt_links_status = TextBlock()
-        self.txt_links_status.FontSize = 12
-        self.txt_links_status.Foreground = brush("#888888")
-        self.txt_links_status.VerticalAlignment = VerticalAlignment.Center
-        WPFGrid.SetColumn(self.txt_links_status, 0)
-        bar.Children.Add(self.txt_links_status)
-
-        self.btn_analyze_links = Button()
-        self.btn_analyze_links.Content = u"\u27F3 Analyze Linked Models"
-        self.btn_analyze_links.Background = brush(DQT_PRIMARY)
-        self.btn_analyze_links.Foreground = brush(DQT_TEXT_DARK)
-        self.btn_analyze_links.FontWeight = FontWeights.SemiBold
-        self.btn_analyze_links.Padding = Thickness(16, 8, 16, 8)
-        self.btn_analyze_links.BorderBrush = brush(DQT_PRIMARY_DARK)
-        self.btn_analyze_links.BorderThickness = Thickness(1)
-        self.btn_analyze_links.Cursor = Cursors.Hand
-        self.btn_analyze_links.IsEnabled = any(m.loaded for m in self.linked_models)
-        self.btn_analyze_links.Click += self._on_analyze_links
-        WPFGrid.SetColumn(self.btn_analyze_links, 1)
-        bar.Children.Add(self.btn_analyze_links)
-        WPFGrid.SetRow(bar, 2)
-        outer.Children.Add(bar)
-
-        loaded = sum(1 for m in self.linked_models if m.loaded)
-        self.txt_links_status.Text = "{} linked file(s), {} loaded.".format(
-            len(self.linked_models), loaded)
-        self._build_links_table()
-        return outer
-
-    def _link_cell(self, table, row, col, text, background, foreground=DQT_TEXT,
-                   bold=False, center=False):
-        b = Border()
-        b.Background = brush(background)
-        b.BorderBrush = brush("#E8E0D0")
-        b.BorderThickness = Thickness(0, 0, 1, 1)
-        b.Padding = Thickness(10, 6, 10, 6)
-        t = TextBlock()
-        t.Text = text
-        t.FontSize = 12
-        t.Foreground = brush(foreground)
-        t.VerticalAlignment = VerticalAlignment.Center
-        t.TextWrapping = TextWrapping.Wrap
-        if bold:
-            t.FontWeight = FontWeights.SemiBold
-        if center:
-            t.HorizontalAlignment = HorizontalAlignment.Center
-        b.Child = t
-        WPFGrid.SetRow(b, row)
-        WPFGrid.SetColumn(b, col)
-        table.Children.Add(b)
-        return b
-
-    def _build_links_table(self):
-        """(Re)draw the Linked Models table from self.linked_models - called
-        after an analysis and whenever the thresholds change."""
-        if self.links_stack is None:
-            return
-        self.links_stack.Children.Clear()
-        if not self.linked_models:
-            none = TextBlock()
-            none.Text = "This model has no Revit links."
-            none.FontSize = 13
-            none.Foreground = brush("#888888")
-            none.Margin = Thickness(14)
-            self.links_stack.Children.Add(none)
-            return
-
-        table = WPFGrid()
-        for _, width in self.LINK_COLUMNS:
-            cd = ColumnDefinition()
-            cd.Width = GridLength(width)
-            table.ColumnDefinitions.Add(cd)
-        rd = RowDefinition()
-        rd.Height = GridLength(36)
-        table.RowDefinitions.Add(rd)
-        for ci, (title, _) in enumerate(self.LINK_COLUMNS):
-            cell = self._link_cell(table, 0, ci, title, DQT_PRIMARY,
-                                   DQT_TEXT_DARK, bold=True)
-            cell.BorderBrush = brush(DQT_PRIMARY_DARK)
-            cell.BorderThickness = Thickness(0, 0, 1, 2)
-
-        for index, model in enumerate(self.linked_models):
-            r = index + 1
-            rd = RowDefinition()
-            rd.Height = GridLength(1, GridUnitType.Auto)
-            rd.MinHeight = 40
-            table.RowDefinitions.Add(rd)
-            row = link_row(model)
-            bg = "#FFFFFF" if r % 2 == 0 else "#FAF8F0"
-            self._link_cell(table, r, 0, row["name"], bg, bold=True)
-            self._link_cell(table, r, 1, str(row["instances"]), bg, center=True)
-            self._link_cell(table, r, 2, row["status"], bg,
-                            DQT_TEXT if model.loaded else HEALTH_RED)
-            self._link_cell(table, r, 3, row["overall"], row["color"] or bg,
-                            row["text_color"], bold=row["color"] is not None,
-                            center=True)
-            self._link_cell(table, r, 4, row["score"], bg, center=True)
-            self._link_cell(table, r, 5, row["red"], bg,
-                            HEALTH_RED if row["red"] not in ("-", "0") else DQT_TEXT,
-                            center=True)
-            self._link_cell(table, r, 6, row["amber"], bg,
-                            "#B07800" if row["amber"] not in ("-", "0") else DQT_TEXT,
-                            center=True)
-            self._link_cell(table, r, 7, row["note"], bg, "#666666")
-
-            action = Border()
-            action.Background = brush(bg)
-            action.BorderBrush = brush("#E8E0D0")
-            action.BorderThickness = Thickness(0, 0, 0, 1)
-            action.Padding = Thickness(4)
-            btn = Button()
-            btn.Content = u"Open \u25B8"
-            btn.FontSize = 11
-            btn.Padding = Thickness(10, 4, 10, 4)
-            btn.Background = brush("#FFFFFF")
-            btn.Foreground = brush(DQT_TEXT_DARK)
-            btn.BorderBrush = brush(DQT_PRIMARY_DARK)
-            btn.BorderThickness = Thickness(1)
-            btn.Cursor = Cursors.Hand
-            btn.HorizontalAlignment = HorizontalAlignment.Center
-            btn.VerticalAlignment = VerticalAlignment.Center
-            btn.IsEnabled = model.loaded
-            btn.Tag = index
-            btn.Click += self._on_open_link
-            action.Child = btn
-            WPFGrid.SetRow(action, r)
-            WPFGrid.SetColumn(action, 8)
-            table.Children.Add(action)
-
-        self.links_stack.Children.Add(table)
-
-    def _on_analyze_links(self, sender, args):
-        for model in self.linked_models:
-            analyze_linked_model(model)
-        self._build_links_table()
-        analyzed = sum(1 for m in self.linked_models if m.metrics is not None)
-        not_loaded = sum(1 for m in self.linked_models if not m.loaded)
-        failed = sum(1 for m in self.linked_models if m.error)
-        text = "Analyzed {} linked model(s) at {}.".format(
-            analyzed, datetime.datetime.now().strftime("%H:%M:%S"))
-        if not_loaded:
-            text += " {} not loaded.".format(not_loaded)
-        if failed:
-            text += " {} could not be read.".format(failed)
-        self.txt_links_status.Text = text
-
-    def _on_open_link(self, sender, args):
-        try:
-            model = self.linked_models[int(sender.Tag)]
-        except Exception:
-            return
-        if not model.loaded:
-            return
-        try:
-            ModelHealthWindow(model.doc, self.uidoc, link_name=model.name).ShowDialog()
-        except Exception as ex:
-            MessageBox.Show("Could not open the linked model's dashboard:\n{}".format(ex),
-                            "Linked Models", MessageBoxButton.OK, MessageBoxImage.Error)
-
-    # ---- HEADER ----
     def _make_header(self):
         border = Border()
         border.Background = brush(DQT_PRIMARY)
@@ -1703,7 +1455,6 @@ class ModelHealthWindow(Window):
         border.Child = g
         return border
 
-    # ---- SCORE CARD WITH GAUGE ----
     def _make_score_card(self):
         border = Border()
         border.Background = brush("#FFFFFF")
@@ -1835,7 +1586,6 @@ class ModelHealthWindow(Window):
         border.Child = g
         return border
 
-    # ---- LEGEND ----
     def _make_legend(self):
         border = Border()
         border.Background = brush("#FFFFFF")
@@ -1870,7 +1620,6 @@ class ModelHealthWindow(Window):
         border.Child = sp
         return border
 
-    # ---- FOOTER ----
     def _make_footer(self):
         border = Border()
         border.Background = brush(DQT_PRIMARY)
@@ -1887,7 +1636,10 @@ class ModelHealthWindow(Window):
     # ----------------------------------------------------------
     # ANALYSIS
     # ----------------------------------------------------------
-    def _run_analysis(self):
+    def run_analysis(self):
+        """Run the 12 metrics; a failure is kept in self.error (and on the
+        linked model, for the Overview) rather than raised."""
+        self.error = None
         try:
             proj = self.doc.ProjectInformation
             proj_name = proj.Name if proj else "Untitled"
@@ -1900,14 +1652,26 @@ class ModelHealthWindow(Window):
             self.analyzer = ModelHealthAnalyzer(self.doc)
             self.metrics = self.analyzer.analyze()
 
-            self._update_score()
-            self._build_heatmap()
-            self._build_recommendations()
-
+            self.regrade()
             self.txt_date.Text = "Last analyzed: {}".format(
                 datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
         except Exception as ex:
-            self.txt_score_label.Text = "Error: " + str(ex)
+            self.metrics = OrderedDict()
+            self.error = str(ex) or ex.__class__.__name__
+            self.txt_score_label.Text = "Error: " + self.error
+        if self.linked_model is not None:
+            self.linked_model.metrics = self.metrics if not self.error else None
+            self.linked_model.error = self.error
+        return self
+
+    def regrade(self):
+        """Re-score and re-draw from the metrics already collected - after
+        an analysis, or when the thresholds change."""
+        if not self.metrics:
+            return
+        self._update_score()
+        self._build_heatmap()
+        self._build_recommendations()
 
     def _update_score(self):
         score = get_health_score(self.metrics)
@@ -2297,7 +2061,7 @@ class ModelHealthWindow(Window):
             id_list = List[ElementId]()
             for eid in ids:
                 id_list.Add(eid)
-            self.Close()
+            self.window.Close()
             self.uidoc.Selection.SetElementIds(id_list)
             try:
                 if id_list.Count > 0:
@@ -2312,157 +2076,768 @@ class ModelHealthWindow(Window):
     # EVENTS
     # ----------------------------------------------------------
     def _on_help(self, sender, args):
-        if _open_help_page("model_health_check.html"):
-            return
-        MessageBox.Show(
-            "Model Health Check\n\n"
-            "Analyzes the model against 12 metrics and combines them into "
-            "one weighted score. The metrics are listed by their impact on "
-            "model performance and stability:\n"
-            "  Critical: Warnings, CAD Imports, File Size, In-Place Families\n"
-            "  High: Duplicate Elements, CAD Links, RVT Links\n"
-            "  Moderate: Imported Images, Model Groups, Design Options\n"
-            "  Low: Unplaced Rooms, Unpinned Links\n\n"
-            "HEALTH SCALE (RAG)\n"
-            "  Green - healthy, meeting expectations\n"
-            "  Amber - needs attention, improvement recommended\n"
-            "  Red - action required, high risk or major impact\n"
-            "  Every metric, and the model as a whole, is graded on this "
-            "scale.\n\n"
-            "WORKFLOW\n"
-            "  Re-Analyze re-runs all metrics against the current model.\n"
-            "  Each row in the recommendations list can Select Elements to "
-            "select the offending elements straight in Revit.\n"
-            "  Export Report saves the dashboard as a report file.\n\n"
-            "LINKED MODELS TAB\n"
-            "  One row per Revit link. Analyze Linked Models checks every "
-            "loaded link with the same metrics and thresholds; Open shows "
-            "a link's full dashboard (read-only). A link that is not loaded "
-            "must be reloaded in Manage Links first. A cloud model's file "
-            "size cannot be measured and shows N/A.\n\n"
-            "SETTINGS TAB\n"
-            "  Edit each metric's Green and Amber values and weight (1-5) "
-            "before running an analysis. Save & Apply writes them to "
-            "threshold_config.json next to this tool and re-scores the "
-            "dashboard immediately; Reset to Defaults restores the "
-            "built-in values and deletes that file.",
-            "Model Health Check - Help",
-            MessageBoxButton.OK, MessageBoxImage.Information)
+        show_help()
 
     def _on_refresh(self, sender, args):
-        self._run_analysis()
+        self.run_analysis()
+        self.window.refresh_overview()
 
-    def _links_report_html(self):
-        """The report's Linked Models section - empty for a linked model's
-        own report, or when the model has no links."""
-        if self.is_link or not self.linked_models:
-            return ""
-        if not any(m.metrics is not None or m.error for m in self.linked_models):
-            return ('<div class="rec-box"><h3>LINKED MODELS</h3>'
-                    '<div style="color:#888;">{} linked file(s) - not analyzed. Use '
-                    'Linked Models &gt; Analyze Linked Models before exporting to '
-                    'include them.</div></div>').format(len(self.linked_models))
-        rows = ""
-        for i, model in enumerate(self.linked_models):
+    def _on_export(self, sender, args):
+        self.window.export_report()
+
+    # ----------------------------------------------------------
+    # REPORT
+    # ----------------------------------------------------------
+    def report_section_html(self):
+        """This model's part of the report: score card, metrics table and
+        recommendations - or a line saying why it could not be read."""
+        if self.error or not self.metrics:
+            return (u'<div class="model"><h2 class="model-title">{}: {}</h2>'
+                    u'<div class="rec-box">Could not be read: {}</div></div>').format(
+                        self.kind, _html(self.title), _html(self.error or "not analyzed"))
+        score = get_health_score(self.metrics)
+        grade, label, grade_color = get_overall_status(score)
+        counts = count_statuses(self.metrics)
+
+        # Build metric rows HTML - priority order, one header per impact tier
+        rows_html = ""
+        i = 0
+        for tier, items in metrics_by_impact(self.metrics):
+            rows_html += """
+              <tr class="tier"><td colspan="4"><strong>{name} IMPACT</strong> &nbsp;-&nbsp; {desc}</td></tr>""".format(
+                name=tier.upper(), desc=IMPACT_TIERS[tier]["description"])
+            for number, key in items:
+                value = self.metrics[key]
+                config = METRIC_THRESHOLDS[key]
+                h_color = get_health_color(key, value)
+                text_color = get_text_color(key, value)
+                thresholds = config["thresholds"]
+                status = get_status_text(key, value)
+                weight = config.get("weight", 1)
+                weight_stars = "&#9733;" * weight + "&#9734;" * (5 - weight)
+                val_str = format_value(key, value)
+                row_bg = "#FFFFFF" if i % 2 == 0 else "#FAF8F0"
+                i += 1
+            
+                # Bar width as a percentage of the bar's scale
+                max_t = bar_scale(thresholds)
+                bar_pct = min(value / max_t * 100, 100) if value is not None and value > 0 else 0
+                empty_pct = 100 - bar_pct
+            
+                rows_html += """
+                <tr style="background:{bg};">
+                    <td style="padding:8px 10px;font-weight:600;border-bottom:1px solid #E8E0D0;">{label}</td>
+                    <td style="padding:8px;text-align:center;background:{color};color:{tcolor};font-weight:700;border-bottom:1px solid #E8E0D0;">{val}</td>
+                    <td style="padding:8px 10px;border-bottom:1px solid #E8E0D0;">
+                        <table style="width:100%;border-collapse:collapse;height:14px;table-layout:fixed;"><tr>
+                            <td style="width:{pct}%;background:{color};border-radius:3px 0 0 3px;height:14px;padding:0;"></td>
+                            <td style="width:{epct}%;background:#E0DDD5;border-radius:0 3px 3px 0;height:14px;padding:0;"></td>
+                        </tr></table>
+                    </td>
+                    <td style="padding:6px 10px;border-bottom:1px solid #E8E0D0;">
+                        <div style="color:{scolor};font-weight:600;font-size:11px;">Status: {status} - {meaning}</div>
+                        <div style="color:#888;font-size:9px;">Impact: {impact} &nbsp;|&nbsp; Weight: {stars} ({w}/5)</div>
+                        <div style="color:#AAA;font-size:8px;">{thresholds}</div>
+                    </td>
+                </tr>""".format(
+                    bg=row_bg, label="{}. {}".format(number, config["label"]), color=h_color,
+                    tcolor=text_color, val=val_str,
+                    pct=round(bar_pct, 1), epct=round(empty_pct, 1),
+                    scolor=status_text_color(status),
+                    status=status, meaning=get_status_meaning(status),
+                    impact=config.get("impact", ""), stars=weight_stars, w=weight,
+                    thresholds=thresholds_text(thresholds).replace(u"\u2264", "&le;").replace(">", "&gt;"))
+        
+        # Build recommendations HTML - Amber and Red, in priority order
+        rec_html = ""
+        rec_keys = recommended_keys(self.metrics)
+        for key in rec_keys:
+            value = self.metrics[key]
+            h_color = get_health_color(key, value)
+            metric_label = METRIC_THRESHOLDS[key]["label"]
+            rec = RECOMMENDATIONS.get(key, "Review and optimize.")
+            rec_html += '<div style="margin:4px 0;"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:{};margin-right:8px;vertical-align:middle;"></span><strong>{} ({}) - {}:</strong> <span style="color:#666;">{}</span></div>'.format(
+                h_color, metric_label, value, get_status_text(key, value), rec)
+        if not rec_keys:
+            rec_html = '<div style="color:#4CAF50;font-weight:600;">All metrics are Green. No action required.</div>'
+
+        return u"""
+    <div class="model">
+    <h2 class="model-title">{kind}: {title}</h2>
+    <div class="score-card">
+        <div class="gauge" style="background:{grade_color};">
+            <div class="grade" style="color:{grade_text};">{grade}</div>
+            <div class="num" style="color:{grade_text};">{score}</div>
+        </div>
+        <div class="score-text">
+            <h3>Model Health: {grade} - {label}</h3>
+            <div class="summary">{summary}</div>
+            <div class="counts">{counts}</div>
+            <div class="counts">{project}</div>
+        </div>
+        <div style="clear:both;"></div>
+    </div>
+
+    <table>
+        <tr>
+            <th style="width:160px;">METRIC</th>
+            <th style="width:70px;text-align:center;">VALUE</th>
+            <th style="width:250px;">HEALTH INDICATOR</th>
+            <th>STATUS</th>
+        </tr>
+        {rows}
+    </table>
+
+    <div class="rec-box">
+        <h3>RECOMMENDATIONS</h3>
+        {recs}
+    </div>
+    </div>""".format(
+            kind=self.kind, title=_html(self.title),
+            grade_color=grade_color, grade_text=RAG_TEXT_COLORS[grade],
+            grade=grade, score=score, label=label,
+            summary=status_summary(counts), counts=counts_text(counts),
+            project=_html(self.txt_project.Text), rows=rows_html, recs=rec_html)
+
+
+# ============================================================
+# WPF WINDOW - Overview, one dashboard tab per model, Settings
+# ============================================================
+class ModelHealthWindow(Window):
+    def __init__(self, doc, uidoc, linked_models=None):
+        """The open model and the linked models ticked at start
+        (LinkedModel.selected) are all analysed up front and shown at once:
+        an Overview tab, one dashboard tab per model, and Settings."""
+        self.doc = doc
+        self.uidoc = uidoc
+        self.linked_models = (collect_linked_models(doc) if linked_models is None
+                              else linked_models)
+        self.overview_stack = None
+
+        self.Title = "Model Health Check v2.2 - DQT"
+        self.Height = 900
+        self.Width = 1400
+        self.MinHeight = 700
+        self.MinWidth = 1100
+        self.WindowStartupLocation = WindowStartupLocation.CenterScreen
+        self.Background = brush(DQT_BACKGROUND)
+
+        self.dashboards = [ModelDashboard(self, doc)]
+        for model in self.linked_models:
+            if model.loaded and model.selected:
+                self.dashboards.append(ModelDashboard(self, model.doc, model))
+
+        self._build_ui()
+        for dashboard in self.dashboards:
+            dashboard.run_analysis()
+        self.refresh_overview()
+        self.tabs.SelectedItem = self.home_tab
+
+    @property
+    def host(self):
+        return self.dashboards[0]
+
+    @property
+    def home_tab(self):
+        """The tab to land on: the Overview when several models were
+        checked, else the open model's dashboard straight away."""
+        return self.tab_overview if len(self.dashboards) > 1 else self.host.tab
+
+    def _build_ui(self):
+        self.tabs = WPFControls.TabControl()
+        self.tabs.Background = brush(DQT_BACKGROUND)
+        self.tabs.BorderThickness = Thickness(0)
+
+        self.tab_overview = WPFControls.TabItem()
+        self.tab_overview.Header = self._make_tab_header(u"Overview")
+        self.tab_overview.Content = self._make_overview_tab()
+        self.tabs.Items.Add(self.tab_overview)
+
+        for dashboard in self.dashboards:
+            tab = WPFControls.TabItem()
+            tab.Content = dashboard.root
+            dashboard.tab = tab
+            self.tabs.Items.Add(tab)
+        self._refresh_tab_headers()
+
+        self.tab_settings = WPFControls.TabItem()
+        self.tab_settings.Header = self._make_tab_header(u"\u2699 Settings")
+        self.tab_settings.Content = self._make_settings_tab()
+        self.tabs.Items.Add(self.tab_settings)
+
+        self.Content = self.tabs
+
+    def _make_tab_header(self, text):
+        tb = TextBlock()
+        tb.Text = text
+        tb.FontSize = 13
+        tb.FontWeight = FontWeights.SemiBold
+        tb.Foreground = brush(DQT_TEXT_DARK)
+        tb.Padding = Thickness(8, 3, 8, 3)
+        return tb
+
+    def _dashboard_tab_header(self, dashboard):
+        """A coloured dot (the model's overall result, grey until graded)
+        and the model's name, shortened - the full name is the tooltip."""
+        sp = StackPanel()
+        sp.Orientation = Orientation.Horizontal
+        dot = Border()
+        dot.Width = 10
+        dot.Height = 10
+        dot.CornerRadius = WinCornerRadius(5)
+        dot.Margin = Thickness(6, 0, 0, 0)
+        dot.VerticalAlignment = VerticalAlignment.Center
+        color = NA_COLOR
+        if dashboard.metrics and not dashboard.error:
+            color = get_overall_status(get_health_score(dashboard.metrics))[2]
+        elif dashboard.error:
+            color = "#888888"
+        dot.Background = brush(color)
+        sp.Children.Add(dot)
+        prefix = u"" if dashboard.is_link else u"Open model: "
+        text = self._make_tab_header(prefix + short_name(dashboard.title))
+        sp.Children.Add(text)
+        sp.ToolTip = u"{}: {}".format(dashboard.kind, dashboard.title)
+        return sp
+
+    def _refresh_tab_headers(self):
+        for dashboard in self.dashboards:
+            if dashboard.tab is not None:
+                dashboard.tab.Header = self._dashboard_tab_header(dashboard)
+
+    def regrade_all(self):
+        """Thresholds changed: re-score every dashboard and the Overview."""
+        for dashboard in self.dashboards:
+            dashboard.regrade()
+        self.refresh_overview()
+
+    def _make_settings_tab(self):
+        outer = WPFGrid()
+        outer.Margin = Thickness(14)
+        for h in [GridLength(1, GridUnitType.Auto),   # intro
+                  GridLength(1, GridUnitType.Star),   # table
+                  GridLength(1, GridUnitType.Auto)]:  # save bar
+            rd = RowDefinition()
+            rd.Height = h
+            outer.RowDefinitions.Add(rd)
+
+        intro = Border()
+        intro.Background = brush(DQT_PRIMARY)
+        intro.CornerRadius = WinCornerRadius(6)
+        intro.Padding = Thickness(16, 12, 16, 12)
+        intro.Margin = Thickness(0, 0, 0, 10)
+        intro_txt = TextBlock()
+        intro_txt.Text = (
+            u"Set the thresholds and weight used to grade each metric, "
+            u"then “Save & Apply” before running Re-Analyze. "
+            u"Each metric is Green up to its Green value, Amber up to its "
+            u"Amber value, and Red above that. Weight (1-5) is how much "
+            u"the metric counts toward the overall weighted score; by "
+            u"default it follows the metric's impact (Critical 5, High 4, "
+            u"Moderate 3, Low 2). Metrics are listed by impact, most "
+            u"impact first. The same values grade every checked model.")
+        intro_txt.FontSize = 13
+        intro_txt.TextWrapping = TextWrapping.Wrap
+        intro_txt.Foreground = brush(DQT_TEXT_DARK)
+        intro.Child = intro_txt
+        WPFGrid.SetRow(intro, 0)
+        outer.Children.Add(intro)
+
+        table_border = Border()
+        table_border.Background = brush("#FFFFFF")
+        table_border.BorderBrush = brush(DQT_BORDER)
+        table_border.BorderThickness = Thickness(1)
+        table_border.CornerRadius = WinCornerRadius(6)
+        table_border.Margin = Thickness(0, 0, 0, 10)
+        sv = ScrollViewer()
+        sv.VerticalScrollBarVisibility = ScrollBarVisibility.Auto
+        sv.HorizontalScrollBarVisibility = ScrollBarVisibility.Auto
+
+        # Column widths and cell padding/margins sized for FontSize 13 -
+        # the same size the Dashboard's heatmap uses for its own row
+        # content (metric label / value), so the two tabs read as one
+        # consistent tool rather than Settings looking like a squeezed-in
+        # afterthought.
+        table = WPFGrid()
+        table.Margin = Thickness(10)
+        col_widths = [230, 110, 120, 120, 120]
+        for w in col_widths:
+            cd = ColumnDefinition()
+            cd.Width = GridLength(w)
+            table.ColumnDefinitions.Add(cd)
+
+        headers = [u"Metric", u"Impact", u"Green ≤", u"Amber ≤",
+                   u"Weight (1-5)"]
+        header_row = RowDefinition()
+        header_row.Height = GridLength(1, GridUnitType.Auto)
+        table.RowDefinitions.Add(header_row)
+        for ci, htext in enumerate(headers):
+            htb = TextBlock()
+            htb.Text = htext
+            htb.FontSize = 13
+            htb.FontWeight = FontWeights.Bold
+            htb.Foreground = brush(DQT_TEXT_DARK)
+            htb.Margin = Thickness(6, 8, 6, 8)
+            htb.TextWrapping = TextWrapping.Wrap
+            WPFGrid.SetRow(htb, 0)
+            WPFGrid.SetColumn(htb, ci)
+            table.Children.Add(htb)
+
+        self._threshold_boxes = OrderedDict()
+        row_i = 1
+        for key, cfg in METRIC_THRESHOLDS.items():
+            rd = RowDefinition()
+            rd.Height = GridLength(1, GridUnitType.Auto)
+            table.RowDefinitions.Add(rd)
+            row_bg = brush("#FAF6EC") if row_i % 2 == 0 else brush("#FFFFFF")
+
+            lbl = TextBlock()
+            lbl.Text = cfg["label"]
+            lbl.FontSize = 13
+            lbl.FontWeight = FontWeights.SemiBold
+            lbl.Foreground = brush(DQT_TEXT)
+            lbl.VerticalAlignment = VerticalAlignment.Center
+            lbl.Margin = Thickness(6, 6, 6, 6)
+            lbl.Background = row_bg
+            tip = cfg.get("tooltip", "")
+            if tip:
+                lbl.ToolTip = tip
+            WPFGrid.SetRow(lbl, row_i)
+            WPFGrid.SetColumn(lbl, 0)
+            table.Children.Add(lbl)
+
+            impact = cfg.get("impact", "")
+            itb = TextBlock()
+            itb.Text = impact
+            itb.FontSize = 13
+            itb.Foreground = brush(DQT_TEXT_DARK)
+            itb.VerticalAlignment = VerticalAlignment.Center
+            itb.Margin = Thickness(6, 6, 6, 6)
+            itb.ToolTip = IMPACT_TIERS.get(impact, {}).get("description", "")
+            WPFGrid.SetRow(itb, row_i)
+            WPFGrid.SetColumn(itb, 1)
+            table.Children.Add(itb)
+
+            boxes = []
+            for ci in range(2):
+                tb = WPFControls.TextBox()
+                tb.Text = str(cfg["thresholds"][ci])
+                tb.FontSize = 13
+                tb.Padding = Thickness(6, 5, 6, 5)
+                tb.Margin = Thickness(4, 4, 4, 4)
+                tb.HorizontalContentAlignment = HorizontalAlignment.Center
+                tb.BorderBrush = brush(DQT_BORDER)
+                tb.Background = brush("#FFFFFF")
+                WPFGrid.SetRow(tb, row_i)
+                WPFGrid.SetColumn(tb, ci + 2)
+                table.Children.Add(tb)
+                boxes.append(tb)
+
+            wtb = WPFControls.TextBox()
+            wtb.Text = str(cfg.get("weight", 1))
+            wtb.FontSize = 13
+            wtb.Padding = Thickness(6, 5, 6, 5)
+            wtb.Margin = Thickness(4, 4, 4, 4)
+            wtb.HorizontalContentAlignment = HorizontalAlignment.Center
+            wtb.BorderBrush = brush(DQT_BORDER)
+            wtb.Background = brush("#FFFFFF")
+            WPFGrid.SetRow(wtb, row_i)
+            WPFGrid.SetColumn(wtb, 4)
+            table.Children.Add(wtb)
+
+            self._threshold_boxes[key] = {"boxes": boxes, "weight_box": wtb}
+            row_i += 1
+
+        sv.Content = table
+        table_border.Child = sv
+        WPFGrid.SetRow(table_border, 1)
+        outer.Children.Add(table_border)
+
+        # Save bar: status text (left) + Reset/Save buttons (right)
+        status_bar = WPFGrid()
+        c1 = ColumnDefinition()
+        c1.Width = GridLength(1, GridUnitType.Star)
+        c2 = ColumnDefinition()
+        c2.Width = GridLength(1, GridUnitType.Auto)
+        status_bar.ColumnDefinitions.Add(c1)
+        status_bar.ColumnDefinitions.Add(c2)
+
+        self.txt_settings_status = TextBlock()
+        self.txt_settings_status.FontSize = 12
+        self.txt_settings_status.Foreground = brush("#888888")
+        self.txt_settings_status.VerticalAlignment = VerticalAlignment.Center
+        WPFGrid.SetColumn(self.txt_settings_status, 0)
+        status_bar.Children.Add(self.txt_settings_status)
+
+        btn_group = StackPanel()
+        btn_group.Orientation = Orientation.Horizontal
+
+        self.btn_reset_thresholds = Button()
+        self.btn_reset_thresholds.Content = u"↺ Reset to Defaults"
+        self.btn_reset_thresholds.Background = brush("#FFFFFF")
+        self.btn_reset_thresholds.Foreground = brush(DQT_TEXT_DARK)
+        self.btn_reset_thresholds.Padding = Thickness(12, 8, 12, 8)
+        self.btn_reset_thresholds.BorderBrush = brush(DQT_PRIMARY_DARK)
+        self.btn_reset_thresholds.BorderThickness = Thickness(1)
+        self.btn_reset_thresholds.Margin = Thickness(0, 0, 8, 0)
+        self.btn_reset_thresholds.Cursor = Cursors.Hand
+        self.btn_reset_thresholds.Click += self._on_reset_thresholds
+        btn_group.Children.Add(self.btn_reset_thresholds)
+
+        self.btn_save_thresholds = Button()
+        self.btn_save_thresholds.Content = "Save & Apply"
+        self.btn_save_thresholds.Background = brush(DQT_PRIMARY)
+        self.btn_save_thresholds.Foreground = brush(DQT_TEXT_DARK)
+        self.btn_save_thresholds.FontWeight = FontWeights.SemiBold
+        self.btn_save_thresholds.Padding = Thickness(16, 8, 16, 8)
+        self.btn_save_thresholds.BorderBrush = brush(DQT_PRIMARY_DARK)
+        self.btn_save_thresholds.BorderThickness = Thickness(1)
+        self.btn_save_thresholds.Cursor = Cursors.Hand
+        self.btn_save_thresholds.Click += self._on_save_thresholds
+        btn_group.Children.Add(self.btn_save_thresholds)
+
+        WPFGrid.SetColumn(btn_group, 1)
+        status_bar.Children.Add(btn_group)
+
+        WPFGrid.SetRow(status_bar, 2)
+        outer.Children.Add(status_bar)
+
+        return outer
+
+    def _on_save_thresholds(self, sender, args):
+        """Validate every row, then apply + persist in one all-or-nothing
+        step - a bad value in one metric must never silently save the
+        other 11 while leaving that one row's edit lost."""
+        new_values = {}
+        for key, refs in self._threshold_boxes.items():
+            label = METRIC_THRESHOLDS[key]["label"]
+            try:
+                t = [_parse_threshold_number(tb.Text) for tb in refs["boxes"]]
+            except ValueError as ex:
+                MessageBox.Show(
+                    u"{}: {}".format(label, ex),
+                    "Invalid Value", MessageBoxButton.OK, MessageBoxImage.Warning)
+                return
+            if not _valid_thresholds_list(t):
+                MessageBox.Show(
+                    u"{}: the Amber value cannot be smaller than the Green "
+                    u"value\n(Green ≤ Amber).".format(label),
+                    "Invalid Thresholds", MessageBoxButton.OK, MessageBoxImage.Warning)
+                return
+            w_text = (refs["weight_box"].Text or "").strip()
+            try:
+                w = int(w_text)
+                is_int = float(w_text) == w
+            except Exception:
+                is_int = False
+            if not is_int or not (1 <= w <= 5):
+                MessageBox.Show(
+                    u"{}: Weight must be a whole number from 1 to 5.".format(label),
+                    "Invalid Weight", MessageBoxButton.OK, MessageBoxImage.Warning)
+                return
+            new_values[key] = (t, w)
+
+        for key, (t, w) in new_values.items():
+            METRIC_THRESHOLDS[key]["thresholds"] = t
+            METRIC_THRESHOLDS[key]["weight"] = w
+        _save_threshold_overrides()
+
+        # Re-score/re-render from the metrics already collected - no need
+        # to re-query Revit, only the grading policy changed.
+        self.regrade_all()
+
+        self.txt_settings_status.Text = "Saved and applied at {}.".format(
+            datetime.datetime.now().strftime("%H:%M:%S"))
+        self.tabs.SelectedItem = self.home_tab
+
+    def _on_reset_thresholds(self, sender, args):
+        result = MessageBox.Show(
+            "Reset every metric's thresholds and weight to the built-in "
+            "defaults?\n\nThis also deletes the saved settings file.",
+            "Reset to Defaults", MessageBoxButton.YesNo, MessageBoxImage.Question)
+        if result != MessageBoxResult.Yes:
+            return
+
+        _reset_threshold_overrides()
+        for key, refs in self._threshold_boxes.items():
+            cfg = METRIC_THRESHOLDS[key]
+            for ci, tb in enumerate(refs["boxes"]):
+                tb.Text = str(cfg["thresholds"][ci])
+            refs["weight_box"].Text = str(cfg.get("weight", 1))
+
+        self.regrade_all()
+
+        self.txt_settings_status.Text = "Reset to built-in defaults."
+
+    # ---- OVERVIEW TAB: every model in one table ----
+    OVERVIEW_COLUMNS = [(u"MODEL", 300), (u"TYPE", 105), (u"INSTANCES", 80),
+                        (u"STATUS", 105), (u"OVERALL", 190), (u"SCORE", 65),
+                        (u"RED", 50), (u"AMBER", 60), (u"NEEDS ATTENTION", 330),
+                        (u"DASHBOARD", 95)]
+
+    def _make_overview_tab(self):
+        outer = WPFGrid()
+        outer.Margin = Thickness(14)
+        for h in [GridLength(1, GridUnitType.Auto),   # intro
+                  GridLength(1, GridUnitType.Star),   # table
+                  GridLength(1, GridUnitType.Auto)]:  # action bar
+            rd = RowDefinition()
+            rd.Height = h
+            outer.RowDefinitions.Add(rd)
+
+        intro = Border()
+        intro.Background = brush(DQT_PRIMARY)
+        intro.CornerRadius = WinCornerRadius(6)
+        intro.Padding = Thickness(16, 12, 16, 12)
+        intro.Margin = Thickness(0, 0, 0, 10)
+        intro_txt = TextBlock()
+        intro_txt.Text = (
+            u"Every model of this check in one table: the open model and each "
+            u"linked model ticked at start, graded with the same 12 metrics and "
+            u"thresholds. Each one has its own dashboard tab - \u201cView\u201d "
+            u"opens it. Links that were not ticked, or are not loaded, are "
+            u"listed too; run the tool again to include them.")
+        intro_txt.FontSize = 13
+        intro_txt.TextWrapping = TextWrapping.Wrap
+        intro_txt.Foreground = brush(DQT_TEXT_DARK)
+        intro.Child = intro_txt
+        WPFGrid.SetRow(intro, 0)
+        outer.Children.Add(intro)
+
+        table_border = Border()
+        table_border.Background = brush("#FFFFFF")
+        table_border.BorderBrush = brush(DQT_BORDER)
+        table_border.BorderThickness = Thickness(1)
+        table_border.CornerRadius = WinCornerRadius(6)
+        table_border.Margin = Thickness(0, 0, 0, 10)
+        sv = ScrollViewer()
+        sv.VerticalScrollBarVisibility = ScrollBarVisibility.Auto
+        sv.HorizontalScrollBarVisibility = ScrollBarVisibility.Auto
+        self.overview_stack = StackPanel()
+        sv.Content = self.overview_stack
+        table_border.Child = sv
+        WPFGrid.SetRow(table_border, 1)
+        outer.Children.Add(table_border)
+
+        bar = WPFGrid()
+        c1 = ColumnDefinition()
+        c1.Width = GridLength(1, GridUnitType.Star)
+        c2 = ColumnDefinition()
+        c2.Width = GridLength(1, GridUnitType.Auto)
+        bar.ColumnDefinitions.Add(c1)
+        bar.ColumnDefinitions.Add(c2)
+        self.txt_overview_status = TextBlock()
+        self.txt_overview_status.FontSize = 12
+        self.txt_overview_status.Foreground = brush("#888888")
+        self.txt_overview_status.VerticalAlignment = VerticalAlignment.Center
+        WPFGrid.SetColumn(self.txt_overview_status, 0)
+        bar.Children.Add(self.txt_overview_status)
+
+        buttons = StackPanel()
+        buttons.Orientation = Orientation.Horizontal
+        self.btn_reanalyze_all = Button()
+        self.btn_reanalyze_all.Content = u"\u27F3 Re-Analyze All"
+        self.btn_reanalyze_all.Background = brush(DQT_PRIMARY)
+        self.btn_reanalyze_all.Foreground = brush(DQT_TEXT_DARK)
+        self.btn_reanalyze_all.FontWeight = FontWeights.SemiBold
+        self.btn_reanalyze_all.Padding = Thickness(16, 8, 16, 8)
+        self.btn_reanalyze_all.BorderBrush = brush(DQT_PRIMARY_DARK)
+        self.btn_reanalyze_all.BorderThickness = Thickness(1)
+        self.btn_reanalyze_all.Margin = Thickness(0, 0, 8, 0)
+        self.btn_reanalyze_all.Cursor = Cursors.Hand
+        self.btn_reanalyze_all.Click += self._on_reanalyze_all
+        buttons.Children.Add(self.btn_reanalyze_all)
+        self.btn_export_all = Button()
+        self.btn_export_all.Content = u"Export Report"
+        self.btn_export_all.Background = brush("#FFFFFF")
+        self.btn_export_all.Foreground = brush(DQT_TEXT_DARK)
+        self.btn_export_all.Padding = Thickness(12, 8, 12, 8)
+        self.btn_export_all.BorderBrush = brush(DQT_PRIMARY_DARK)
+        self.btn_export_all.BorderThickness = Thickness(1)
+        self.btn_export_all.Cursor = Cursors.Hand
+        self.btn_export_all.Click += self._on_export_all
+        buttons.Children.Add(self.btn_export_all)
+        WPFGrid.SetColumn(buttons, 1)
+        bar.Children.Add(buttons)
+        WPFGrid.SetRow(bar, 2)
+        outer.Children.Add(bar)
+        return outer
+
+    def _link_cell(self, table, row, col, text, background, foreground=DQT_TEXT,
+                   bold=False, center=False):
+        b = Border()
+        b.Background = brush(background)
+        b.BorderBrush = brush("#E8E0D0")
+        b.BorderThickness = Thickness(0, 0, 1, 1)
+        b.Padding = Thickness(10, 6, 10, 6)
+        t = TextBlock()
+        t.Text = text
+        t.FontSize = 12
+        t.Foreground = brush(foreground)
+        t.VerticalAlignment = VerticalAlignment.Center
+        t.TextWrapping = TextWrapping.Wrap
+        if bold:
+            t.FontWeight = FontWeights.SemiBold
+        if center:
+            t.HorizontalAlignment = HorizontalAlignment.Center
+        b.Child = t
+        WPFGrid.SetRow(b, row)
+        WPFGrid.SetColumn(b, col)
+        table.Children.Add(b)
+        return b
+
+    def overview_rows(self):
+        """[(row dict, dashboard or None)] - the open model first, then every
+        linked file by name."""
+        dash_by_model = dict((id(d.linked_model), d) for d in self.dashboards if d.is_link)
+        host = self.host
+        row = {"name": host.title, "kind": "Open model", "instances": "-",
+               "status": "Checked"}
+        row.update(summary_fields(host.metrics if not host.error else None, host.error))
+        rows = [(row, host)]
+        for model in self.linked_models:
             row = link_row(model)
+            row["kind"] = "Linked model"
+            rows.append((row, dash_by_model.get(id(model))))
+        return rows
+
+    def refresh_overview(self):
+        """(Re)draw the Overview table and the tabs' coloured dots."""
+        self._refresh_tab_headers()
+        if self.overview_stack is None:
+            return
+        self.overview_stack.Children.Clear()
+
+        table = WPFGrid()
+        for _, width in self.OVERVIEW_COLUMNS:
+            cd = ColumnDefinition()
+            cd.Width = GridLength(width)
+            table.ColumnDefinitions.Add(cd)
+        rd = RowDefinition()
+        rd.Height = GridLength(36)
+        table.RowDefinitions.Add(rd)
+        for ci, (title, _) in enumerate(self.OVERVIEW_COLUMNS):
+            cell = self._link_cell(table, 0, ci, title, DQT_PRIMARY,
+                                   DQT_TEXT_DARK, bold=True)
+            cell.BorderBrush = brush(DQT_PRIMARY_DARK)
+            cell.BorderThickness = Thickness(0, 0, 1, 2)
+
+        rows = self.overview_rows()
+        for index, (row, dashboard) in enumerate(rows):
+            r = index + 1
+            rd = RowDefinition()
+            rd.Height = GridLength(1, GridUnitType.Auto)
+            rd.MinHeight = 40
+            table.RowDefinitions.Add(rd)
+            bg = "#FFFFFF" if r % 2 == 0 else "#FAF8F0"
+            self._link_cell(table, r, 0, row["name"], bg, bold=True)
+            self._link_cell(table, r, 1, row["kind"], bg)
+            self._link_cell(table, r, 2, str(row["instances"]), bg, center=True)
+            self._link_cell(table, r, 3, row["status"], bg,
+                            DQT_TEXT if row["status"] == "Checked" else "#888888")
+            self._link_cell(table, r, 4, row["overall"], row["color"] or bg,
+                            row["text_color"], bold=row["color"] is not None,
+                            center=True)
+            self._link_cell(table, r, 5, row["score"], bg, center=True)
+            self._link_cell(table, r, 6, row["red"], bg,
+                            HEALTH_RED if row["red"] not in ("-", "0") else DQT_TEXT,
+                            center=True)
+            self._link_cell(table, r, 7, row["amber"], bg,
+                            "#B07800" if row["amber"] not in ("-", "0") else DQT_TEXT,
+                            center=True)
+            self._link_cell(table, r, 8, row["note"], bg, "#666666")
+
+            action = Border()
+            action.Background = brush(bg)
+            action.BorderBrush = brush("#E8E0D0")
+            action.BorderThickness = Thickness(0, 0, 0, 1)
+            action.Padding = Thickness(4)
+            if dashboard is not None:
+                btn = Button()
+                btn.Content = u"View \u25B8"
+                btn.FontSize = 11
+                btn.Padding = Thickness(10, 4, 10, 4)
+                btn.Background = brush("#FFFFFF")
+                btn.Foreground = brush(DQT_TEXT_DARK)
+                btn.BorderBrush = brush(DQT_PRIMARY_DARK)
+                btn.BorderThickness = Thickness(1)
+                btn.Cursor = Cursors.Hand
+                btn.HorizontalAlignment = HorizontalAlignment.Center
+                btn.VerticalAlignment = VerticalAlignment.Center
+                btn.Tag = self.dashboards.index(dashboard)
+                btn.Click += self._on_view_dashboard
+                action.Child = btn
+            WPFGrid.SetRow(action, r)
+            WPFGrid.SetColumn(action, 9)
+            table.Children.Add(action)
+
+        self.overview_stack.Children.Add(table)
+
+        checked = len(self.dashboards)
+        skipped = sum(1 for m in self.linked_models if m.loaded and not m.selected)
+        not_loaded = sum(1 for m in self.linked_models if not m.loaded)
+        failed = sum(1 for d in self.dashboards if d.error)
+        text = "{} model(s) checked at {}".format(
+            checked, datetime.datetime.now().strftime("%H:%M:%S"))
+        if skipped:
+            text += " - {} linked model(s) not ticked".format(skipped)
+        if not_loaded:
+            text += " - {} not loaded".format(not_loaded)
+        if failed:
+            text += " - {} could not be read".format(failed)
+        self.txt_overview_status.Text = text + "."
+
+    def _on_view_dashboard(self, sender, args):
+        try:
+            dashboard = self.dashboards[int(sender.Tag)]
+        except Exception:
+            return
+        self.tabs.SelectedItem = dashboard.tab
+
+    def _on_reanalyze_all(self, sender, args):
+        for dashboard in self.dashboards:
+            dashboard.run_analysis()
+        self.refresh_overview()
+
+    def _on_export_all(self, sender, args):
+        self.export_report()
+
+    # ---- REPORT: everything in one file ----
+    def _overview_report_html(self):
+        rows = ""
+        for i, (row, _) in enumerate(self.overview_rows()):
             bg = "#FFFFFF" if i % 2 == 0 else "#FAF8F0"
             overall_style = ("background:{};color:{};font-weight:700;".format(row["color"], row["text_color"])
                              if row["color"] else "")
             rows += (u'<tr style="background:{bg};"><td style="padding:6px 10px;font-weight:600;">{name}</td>'
-                     u'<td style="text-align:center;">{inst}</td><td>{status}</td>'
+                     u'<td>{kind}</td><td style="text-align:center;">{inst}</td><td>{status}</td>'
                      u'<td style="text-align:center;{ostyle}">{overall}</td>'
                      u'<td style="text-align:center;">{score}</td><td style="text-align:center;">{red}</td>'
                      u'<td style="text-align:center;">{amber}</td><td style="color:#666;">{note}</td></tr>').format(
-                bg=bg, name=_html(row["name"]), inst=row["instances"], status=row["status"],
-                ostyle=overall_style, overall=row["overall"], score=row["score"],
-                red=row["red"], amber=row["amber"], note=_html(row["note"]))
-        return (u'<div class="rec-box"><h3>LINKED MODELS</h3><table>'
-                u'<tr><th>LINKED MODEL</th><th style="text-align:center;">INSTANCES</th><th>STATUS</th>'
+                bg=bg, name=_html(row["name"]), kind=row["kind"], inst=row["instances"],
+                status=row["status"], ostyle=overall_style, overall=row["overall"],
+                score=row["score"], red=row["red"], amber=row["amber"], note=_html(row["note"]))
+        return (u'<div class="rec-box"><h3>OVERVIEW</h3><table>'
+                u'<tr><th>MODEL</th><th>TYPE</th><th style="text-align:center;">INSTANCES</th><th>STATUS</th>'
                 u'<th style="text-align:center;">OVERALL</th><th style="text-align:center;">SCORE</th>'
                 u'<th style="text-align:center;">RED</th><th style="text-align:center;">AMBER</th>'
                 u'<th>NEEDS ATTENTION</th></tr>{}</table></div>').format(rows)
 
-    def _on_export(self, sender, args):
-        """Export report as PDF using HTML rendering"""
+    def export_report(self):
+        """One HTML report with everything: the Overview, then every
+        checked model's score card, metrics and recommendations."""
         try:
             desktop = Environment.GetFolderPath(Environment.SpecialFolder.Desktop)
             fname = os.path.basename(self.doc.PathName).replace(".rvt", "") if self.doc.PathName else "Model"
             fname = fname.replace(" ", "_")
             ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            
+
             proj = self.doc.ProjectInformation
             proj_name = proj.Name if proj else "Untitled"
             file_name = os.path.basename(self.doc.PathName) if self.doc.PathName else "Unsaved"
-            
-            score = get_health_score(self.metrics)
-            grade, label, grade_color = get_overall_status(score)
-            counts = count_statuses(self.metrics)
-            
-            # Build metric rows HTML - priority order, one header per impact tier
-            rows_html = ""
-            i = 0
-            for tier, items in metrics_by_impact(self.metrics):
-                rows_html += """
-                  <tr class="tier"><td colspan="4"><strong>{name} IMPACT</strong> &nbsp;-&nbsp; {desc}</td></tr>""".format(
-                    name=tier.upper(), desc=IMPACT_TIERS[tier]["description"])
-                for number, key in items:
-                    value = self.metrics[key]
-                    config = METRIC_THRESHOLDS[key]
-                    h_color = get_health_color(key, value)
-                    text_color = get_text_color(key, value)
-                    thresholds = config["thresholds"]
-                    status = get_status_text(key, value)
-                    weight = config.get("weight", 1)
-                    weight_stars = "&#9733;" * weight + "&#9734;" * (5 - weight)
-                    val_str = format_value(key, value)
-                    row_bg = "#FFFFFF" if i % 2 == 0 else "#FAF8F0"
-                    i += 1
-                
-                    # Bar width as a percentage of the bar's scale
-                    max_t = bar_scale(thresholds)
-                    bar_pct = min(value / max_t * 100, 100) if value is not None and value > 0 else 0
-                    empty_pct = 100 - bar_pct
-                
-                    rows_html += """
-                    <tr style="background:{bg};">
-                        <td style="padding:8px 10px;font-weight:600;border-bottom:1px solid #E8E0D0;">{label}</td>
-                        <td style="padding:8px;text-align:center;background:{color};color:{tcolor};font-weight:700;border-bottom:1px solid #E8E0D0;">{val}</td>
-                        <td style="padding:8px 10px;border-bottom:1px solid #E8E0D0;">
-                            <table style="width:100%;border-collapse:collapse;height:14px;table-layout:fixed;"><tr>
-                                <td style="width:{pct}%;background:{color};border-radius:3px 0 0 3px;height:14px;padding:0;"></td>
-                                <td style="width:{epct}%;background:#E0DDD5;border-radius:0 3px 3px 0;height:14px;padding:0;"></td>
-                            </tr></table>
-                        </td>
-                        <td style="padding:6px 10px;border-bottom:1px solid #E8E0D0;">
-                            <div style="color:{scolor};font-weight:600;font-size:11px;">Status: {status} - {meaning}</div>
-                            <div style="color:#888;font-size:9px;">Impact: {impact} &nbsp;|&nbsp; Weight: {stars} ({w}/5)</div>
-                            <div style="color:#AAA;font-size:8px;">{thresholds}</div>
-                        </td>
-                    </tr>""".format(
-                        bg=row_bg, label="{}. {}".format(number, config["label"]), color=h_color,
-                        tcolor=text_color, val=val_str,
-                        pct=round(bar_pct, 1), epct=round(empty_pct, 1),
-                        scolor=status_text_color(status),
-                        status=status, meaning=get_status_meaning(status),
-                        impact=config.get("impact", ""), stars=weight_stars, w=weight,
-                        thresholds=thresholds_text(thresholds).replace(u"\u2264", "&le;").replace(">", "&gt;"))
-            
-            # Build recommendations HTML - Amber and Red, in priority order
-            rec_html = ""
-            rec_keys = recommended_keys(self.metrics)
-            for key in rec_keys:
-                value = self.metrics[key]
-                h_color = get_health_color(key, value)
-                metric_label = METRIC_THRESHOLDS[key]["label"]
-                rec = RECOMMENDATIONS.get(key, "Review and optimize.")
-                rec_html += '<div style="margin:4px 0;"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:{};margin-right:8px;vertical-align:middle;"></span><strong>{} ({}) - {}:</strong> <span style="color:#666;">{}</span></div>'.format(
-                    h_color, metric_label, value, get_status_text(key, value), rec)
-            if not rec_keys:
-                rec_html = '<div style="color:#4CAF50;font-weight:600;">All metrics are Green. No action required.</div>'
 
-            links_html = self._links_report_html()
-            
-            # Full HTML
+            sections = "\n".join(d.report_section_html() for d in self.dashboards)
+
             html = u"""<!DOCTYPE html>
 <html>
 <head>
@@ -2476,11 +2851,13 @@ class ModelHealthWindow(Window):
     .header h1 {{ margin: 0; font-size: 22px; color: #5D4E37; float: left; }}
     .header .right {{ float: right; text-align: right; color: #5D4E37; }}
     .header .sub {{ font-size: 11px; color: #5D4E37; margin-top: 4px; }}
+    .model {{ margin-top: 22px; page-break-before: always; }}
+    .model-title {{ font-size: 16px; color: #5D4E37; border-bottom: 2px solid #D4B87A; padding-bottom: 4px; }}
     .score-card {{ background: #FFF; border: 1px solid #D4B87A; border-radius: 6px; padding: 15px 20px; margin-bottom: 15px; overflow: hidden; }}
-    .gauge {{ float: left; width: 90px; height: 90px; border-radius: 50%; background: {grade_color}; text-align: center; margin-right: 20px; }}
-    .gauge .grade {{ font-size: 22px; font-weight: bold; color: {grade_text}; margin-top: 24px; }}
-    .gauge .num {{ font-size: 12px; color: {grade_text}; opacity: 0.9; }}
-    .score-text h2 {{ margin: 0 0 5px 0; font-size: 18px; color: #333; }}
+    .gauge {{ float: left; width: 90px; height: 90px; border-radius: 50%; text-align: center; margin-right: 20px; }}
+    .gauge .grade {{ font-size: 22px; font-weight: bold; margin-top: 24px; }}
+    .gauge .num {{ font-size: 12px; opacity: 0.9; }}
+    .score-text h3 {{ margin: 0 0 5px 0; font-size: 18px; color: #333; }}
     .score-text .summary {{ color: #666; font-size: 12px; }}
     .score-text .counts {{ color: #888; font-size: 10px; margin-top: 4px; }}
     .legend {{ background: #FFF; border: 1px solid #D4B87A; border-radius: 6px; padding: 8px 15px; margin-bottom: 15px; text-align: center; }}
@@ -2501,21 +2878,7 @@ class ModelHealthWindow(Window):
             <div style="font-size:9px;opacity:0.7;">Copyright by Dang Quoc Truong - DQT</div>
         </div>
         <div style="clear:both;"></div>
-        <div class="sub">{link_note}Project: {proj} &nbsp;|&nbsp; File: {file}</div>
-    </div>
-
-    <div class="score-card">
-        <div class="gauge">
-            <div class="grade">{grade}</div>
-            <div class="num">{score}</div>
-        </div>
-        <div class="score-text">
-            <h2>Model Health: {grade} - {label}</h2>
-            <div class="summary">{summary}</div>
-            <div class="counts">{counts}</div>
-            <div class="counts">Date: {date}</div>
-        </div>
-        <div style="clear:both;"></div>
+        <div class="sub">Project: {proj} &nbsp;|&nbsp; File: {file} &nbsp;|&nbsp; Date: {date}</div>
     </div>
 
     <div class="legend">
@@ -2523,51 +2886,30 @@ class ModelHealthWindow(Window):
         {legend}
     </div>
 
-    <table>
-        <tr>
-            <th style="width:160px;">METRIC</th>
-            <th style="width:70px;text-align:center;">VALUE</th>
-            <th style="width:250px;">HEALTH INDICATOR</th>
-            <th>STATUS</th>
-        </tr>
-        {rows}
-    </table>
+    {overview}
 
-    <div class="rec-box">
-        <h3>RECOMMENDATIONS</h3>
-        {recs}
-    </div>
+    {sections}
 
-    {links}
-
-    <div class="footer">Copyright by Dang Quoc Truong - DQT &copy; 2025</div>
+    <div class="footer">Dang Quoc Truong - DQT (c) 2026</div>
 </body>
 </html>""".format(
-                grade_color=grade_color, grade_text=RAG_TEXT_COLORS[grade],
-                proj=proj_name, file=file_name,
-                grade=grade, score=score, label=label,
-                summary=status_summary(counts),
-                counts=counts_text(counts),
+                proj=_html(proj_name), file=_html(file_name),
                 legend="\n        ".join(
                     '<span style="background:{};color:{};">{} - {}</span>'.format(
                         RAG_COLORS[lv], RAG_TEXT_COLORS[lv], lv, RAG_MEANING[lv])
                     for lv in RAG_LEVELS),
                 date=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                rows=rows_html, recs=rec_html, links=links_html,
-                link_note=(u"Linked model: {} &nbsp;|&nbsp; ".format(_html(self.link_name))
-                           if self.is_link else ""))
-            
-            # Save HTML with UTF-8 encoding
+                overview=self._overview_report_html(), sections=sections)
+
             html_path = os.path.join(desktop, "ModelHealth_{}_{}.html".format(fname, ts))
             with codecs.open(html_path, 'w', 'utf-8') as f:
                 f.write(html)
-            
-            # Auto-open in default browser
+
             try:
                 System.Diagnostics.Process.Start(html_path)
             except:
                 pass
-            
+
             MessageBox.Show(
                 "Report exported!\n\n{}\n\nFile opened in browser.\nUse Ctrl+P > Save as PDF to create PDF.".format(html_path),
                 "Export Complete",
@@ -2580,13 +2922,67 @@ class ModelHealthWindow(Window):
 
 
 # ============================================================
+# HELP + ENTRY POINT
+# ============================================================
+def show_help():
+    if _open_help_page("model_health_check.html"):
+        return
+    MessageBox.Show(
+        "Model Health Check\n\n"
+        "Analyzes the model against 12 metrics and combines them into "
+        "one weighted score. The metrics are listed by their impact on "
+        "model performance and stability:\n"
+        "  Critical: Warnings, CAD Imports, File Size, In-Place Families\n"
+        "  High: Duplicate Elements, CAD Links, RVT Links\n"
+        "  Moderate: Imported Images, Model Groups, Design Options\n"
+        "  Low: Unplaced Rooms, Unpinned Links\n\n"
+        "HEALTH SCALE (RAG)\n"
+        "  Green - healthy, meeting expectations\n"
+        "  Amber - needs attention, improvement recommended\n"
+        "  Red - action required, high risk or major impact\n"
+        "  Every metric, and the model as a whole, is graded on this "
+        "scale.\n\n"
+        "WORKFLOW\n"
+        "  Re-Analyze re-runs all metrics against the current model.\n"
+        "  Each row in the recommendations list can Select Elements to "
+        "select the offending elements straight in Revit.\n"
+        "  Export Report saves every checked model in one report file.\n\n"
+        "LINKED MODELS\n"
+        "  When the model has Revit links, a list comes up first: tick "
+        "the links to check with the open model. Every checked model "
+        "gets its own dashboard tab, and the Overview tab lists all of "
+        "them. A link that is not loaded must be reloaded in Manage "
+        "Links first. A cloud model's file size cannot be measured and "
+        "shows N/A.\n\n"
+        "SETTINGS TAB\n"
+        "  Edit each metric's Green and Amber values and weight (1-5) "
+        "before running an analysis. Save & Apply writes them to "
+        "threshold_config.json next to this tool and re-scores the "
+        "dashboard immediately; Reset to Defaults restores the "
+        "built-in values and deletes that file.",
+        "Model Health Check - Help",
+        MessageBoxButton.OK, MessageBoxImage.Information)
+
+
+def run_health_check(doc, uidoc):
+    """Tick the linked models to check (when there are any), then show
+    every checked model at once. Cancel at the list stops here."""
+    linked_models = collect_linked_models(doc)
+    if linked_models:
+        picker = LinkPickerWindow(model_title(doc), linked_models)
+        picker.ShowDialog()
+        if picker.result is None:
+            return None
+    window = ModelHealthWindow(doc, uidoc, linked_models)
+    window.ShowDialog()
+    return window
+
+
+# ============================================================
 # MAIN
 # ============================================================
 try:
-    doc = __revit__.ActiveUIDocument.Document
-    uidoc = __revit__.ActiveUIDocument
-    window = ModelHealthWindow(doc, uidoc)
-    window.ShowDialog()
+    run_health_check(__revit__.ActiveUIDocument.Document, __revit__.ActiveUIDocument)
 except Exception as e:
     from pyrevit import forms
     forms.alert("Error launching Model Health Check:\n{}".format(str(e)),
