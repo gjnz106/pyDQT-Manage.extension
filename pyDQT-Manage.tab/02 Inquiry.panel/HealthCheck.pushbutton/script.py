@@ -58,6 +58,10 @@ clr.AddReference('PresentationCore')
 clr.AddReference('WindowsBase')
 clr.AddReference('RevitAPI')
 clr.AddReference('RevitAPIUI')
+clr.AddReference('System.Core')            # HashSet<T> - not auto-loaded on
+                                            # Revit 2024's .NET Framework CLR
+                                            # (Revit 2025+'s .NET 8 CLR has it
+                                            # loaded already, masking the gap)
 
 import System
 import System.Diagnostics
