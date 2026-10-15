@@ -45,6 +45,17 @@
       <dt class="v-dark">ID</dt><dd>the placed instance's own Element ID</dd>
       <dt class="v-dark">Type ID</dt><dd>the CAD Type's Element ID, shared by every instance of that file - <b>this is the ID ACC's Model Analytics reports</b>, so paste it into Search to find that file's instances here</dd>
       <dt class="v-dark">Type</dt><dd>Import (geometry embedded in the model) vs Link (external .dwg still on disk)</dd>
+      <dt class="v-dark">In View</dt><dd><b>On</b> or <b>Off</b> in the view the CAD file was placed into -
+        what Visibility/Graphics &rsaquo; Imported Categories shows. Off is in red and says why:
+        <span class="code">imports off in view</span> ("Show imported categories in this view" unticked),
+        <span class="code">unchecked in V/G</span> (the file's own box unticked),
+        <span class="code">hidden in view</span> (Hide in View &rsaquo; Elements),
+        <span class="code">workset hidden</span>, <span class="code">all layers off</span> or
+        <span class="code">link not loaded</span>. <span class="code">On (3 of 12 layers off)</span>
+        means it shows with some layers turned off. When the view has a view template that controls
+        V/G Overrides Import, the template's settings are the ones checked. A file placed in
+        <b>all views</b> is checked in the <b>active view</b> (marked <span class="code">(active view)</span>,
+        and <span class="code">-</span> when the active view is a sheet, schedule, drafting view or legend)</dd>
       <dt class="v-dark">Sheet</dt><dd>the sheet the CAD file's view is placed on, as <span class="code">number - name</span>. <span class="code">-</span> means it was imported into all views, so there is no single sheet; <span class="code">Not on a sheet</span> means its view is on no sheet. A view that is on several sheets (a Legend) lists them all</dd>
     </dl>
   </div>
@@ -52,8 +63,9 @@
   <div class="card">
     <h2>Filters</h2>
     <dl class="kv">
-      <dt class="v-dark">Search</dt><dd>matches name, creator, workset, view, sheet, ID or Type ID - type a sheet number to find every CAD file on it</dd>
+      <dt class="v-dark">Search</dt><dd>matches name, creator, workset, view, on/off, sheet, ID or Type ID - type a sheet number to find every CAD file on it</dd>
       <dt class="v-dark">Type</dt><dd>All / Import only / Link only</dd>
+      <dt class="v-dark">In View</dt><dd>All / On in view / Off in view - e.g. list every CAD file switched off in its view, to clean them up</dd>
     </dl>
   </div>
 
@@ -83,6 +95,11 @@
       Delete is permanent for that model session beyond Ctrl+Z - double-check
       the selection (or use Zoom To first) before deleting CAD content other
       people may depend on.
+    </div>
+    <div class="box fixed">
+      <b>New: In View column.</b> Shows whether each CAD file is on or off in
+      its view - and why - so you no longer need to open Visibility/Graphics
+      in every view to find out. Refresh after changing a view's settings.
     </div>
     <div class="box fixed">
       <b>A CAD import shows up in ACC's Model Analytics (Insight) but not
