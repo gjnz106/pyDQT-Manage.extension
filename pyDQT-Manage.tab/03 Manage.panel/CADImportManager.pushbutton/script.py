@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
-"""CAD Import Manager v1.2
+"""CAD Import Manager v1.3
 Author: Dang Quoc Truong (DQT)
 
 Lists every CAD file imported or linked into the model (ImportInstance
 elements) with its file name, link type, creator, workset, host level, the
-view it was placed into and the sheet that view is on, so a stray or
-oversized CAD file can be found and selected without hunting through every
-view or sheet.
+view it was placed into, whether it is on or off in that view (and why),
+and the sheet that view is on, so a stray or oversized CAD file can be
+found and selected without hunting through every view or sheet.
 
 Also finds and purges "unused" CAD Import/Link Types - a Type left with
 zero instances after its last placement is deleted, which Revit never
@@ -71,6 +71,8 @@ class CADImportItem(object):
         self.workset = "-"
         self.level = "-"
         self.view_name = "-"
+        self.visibility = "-"         # "On" / "Off - <why>" in its view
+        self.is_off = False           # drives the red text in the grid
         self.sheet = "-"
         self.element = None
 
@@ -280,8 +282,138 @@ def _link_status_suffix(doc, elem, is_linked):
     return ""
 
 
-def get_cad_imports(doc):
+# ----------------------------------------------------------------------------
+# ON / OFF IN VIEW - what Visibility/Graphics > Imported Categories shows
+# ----------------------------------------------------------------------------
+ACTIVE_VIEW_NOTE = " (active view)"
+# Views that cannot show a CAD file at all - no on/off to report.
+NO_CAD_VIEW_TYPES = ("Schedule", "ProjectBrowser", "SystemBrowser", "Internal",
+                     "Undefined", "Report", "CostReport", "LoadsReport",
+                     "PresureLossReport", "PanelSchedule", "ColumnSchedule")
+# Views that show a CAD file placed in them, but never one placed in all
+# views (a sheet, drafting view or legend shows no model geometry).
+NO_3D_CAD_VIEW_TYPES = ("DrawingSheet", "DraftingView", "Legend")
+
+
+def _can_show_cad(view, all_views=False):
+    """Whether `view` can show the CAD file at all - one placed in all views
+    (`all_views`) only shows in model views."""
+    try:
+        if view is None or view.IsTemplate:
+            return False
+        kind = str(view.ViewType)
+        if "." in kind:
+            kind = kind.rsplit(".", 1)[-1]
+        if kind in NO_CAD_VIEW_TYPES:
+            return False
+        return not (all_views and kind in NO_3D_CAD_VIEW_TYPES)
+    except Exception:
+        return False
+
+
+def _vg_source(doc, view):
+    """The element whose Visibility/Graphics settings apply in `view`: its
+    view template when the template controls "V/G Overrides Import", else
+    the view itself."""
+    try:
+        template_id = view.ViewTemplateId
+        if template_id is None or _eid_int(template_id) <= 0:
+            return view
+        template = doc.GetElement(template_id)
+        if template is None:
+            return view
+        controlled = _eid_int(ElementId(BuiltInParameter.VIS_GRAPHICS_IMPORT))
+        free = [_eid_int(p) for p in template.GetNonControlledTemplateParameterIds()]
+        return view if controlled in free else template
+    except Exception:
+        return view
+
+
+def _layers_off(vg, category, cache):
+    """(layers turned off, layers) of a CAD file's category in these V/G
+    settings - cached per settings and file, since every copy of a file
+    shares its layers."""
+    key = (_eid_int(vg.Id), _eid_int(category.Id))
+    if key not in cache:
+        total = off = 0
+        try:
+            for sub in category.SubCategories:
+                total += 1
+                try:
+                    if vg.GetCategoryHidden(sub.Id):
+                        off += 1
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        cache[key] = (off, total)
+    return cache[key]
+
+
+def _visibility_in_view(doc, elem, view, loaded=True, cache=None, all_views=False):
+    """"On", "On (3 of 12 layers off)" or "Off - <why>" for a CAD file in a
+    view - the first thing that hides it, in the order Revit applies them:
+    an unloaded link, the view's "Show imported categories" switch, the
+    file's own check box under Imported Categories, Hide in View, a hidden
+    workset, every layer off. "-" for a view that cannot show it. Never
+    raises."""
+    if not _can_show_cad(view, all_views):
+        return "-"
+    if not loaded:
+        return "Off - link not loaded"
+    cache = {} if cache is None else cache
+    vg = _vg_source(doc, view)
+    try:
+        if vg.AreImportCategoriesHidden:
+            return "Off - imports off in view"
+    except Exception:
+        pass
+    category = None
+    try:
+        category = elem.Category
+    except Exception:
+        pass
+    if category is not None:
+        try:
+            if vg.GetCategoryHidden(category.Id):
+                return "Off - unchecked in V/G"
+        except Exception:
+            pass
+    try:
+        if elem.IsHidden(view):
+            return "Off - hidden in view"
+    except Exception:
+        pass
+    try:
+        if doc.IsWorkshared and not view.IsWorksetVisible(elem.WorksetId):
+            return "Off - workset hidden"
+    except Exception:
+        pass
+    if category is not None:
+        off, total = _layers_off(vg, category, cache)
+        if total and off == total:
+            return "Off - all layers off"
+        if off:
+            return "On ({} of {} layers off)".format(off, total)
+    return "On"
+
+
+def _get_visibility(doc, elem, loaded, active_view, cache):
+    """On/off in the view the CAD file was placed into; for one placed in
+    all views, in the active view (and the text says so)."""
+    try:
+        owner_id = elem.OwnerViewId
+        if owner_id is not None and _eid_int(owner_id) > 0:
+            return _visibility_in_view(doc, elem, doc.GetElement(owner_id), loaded, cache)
+    except Exception:
+        return "-"
+    text = _visibility_in_view(doc, elem, active_view, loaded, cache, all_views=True)
+    return text if text == "-" else text + ACTIVE_VIEW_NOTE
+
+
+def get_cad_imports(doc, active_view=None):
     items = []
+    cache = {}
     try:
         view_sheet_map = build_view_sheet_map(doc)
     except Exception:
@@ -296,12 +428,14 @@ def get_cad_imports(doc):
             item.type_id = _eid_int(elem.GetTypeId())
             item.name = _cad_type_name(doc, elem)
             is_linked = _is_linked(doc, elem)
-            item.link_type = ("Link" if is_linked else "Import") \
-                + _link_status_suffix(doc, elem, is_linked)
+            status = _link_status_suffix(doc, elem, is_linked)
+            item.link_type = ("Link" if is_linked else "Import") + status
             item.created_by = _get_created_by(doc, elem)
             item.workset = _get_workset(doc, elem)
             item.level = _get_level(doc, elem)
             item.view_name = _get_view_name(doc, elem)
+            item.visibility = _get_visibility(doc, elem, not status, active_view, cache)
+            item.is_off = item.visibility.startswith("Off")
             item.sheet = _get_sheet(doc, elem, view_sheet_map)
             items.append(item)
         except:
@@ -421,12 +555,19 @@ MAIN_XAML = """
             <Border Grid.Column="0" Background="White" BorderBrush="#D4B87A" BorderThickness="1" CornerRadius="4" Padding="8" Margin="0,0,8,0">
                 <StackPanel>
                     <TextBlock Text="SEARCH" FontSize="9" FontWeight="SemiBold" Margin="0,0,0,4"/>
-                    <TextBox x:Name="txtSearch" Padding="6,4" Margin="0,0,0,10" ToolTip="Name, creator, workset, view, sheet, ID or Type ID"/>
+                    <TextBox x:Name="txtSearch" Padding="6,4" Margin="0,0,0,10" ToolTip="Name, creator, workset, view, on/off, sheet, ID or Type ID"/>
                     <TextBlock Text="TYPE" FontSize="9" FontWeight="SemiBold" Margin="0,0,0,4"/>
                     <ComboBox x:Name="cmbFilter" Padding="6,4" Margin="0,0,0,10" SelectedIndex="0">
                         <ComboBoxItem Content="All"/>
                         <ComboBoxItem Content="Import only"/>
                         <ComboBoxItem Content="Link only"/>
+                    </ComboBox>
+                    <TextBlock Text="IN VIEW" FontSize="9" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                    <ComboBox x:Name="cmbVisibility" Padding="6,4" Margin="0,0,0,10" SelectedIndex="0"
+                              ToolTip="On or off in the view the CAD file was placed into (the active view for one placed in all views)">
+                        <ComboBoxItem Content="All"/>
+                        <ComboBoxItem Content="On in view"/>
+                        <ComboBoxItem Content="Off in view"/>
                     </ComboBox>
                     <TextBlock Text="Double-click ID or Type ID to copy it. Double-click elsewhere on a row to select + zoom to that file. Type ID is the Element ID ACC's Model Analytics reports - paste it into Search to find its instances." FontSize="9" Foreground="#888" TextWrapping="Wrap" Margin="0,6,0,0"/>
                 </StackPanel>
@@ -448,6 +589,19 @@ MAIN_XAML = """
                     <DataGridTextColumn Header="Created By" Binding="{Binding created_by}" Width="120" SortMemberPath="created_by"/>
                     <DataGridTextColumn Header="Workset" Binding="{Binding workset}" Width="120" SortMemberPath="workset"/>
                     <DataGridTextColumn Header="View" Binding="{Binding view_name}" Width="160" SortMemberPath="view_name"/>
+                    <DataGridTextColumn Header="In View" Binding="{Binding visibility}" Width="150" SortMemberPath="visibility">
+                        <DataGridTextColumn.ElementStyle>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="ToolTip" Value="On or off in this row's view - for a CAD file placed in all views, in the active view. Off says why: imports off in the view, unchecked in V/G > Imported Categories, hidden in view, workset hidden, all layers off, or link not loaded."/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding is_off}" Value="True">
+                                        <Setter Property="Foreground" Value="#D32F2F"/>
+                                        <Setter Property="FontWeight" Value="SemiBold"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </DataGridTextColumn.ElementStyle>
+                    </DataGridTextColumn>
                     <DataGridTextColumn Header="Sheet" Binding="{Binding sheet}" Width="170" SortMemberPath="sheet"/>
                     <DataGridTextColumn Header="Level" Binding="{Binding level}" Width="100" SortMemberPath="level"/>
                 </DataGrid.Columns>
@@ -497,6 +651,7 @@ class CADImportManagerWindow(WPFWindow):
 
         self.txtSearch.TextChanged += self.on_filter
         self.cmbFilter.SelectionChanged += self.on_filter
+        self.cmbVisibility.SelectionChanged += self.on_filter
         self.dataGrid.SelectionChanged += self.on_selection
         self.dataGrid.MouseDoubleClick += self.on_double_click
 
@@ -515,7 +670,11 @@ class CADImportManagerWindow(WPFWindow):
         self.update_ui()
 
     def load_data(self):
-        self.items = get_cad_imports(self.doc)
+        try:
+            active_view = self.doc.ActiveView
+        except Exception:
+            active_view = None
+        self.items = get_cad_imports(self.doc, active_view)
         self.filtered = list(self.items)
         self.closed_worksets = _get_closed_worksets(self.doc)
         self.unused_types = _get_unused_cad_types(self.doc)
@@ -557,6 +716,7 @@ class CADImportManagerWindow(WPFWindow):
     def on_filter(self, s, e):
         search = self.txtSearch.Text.lower().strip() if self.txtSearch.Text else ""
         fi = self.cmbFilter.SelectedIndex
+        vi = self.cmbVisibility.SelectedIndex
 
         self.filtered = []
         for item in self.items:
@@ -564,10 +724,14 @@ class CADImportManagerWindow(WPFWindow):
                 continue
             if fi == 2 and not item.link_type.startswith("Link"):
                 continue
-            if search and search not in "{} {} {} {} {} {} {}".format(
+            if vi == 1 and not item.visibility.startswith("On"):
+                continue
+            if vi == 2 and not item.is_off:
+                continue
+            if search and search not in "{} {} {} {} {} {} {} {}".format(
                     item.name, item.created_by, item.workset,
-                    item.view_name, item.sheet, item.element_id,
-                    item.type_id).lower():
+                    item.view_name, item.visibility, item.sheet,
+                    item.element_id, item.type_id).lower():
                 continue
             self.filtered.append(item)
         self.update_grid()
@@ -746,13 +910,14 @@ class CADImportManagerWindow(WPFWindow):
         if dlg.ShowDialog() == DialogResult.OK:
             try:
                 with codecs.open(dlg.FileName, 'w', 'utf-8-sig') as f:
-                    f.write("ID,Type ID,File Name,Type,Created By,Workset,View,Sheet,Level\n")
+                    f.write("ID,Type ID,File Name,Type,Created By,Workset,View,In View,Sheet,Level\n")
                     for item in current_items:
-                        f.write('{},{},"{}",{},{},{},"{}","{}",{}\n'.format(
+                        f.write('{},{},"{}",{},{},{},"{}","{}","{}",{}\n'.format(
                             item.element_id, item.type_id,
                             item.name.replace('"', '""'),
                             item.link_type, item.created_by, item.workset,
                             item.view_name.replace('"', '""'),
+                            item.visibility.replace('"', '""'),
                             item.sheet.replace('"', '""'), item.level))
                 forms.alert("Exported {} row(s).".format(len(current_items)),
                             title="DQT - CAD Import Manager")
@@ -986,12 +1151,17 @@ class CADImportManagerWindow(WPFWindow):
             "            instance of that file. This is the ID ACC's\n"
             "            Model Analytics reports, so paste it into\n"
             "            Search to find that file's instances here.\n"
+            "  In View - On or Off in the view it was placed into (for a "
+            "file placed in all views: in the active view). Off says why: "
+            "imports off in view, unchecked in V/G, hidden in view, "
+            "workset hidden, all layers off, or link not loaded. Shown in "
+            "red; filter with IN VIEW.\n"
             "  Sheet   - the sheet the CAD file's view is placed on. '-' "
             "means it was imported into all views, so there is no single "
             "sheet; 'Not on a sheet' means its view is on no sheet.\n\n"
             "WORKFLOW\n"
-            "  Search matches name, creator, workset, view, sheet, ID or "
-            "Type ID.\n"
+            "  Search matches name, creator, workset, view, on/off, sheet, "
+            "ID or Type ID.\n"
             "  Double-click ID or Type ID to copy it; double-click "
             "elsewhere on a row to select + zoom to that file.\n"
             "  Select in Model / Zoom To act on the checked rows.\n"
