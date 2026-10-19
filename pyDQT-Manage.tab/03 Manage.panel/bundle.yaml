@@ -20,4 +20,5 @@ layout:
   - DimensionManager
   - LegendManager
   - ViewTemplate
+  - TemplateFilters
   - WallLayerManager
