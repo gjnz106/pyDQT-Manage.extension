@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Model Health Check v2.6 - DQT
+Model Health Check v2.7 - DQT
 Analyzes Revit model health with color-coded metrics dashboard.
 Features: Gauge dashboard, Select Elements, Weighted score, Purgeable elements.
 Pure code-behind WPF for IronPython stability.
@@ -38,6 +38,13 @@ Materials (Moderate), Line Styles, Line Patterns and Fill Patterns (Low).
 v2.6: File Size of a cloud model is no longer graded on Revit's cache copy
 (never compacted - 740 MB for a model ACC lists at 95 MB). It shows N/A,
 left out of the score, with the cache copy's size in the note for reference.
+
+v2.7: CAD Links and CAD Imports count CAD FILES - each file once, the way
+Manage Links lists them - instead of every placed copy. A link placed in
+one view and copied into the views of other drawing sets used to count once
+per view (49 linked files read as several times that). The note under the
+metric gives how many times the files are placed; Select still picks every
+placed copy.
 
 Copyright (c) 2025 Dang Quoc Truong (DQT)
 All rights reserved.
@@ -217,7 +224,7 @@ METRIC_THRESHOLDS = OrderedDict([
         "label": "CAD Imports",
         "impact": "Critical",
         "thresholds": [2, 5],
-        "tooltip": "Imported CAD (not linked), plus CAD types left with no instances. Bloats file size significantly, and orphaned types keep being reported by ACC Model Analytics.",
+        "tooltip": "Imported CAD files (not linked) - each file counted once, however many views it was copied into - including ones left with no instances. Bloats file size significantly, and orphaned types keep being reported by ACC Model Analytics.",
         "unit": "",
         "selectable": True,
         "weight": 5
@@ -254,7 +261,7 @@ METRIC_THRESHOLDS = OrderedDict([
         "label": "CAD Links",
         "impact": "High",
         "thresholds": [25, 50],
-        "tooltip": "Linked CAD files. Many links degrade navigation.",
+        "tooltip": "Linked CAD files - each file counted once, however many views it is placed in (as Manage Links lists them). Many links degrade navigation.",
         "unit": "",
         "selectable": True,
         "weight": 4
@@ -516,6 +523,10 @@ NOTE_CLOUD_NO_CACHE = (u"Cloud model - not graded: ACC lists the size of the las
                        u"version (no local cache copy found on this computer).")
 NOTE_UNSAVED = u"The model has never been saved."
 
+# CAD Imports / CAD Links count files (CAD types), not placed copies
+NOTE_CAD_FILES = u"{files} {what} CAD file(s), each counted once - placed {placed} time(s) across views"
+NOTE_CAD_ORPHANS = u"; {count} of them with no placed copy left"
+
 # Purge Unused, as the API sees it
 PURGE_API = "api"
 PURGE_ADVISER = "adviser"
@@ -728,23 +739,49 @@ class ModelHealthAnalyzer:
         dropping the element from BOTH this metric and CAD Links."""
         try:
             col = FilteredElementCollector(self.doc).OfClass(ImportInstance).WhereElementIsNotElementType()
-            elems = []
+            placed = []
             for inst in col:
                 try:
                     if not is_cad_link(self.doc, inst):
-                        elems.append(inst)
+                        placed.append(inst)
                 except:
                     pass
             try:
                 # a type left behind by a LINK is not an import
-                elems.extend(t for t in get_unused_cad_types(self.doc)
-                             if not is_cad_link_type(t))
+                orphans = [t for t in get_unused_cad_types(self.doc)
+                           if not is_cad_link_type(t)]
             except:
-                pass
-            self.metrics["cad_imports"] = len(elems)
-            self._store_ids("cad_imports", elems)
+                orphans = []
+            self._count_cad_files("cad_imports", "imported", placed, orphans)
+            self._store_ids("cad_imports", placed + orphans)
         except:
             self.metrics["cad_imports"] = 0
+
+    def _count_cad_files(self, key, what, placed, orphans):
+        """CAD files, each counted once - the CAD types of the placed copies
+        plus the types left with no copy. One file placed in one view and
+        copied into the views of other drawing sets is still ONE file in
+        Manage Links (and in ACC's Model Analytics, which counts CAD types);
+        counting every placed copy made 49 linked files read as several
+        times that."""
+        files = set()
+        for inst in placed:
+            try:
+                files.add(_id_value(inst.GetTypeId()))
+            except:
+                files.add(("instance", id(inst)))   # no type to read: count it alone
+        for cad_type in orphans:
+            try:
+                files.add(_id_value(cad_type.Id))
+            except:
+                files.add(("type", id(cad_type)))
+        self.metrics[key] = len(files)
+        copies = len(placed) > len(files) - len(orphans)
+        if copies or orphans:
+            note = NOTE_CAD_FILES.format(files=len(files), what=what, placed=len(placed))
+            if orphans:
+                note += NOTE_CAD_ORPHANS.format(count=len(orphans))
+            self.notes[key] = note + u"."
 
     def _in_place_families(self):
         try:
@@ -762,17 +799,24 @@ class ModelHealthAnalyzer:
             self.metrics["in_place_families"] = 0
 
     def _cad_links(self):
+        """Linked CAD files, each counted once (see _count_cad_files),
+        including a link whose every placed copy was deleted - Manage Links
+        still lists it. Select picks the placed copies."""
         try:
             col = FilteredElementCollector(self.doc).OfClass(ImportInstance).WhereElementIsNotElementType()
-            elems = []
+            placed = []
             for inst in col:
                 try:
                     if is_cad_link(self.doc, inst):
-                        elems.append(inst)
+                        placed.append(inst)
                 except:
                     pass
-            self.metrics["cad_links"] = len(elems)
-            self._store_ids("cad_links", elems)
+            try:
+                orphans = [t for t in get_unused_cad_types(self.doc) if is_cad_link_type(t)]
+            except:
+                orphans = []
+            self._count_cad_files("cad_links", "linked", placed, orphans)
+            self._store_ids("cad_links", placed)
         except:
             self.metrics["cad_links"] = 0
 
@@ -1401,7 +1445,7 @@ class LinkPickerWindow(Window):
         self.result = None
         self._boxes = []
 
-        self.Title = "Model Health Check v2.6 - DQT"
+        self.Title = "Model Health Check v2.7 - DQT"
         self.Width = 820
         self.Height = 620
         self.MinWidth = 640
@@ -2692,7 +2736,7 @@ class ModelHealthWindow(Window):
                               else linked_models)
         self.overview_stack = None
 
-        self.Title = "Model Health Check v2.6 - DQT"
+        self.Title = "Model Health Check v2.7 - DQT"
         self.Height = 900
         self.Width = 1400
         self.MinHeight = 700

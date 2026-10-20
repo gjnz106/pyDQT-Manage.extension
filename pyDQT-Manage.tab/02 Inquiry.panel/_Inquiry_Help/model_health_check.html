@@ -56,6 +56,12 @@
     <p>Each metric's default weight in the overall score follows its impact:
       Critical 5, High 4, Moderate 3, Low 2.</p>
     <dl class="kv">
+      <dt class="v-dark">CAD Imports / CAD Links</dt><dd>count CAD <b>files</b>, each once - the way
+        Manage Links lists them (and ACC's Model Analytics counts them) - however many views a file is
+        placed in. A DWG linked into one view and copied into the views of other drawing sets is one
+        file. A file whose every placed copy was deleted still counts (it is still in the model).
+        The note under the metric gives how many times the files are placed; <b>Select</b> picks every
+        placed copy.</dd>
       <dt class="v-dark">Unused Families &amp; Types</dt><dd>the families and types Revit's own
         <b>Purge Unused</b> would remove (Green up to 100, Amber up to 300). Read with
         <span class="code">GetUnusedElements</span> on Revit 2025+,
@@ -176,6 +182,13 @@
       cannot be measured or graded fairly: File Size of a model that has never
       been saved or of a cloud model, and Unused Families &amp; Types on a
       Revit version without a purge list. The note under the metric says why.
+    </div>
+    <div class="box fixed">
+      <b>New in v2.7 - CAD counted by file, not by copy.</b> CAD Links (and
+      CAD Imports) counted every placed copy: a model with 49 linked CAD files,
+      some copied into the views of other drawing sets, read as many more. Each
+      file now counts once; the note says how many times they are placed.
+      Unpinned Links still counts every unpinned copy - pinning is per copy.
     </div>
     <div class="box fixed">
       <b>New in v2.6 - ACC File Size no longer graded on the cache.</b> v2.4
