@@ -2162,7 +2162,12 @@ class ModelDashboard(object):
     def _add_metric_row(self, table, row_idx, number, key):
         """One metric's row: name, value, health bar, status, Select."""
         rd = RowDefinition()
-        rd.Height = GridLength(50)  # Taller rows
+        # At least 50 px, taller when the status column needs it - a fixed
+        # 50 px cut off the note under the metric (why a cloud model's File
+        # Size is N/A, how many times CAD files are placed, ...) and the
+        # Status line above it
+        rd.Height = GridLength(1, GridUnitType.Auto)
+        rd.MinHeight = 50
         table.RowDefinitions.Add(rd)
 
         value = self.metrics[key]
