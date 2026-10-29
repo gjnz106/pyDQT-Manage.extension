@@ -9,6 +9,8 @@ Project Browser. View and Sheet columns say where each type is used;
 selecting a type and clicking Detail shows exactly which view and sheet each
 of its instances lives in. Delete removes the selected group types.
 """
+try: __import__("dqt_usage").log_use(__file__)  # pyDQT usage log
+except Exception: pass
 __title__ = "Group\nManager"
 __author__ = "DQT"
 

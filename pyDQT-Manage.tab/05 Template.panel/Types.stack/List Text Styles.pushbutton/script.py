@@ -4,6 +4,8 @@
 Place one text note per Text Note Type, each rendered in its own style,
 so every text style in the project can be reviewed visually.
 """
+try: __import__("dqt_usage").log_use(__file__)  # pyDQT usage log
+except Exception: pass
 __title__ = "List Text\nStyles"
 __author__ = "Dang Quoc Truong (DQT)"
 

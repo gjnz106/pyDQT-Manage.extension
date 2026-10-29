@@ -4,6 +4,8 @@ Author: Dang Quoc Truong (DQT)
 Auto-generates one 3D view per workset, isolating that workset (all
 other worksets hidden) so each workset can be reviewed independently.
 """
+try: __import__("dqt_usage").log_use(__file__)  # pyDQT usage log
+except Exception: pass
 __title__ = "Workset\nChecker"
 __author__ = "DQT"
 

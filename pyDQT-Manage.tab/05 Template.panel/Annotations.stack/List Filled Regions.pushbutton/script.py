@@ -4,6 +4,8 @@
 Draw a rectangle with each Filled Region type and a label next to it, so
 all filled region patterns can be reviewed on one view.
 """
+try: __import__("dqt_usage").log_use(__file__)  # pyDQT usage log
+except Exception: pass
 __title__ = "List Filled\nRegions"
 __author__ = "Dang Quoc Truong (DQT)"
 

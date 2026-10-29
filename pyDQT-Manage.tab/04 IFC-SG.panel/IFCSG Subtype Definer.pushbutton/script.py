@@ -3,6 +3,8 @@
 Loads mapping from the official IFC+SG Industry Mapping Excel (COP edition 3)
 and batch-assigns IFC Export Class and Predefined Type to Revit elements.
 """
+try: __import__("dqt_usage").log_use(__file__)  # pyDQT usage log
+except Exception: pass
 
 __title__ = "IFC-SG\nSubtype"
 __author__ = "DQT"

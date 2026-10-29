@@ -13,6 +13,8 @@ zero instances after its last placement is deleted, which Revit never
 auto-deletes on its own, and which ACC's Model Analytics (Insight) keeps
 reporting as present since it reports CAD imports at the Type level.
 """
+try: __import__("dqt_usage").log_use(__file__)  # pyDQT usage log
+except Exception: pass
 __title__ = "CAD Import\nManager"
 __author__ = "DQT"
 

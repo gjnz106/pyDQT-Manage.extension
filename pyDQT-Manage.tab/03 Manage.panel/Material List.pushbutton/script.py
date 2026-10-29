@@ -8,6 +8,8 @@ Compatible: Revit 2024 / 2025 / 2026 / 2027  (pyRevit 6.1, IronPython)
 Dang Quoc Truong - DQT (c) 2026
 All rights reserved.
 """
+try: __import__("dqt_usage").log_use(__file__)  # pyDQT usage log
+except Exception: pass
 __title__ = "Material\nManage"
 __author__ = "Dang Quoc Truong (DQT)"
 __doc__ = "Manage and analyze Materials - By DQT"

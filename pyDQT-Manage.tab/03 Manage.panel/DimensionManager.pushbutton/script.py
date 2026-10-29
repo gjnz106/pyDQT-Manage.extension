@@ -9,6 +9,8 @@ each of its instances lives in - every Dimension is view-specific, so
 that lookup is always instant, unlike Model Groups. Rename, Batch Rename
 and Delete Type act on the selected types directly from the grid.
 """
+try: __import__("dqt_usage").log_use(__file__)  # pyDQT usage log
+except Exception: pass
 __title__ = "Dimension\nManager"
 __author__ = "DQT"
 

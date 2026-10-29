@@ -6,6 +6,8 @@ Manage and rename Fill Patterns in Revit using DQT shared library
 Copyright (c) 2024 Dang Quoc Truong (DQT)
 All rights reserved.
 """
+try: __import__("dqt_usage").log_use(__file__)  # pyDQT usage log
+except Exception: pass
 __title__ = "Fill Pattern\nManager"
 __author__ = "Dang Quoc Truong (DQT)"
 __doc__ = "Manage and rename Fill Patterns (Hatching) - By DQT"
