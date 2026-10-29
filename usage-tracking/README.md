@@ -36,6 +36,10 @@ the two identical.
 
 ## Setup (once)
 
+pyDQT logs to the Firebase project `pydqt-usage`: its Project ID and Web API
+key are in `lib/dqt_usage.py` and `dashboard.html`. These steps are for
+setting it up again, or for moving the log to another project.
+
 1. **Firebase project.** Open https://console.firebase.google.com. Either
    create a project or use an existing one, then add a **Web app** to it.
 2. **Firestore.** Go to Build › Firestore Database › Create database, in
