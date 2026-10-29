@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Model Health Check v2.7 - DQT
+Model Health Check v2.8 - DQT
 Analyzes Revit model health with color-coded metrics dashboard.
 Features: Gauge dashboard, Select Elements, Weighted score, Purgeable elements.
 Pure code-behind WPF for IronPython stability.
@@ -38,6 +38,15 @@ Materials (Moderate), Line Styles, Line Patterns and Fill Patterns (Low).
 v2.6: File Size of a cloud model is no longer graded on Revit's cache copy
 (never compacted - 740 MB for a model ACC lists at 95 MB). It shows N/A,
 left out of the score, with the cache copy's size in the note for reference.
+
+v2.8: Export Report no longer stops at "Could not open the Save dialog:
+Value does not fall within the expected range". Windows refuses to open
+the dialog when the start folder or the suggested name is one its shell
+cannot parse (forward slashes, a relative or vanished folder remembered
+from an earlier export, a character a file name cannot hold); the folder
+and name are now cleaned first, the dialog is retried without them, and
+if it still cannot open the report is saved to Documents and the message
+says where.
 
 v2.7: CAD Links and CAD Imports count CAD FILES - each file once, the way
 Manage Links lists them - instead of every placed copy. A link placed in
@@ -1445,7 +1454,7 @@ class LinkPickerWindow(Window):
         self.result = None
         self._boxes = []
 
-        self.Title = "Model Health Check v2.7 - DQT"
+        self.Title = "Model Health Check v2.8 - DQT"
         self.Width = 820
         self.Height = 620
         self.MinWidth = 640
@@ -2595,6 +2604,34 @@ def _export_config():
         return None
 
 
+def clean_folder(folder):
+    """`folder` as an absolute Windows path that exists, else "". Windows'
+    Save dialog refuses ("Value does not fall within the expected range")
+    a start folder its shell cannot parse - forward slashes, a relative
+    path, a drive with no folder."""
+    try:
+        folder = (folder or u"").strip().replace(u"/", u"\\")
+        if not folder or not os.path.isabs(folder):
+            return u""
+        folder = os.path.normpath(folder)
+        return folder if os.path.isdir(folder) else u""
+    except Exception:
+        return u""
+
+
+BAD_NAME_CHARS = u'<>:"/\\|?*'
+
+
+def clean_stem(stem):
+    """A file name Windows accepts: no <>:"/\\|?* or control characters, no
+    trailing dots or spaces, at most 120 characters."""
+    chars = []
+    for ch in (stem or u""):
+        chars.append(u"_" if ch in BAD_NAME_CHARS or ord(ch) < 32 else ch)
+    stem = u"".join(chars).strip(u" .")[:120].strip(u" .")
+    return stem or u"ModelHealth"
+
+
 def _export_folder():
     """The folder of the last export, else the Desktop."""
     cfg = _export_config()
@@ -2602,9 +2639,19 @@ def _export_folder():
         folder = cfg.get_option("export_folder", "") if cfg is not None else ""
     except Exception:
         folder = ""
-    if folder and os.path.isdir(folder):
-        return folder
-    return Environment.GetFolderPath(Environment.SpecialFolder.Desktop)
+    return clean_folder(folder) or clean_folder(Environment.GetFolderPath(Environment.SpecialFolder.Desktop))
+
+
+def fallback_report_folder():
+    """Where the report goes when no Save dialog can be opened at all."""
+    for special in (Environment.SpecialFolder.MyDocuments, Environment.SpecialFolder.Desktop):
+        try:
+            folder = clean_folder(Environment.GetFolderPath(special))
+        except Exception:
+            folder = u""
+        if folder:
+            return folder
+    return tempfile.gettempdir()
 
 
 def _remember_export_folder(folder):
@@ -2618,9 +2665,9 @@ def _remember_export_folder(folder):
         pass
 
 
-def ask_report_path(default_stem, owner=None):
-    """Save dialog for the report - PDF (default) or HTML. Returns the
-    chosen path, always ending .pdf or .html, or None when cancelled."""
+def _save_dialog(stem, folder, owner):
+    """(dialog, its answer) - the Save dialog with this start folder and
+    suggested name, either left out when empty."""
     dlg = Win32.SaveFileDialog()
     dlg.Title = "Export Model Health Report"
     dlg.Filter = REPORT_FILTER
@@ -2628,9 +2675,39 @@ def ask_report_path(default_stem, owner=None):
     dlg.DefaultExt = ".pdf"
     dlg.AddExtension = True
     dlg.OverwritePrompt = True
-    dlg.InitialDirectory = _export_folder()
-    dlg.FileName = default_stem + ".pdf"
-    ok = dlg.ShowDialog(owner) if owner is not None else dlg.ShowDialog()
+    if folder:
+        dlg.InitialDirectory = folder
+    if stem:
+        dlg.FileName = stem + ".pdf"
+    return dlg, (dlg.ShowDialog(owner) if owner is not None else dlg.ShowDialog())
+
+
+def ask_report_path(default_stem, owner=None):
+    """Save dialog for the report - PDF (default) or HTML. Returns the
+    chosen path, always ending .pdf or .html, or None when cancelled.
+
+    When Windows will not open the dialog with the remembered folder or the
+    suggested name, it is tried again without the folder, then without
+    either; a folder Windows refused is forgotten. Raises only when no
+    dialog can be opened at all."""
+    stem = clean_stem(default_stem)
+    folder = _export_folder()
+    attempts = []
+    for attempt in ((stem, folder), (stem, u""), (u"", u"")):
+        if attempt not in attempts:
+            attempts.append(attempt)
+    error = None
+    for name, start in attempts:
+        try:
+            dlg, ok = _save_dialog(name, start, owner)
+        except Exception as ex:
+            error = ex
+            if start:
+                _remember_export_folder(u"")
+            continue
+        break
+    else:
+        raise error
     if ok != True:
         return None
     path = dlg.FileName
@@ -2741,7 +2818,7 @@ class ModelHealthWindow(Window):
                               else linked_models)
         self.overview_stack = None
 
-        self.Title = "Model Health Check v2.7 - DQT"
+        self.Title = "Model Health Check v2.8 - DQT"
         self.Height = 900
         self.Width = 1400
         self.MinHeight = 700
@@ -3477,12 +3554,15 @@ class ModelHealthWindow(Window):
         """Ask where to save the report first - PDF (default) or HTML -
         then write it with everything in it: the Overview and every
         checked model."""
+        stem = clean_stem(self.report_file_stem())
+        fallback_note = u""
         try:
-            path = ask_report_path(self.report_file_stem(), self)
+            path = ask_report_path(stem, self)
         except Exception as ex:
-            MessageBox.Show("Could not open the Save dialog:\n{}".format(ex),
-                "Export Report", MessageBoxButton.OK, MessageBoxImage.Error)
-            return None
+            # no Save dialog at all - save it where it can be found and say so
+            path = os.path.join(fallback_report_folder(), stem + ".pdf")
+            fallback_note = (u"Windows could not open the Save dialog ({}), so the report "
+                             u"was saved to your Documents folder.\n\n".format(ex))
         if not path:
             return None
         try:
@@ -3499,9 +3579,9 @@ class ModelHealthWindow(Window):
                     _remember_export_folder(os.path.dirname(html_path))
                     opened = _open_file(html_path)
                     MessageBox.Show(
-                        u"The PDF could not be created: {}.\n\nThe full report was saved "
+                        u"{}The PDF could not be created: {}.\n\nThe full report was saved "
                         u"as HTML instead:\n{}\n\n{}".format(
-                            problem, html_path,
+                            fallback_note, problem, html_path,
                             u"It is open in your browser - use Ctrl+P > Save as PDF."
                             if opened else u"Open it in a browser and use Ctrl+P > Save as PDF."),
                         "Export Report", MessageBoxButton.OK, MessageBoxImage.Warning)
@@ -3511,7 +3591,8 @@ class ModelHealthWindow(Window):
             _remember_export_folder(os.path.dirname(path))
             opened = _open_file(path)
             MessageBox.Show(
-                u"Report exported!\n\n{}{}".format(path, u"\n\nThe file is now open." if opened else u""),
+                u"{}Report exported!\n\n{}{}".format(fallback_note, path,
+                                                   u"\n\nThe file is now open." if opened else u""),
                 "Export Complete", MessageBoxButton.OK, MessageBoxImage.Information)
             return path
         except Exception as ex:
