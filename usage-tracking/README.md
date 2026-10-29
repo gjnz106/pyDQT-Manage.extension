@@ -64,13 +64,19 @@ setting it up again, or for moving the log to another project.
 6. **Dashboard.** Paste the same web-app config (`apiKey`, `authDomain`,
    `projectId`) into `firebaseConfig` at the top of `dashboard.html`.
    Google sign-in does not work from a `file://` page, so open it in one
-   of these two ways:
+   of these ways:
+   - **GitHub Pages** (no install): in the repository's Settings › Pages,
+     deploy from the `main` branch, `/ (root)`. Then add
+     `gjnz106.github.io` under Firebase › Authentication › Settings ›
+     **Authorized domains** - without it, sign-in is refused. The page is
+     https://gjnz106.github.io/pyDQT-Manage.extension/usage-tracking/dashboard.html;
    - **Firebase Hosting:** `firebase init hosting`, copy `dashboard.html`
      into the public folder, then `firebase deploy`;
-   - **locally:** run `python -m http.server 8000` in this folder, then
-     open http://localhost:8000/dashboard.html.
+   - **locally:** run `python -m http.server 8000` in this folder, keep
+     that window open, and open http://localhost:8000/dashboard.html.
 
-   Sign in with the owner account.
+   Sign in with the owner account. If sign-in or reading fails, the
+   status line under Period says why.
 
 ## Dashboard
 

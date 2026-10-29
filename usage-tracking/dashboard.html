@@ -157,9 +157,22 @@ async function load() {
   $("status").textContent = `${recs.length} record(s) loaded` + (recs.length >= 20000 ? " (the newest 20000)" : "") + ".";
 }
 
-$("signin").onclick = () => signInWithPopup(auth, new GoogleAuthProvider());
+// What to do about the usual sign-in and read errors - they are otherwise silent.
+const HINTS = {
+  "auth/unauthorized-domain": () => `this page's domain is not allowed - add ${location.hostname} in Firebase console > ` +
+    "Authentication > Settings > Authorized domains, then try again.",
+  "auth/popup-blocked": () => "the browser blocked the sign-in window - allow pop-ups for this page, then try again.",
+  "auth/popup-closed-by-user": () => "the sign-in window was closed before signing in.",
+  "auth/operation-not-allowed": () => "Google sign-in is off - turn it on in Firebase console > Authentication > Sign-in method.",
+  "permission-denied": () => `${auth.currentUser ? auth.currentUser.email : "this account"} is not the owner in ` +
+    "firestore.rules - sign in with the owner's account, or put this email in the rules and Publish.",
+};
+const explain = (e) => (HINTS[e.code] ? HINTS[e.code]() : e.message);
+
+$("signin").onclick = () => signInWithPopup(auth, new GoogleAuthProvider())
+  .catch((e) => $("status").textContent = "Could not sign in: " + explain(e));
 $("signout").onclick = () => signOut(auth);
-$("reload").onclick = () => load().catch((e) => $("status").textContent = "Could not read the log: " + e.message);
+$("reload").onclick = () => load().catch((e) => $("status").textContent = "Could not read the log: " + explain(e));
 $("days").onchange = $("reload").onclick;
 onAuthStateChanged(auth, (user) => {
   $("signin").hidden = !!user; $("signout").hidden = !user;
