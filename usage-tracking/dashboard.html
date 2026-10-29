@@ -63,6 +63,8 @@
 // Firebase console > Project settings > General > Your apps (Web) - paste the config here.
 const firebaseConfig = { apiKey: "AIzaSyC582PtJqTtNVagIs-qGlyDLlgcb1TfpbA", authDomain: "pydqt-usage.firebaseapp.com", projectId: "pydqt-usage" };
 const COLLECTION = "pydqt_usage";
+const MAX_RECORDS = 20000;   // read per load - each one counts against the daily read quota
+const PAGE_SIZE = 5000;
 const OFFICIAL = {
   "pyDQT-Manage": "github.com/gjnz106/pydqt-manage.extension",
   "pyDQT-Design": "github.com/gjnz106/pydqt-design.extension",
@@ -71,7 +73,7 @@ const OFFICIAL = {
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { getFirestore, collection, query, where, orderBy, limit, getDocs, Timestamp }
+import { getFirestore, collection, query, where, orderBy, limit, startAfter, getDocs, Timestamp }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const app = initializeApp(firebaseConfig);
@@ -104,9 +106,18 @@ function table(el, head, rows) {
 async function load() {
   $("status").textContent = "Loading...";
   const since = Timestamp.fromDate(new Date(Date.now() - Number($("days").value) * 86400000));
-  const snap = await getDocs(query(collection(db, COLLECTION), where("time", ">=", since),
-                                   orderBy("time", "desc"), limit(20000)));
-  const recs = snap.docs.map((d) => ({ ...d.data(), time: d.data().time?.toDate() }));
+  // Newest first, MAX_RECORDS at most, in pages: Firestore refuses a limit over 10000.
+  const docs = [];
+  for (let last = null; docs.length < MAX_RECORDS;) {
+    const size = Math.min(PAGE_SIZE, MAX_RECORDS - docs.length);
+    const parts = [where("time", ">=", since), orderBy("time", "desc")];
+    if (last) parts.push(startAfter(last));
+    const snap = await getDocs(query(collection(db, COLLECTION), ...parts, limit(size)));
+    docs.push(...snap.docs);
+    if (snap.docs.length < size) break;
+    last = snap.docs[snap.docs.length - 1];
+  }
+  const recs = docs.map((d) => ({ ...d.data(), time: d.data().time?.toDate() }));
   const tools = recs.filter((r) => r.event === "tool");
 
   const users = new Map();
@@ -154,7 +165,7 @@ async function load() {
     [...copies.values()].sort((a, b) => b.last - a.last).map((c) => [
       esc(c.r.extension), `<span class="tag">${esc(c.why)}</span>`, esc(c.r.install_path), esc(c.r.git_remote),
       esc(c.r.machine), esc([...c.people].join(", ")), c.runs, esc(day(c.last))]));
-  $("status").textContent = `${recs.length} record(s) loaded` + (recs.length >= 20000 ? " (the newest 20000)" : "") + ".";
+  $("status").textContent = `${recs.length} record(s) loaded` + (recs.length >= MAX_RECORDS ? ` (the newest ${MAX_RECORDS})` : "") + ".";
 }
 
 // What to do about the usual sign-in and read errors - they are otherwise silent.
