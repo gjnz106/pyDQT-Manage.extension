@@ -184,6 +184,14 @@
       Revit version without a purge list. The note under the metric says why.
     </div>
     <div class="box fixed">
+      <b>v2.8 - Export no longer stops at "Could not open the Save dialog".</b>
+      Windows refused to open the dialog ("Value does not fall within the expected
+      range") when the folder remembered from the last export, or the suggested file
+      name, was one it could not parse. Both are cleaned first; if Windows still
+      refuses, the dialog opens without them, and if no dialog can open at all the
+      report is saved to <b>Documents</b> and the message says where.
+    </div>
+    <div class="box fixed">
       <b>New in v2.7 - CAD counted by file, not by copy.</b> CAD Links (and
       CAD Imports) counted every placed copy: a model with 49 linked CAD files,
       some copied into the views of other drawing sets, read as many more. Each
