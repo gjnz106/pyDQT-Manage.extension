@@ -11,6 +11,8 @@ anywhere, so the count matches Manage Links instead of silently missing
 loaded-but-unplaced content - so a stray, oversized or broken-link image
 can be found and selected without hunting through every view.
 """
+try: __import__("dqt_usage").log_use(__file__)  # pyDQT usage log
+except Exception: pass
 __title__ = "Image\nManager"
 __author__ = "DQT"
 

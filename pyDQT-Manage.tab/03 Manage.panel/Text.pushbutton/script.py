@@ -6,6 +6,8 @@ Manage Text Note Types with beautiful UI - Sheet Manager Style
 Copyright (c) 2026 Dang Quoc Truong (DQT)
 All rights reserved.
 """
+try: __import__("dqt_usage").log_use(__file__)  # pyDQT usage log
+except Exception: pass
 __title__ = "Text Note Type\nManage"
 __author__ = "Dang Quoc Truong (DQT)"
 __doc__ = "Manage and rename Text Note Types - By DQT"

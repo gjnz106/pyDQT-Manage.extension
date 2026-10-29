@@ -16,6 +16,8 @@ itself: it tries to re-type the sample dimension it just made to the
 target type, and if Revit refuses (a mismatched style), that type is
 skipped and named in the summary instead of faked.
 """
+try: __import__("dqt_usage").log_use(__file__)  # pyDQT usage log
+except Exception: pass
 __title__ = "List\nDimension"
 __author__ = "Dang Quoc Truong (DQT)"
 

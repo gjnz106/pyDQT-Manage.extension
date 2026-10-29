@@ -5,6 +5,8 @@ Place every Detail Component type (view-based and curve/line-based),
 grouped by family with bold family headers and type labels, so all detail
 items in the project can be reviewed on one view.
 """
+try: __import__("dqt_usage").log_use(__file__)  # pyDQT usage log
+except Exception: pass
 __title__ = "List Detail\nItems"
 __author__ = "Dang Quoc Truong (DQT)"
 

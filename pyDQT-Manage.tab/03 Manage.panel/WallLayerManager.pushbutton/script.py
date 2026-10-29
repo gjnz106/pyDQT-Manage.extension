@@ -8,6 +8,8 @@ Function of the layers you tick - across many types at once.
 Copyright (c) 2026 Dang Quoc Truong (DQT)
 All rights reserved.
 """
+try: __import__("dqt_usage").log_use(__file__)  # pyDQT usage log
+except Exception: pass
 
 __title__ = "Wall Layer\nManager"
 __author__ = "Dang Quoc Truong (DQT)"

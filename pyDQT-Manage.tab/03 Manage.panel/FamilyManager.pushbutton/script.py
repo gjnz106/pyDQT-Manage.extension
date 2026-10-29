@@ -12,6 +12,8 @@ Changes in v3.0:
 - Filter by Loadable/System/Groups
 - Rename works for all family types
 """
+try: __import__("dqt_usage").log_use(__file__)  # pyDQT usage log
+except Exception: pass
 __title__ = "Family\nManager"
 __author__ = "DQT"
 

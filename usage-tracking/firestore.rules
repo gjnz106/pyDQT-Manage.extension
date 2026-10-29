@@ -1,0 +1,43 @@
+rules_version = '2';
+
+// pyDQT usage log. Anyone running pyDQT may ADD a record of the expected
+// shape; only the owner (signed in with Google) may read them; nobody may
+// change or delete one. Replace OWNER_EMAIL with your Google account.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /pydqt_usage/{record} {
+      allow create: if validRecord(request.resource.data);
+      allow read: if request.auth != null
+                  && request.auth.token.email == 'OWNER_EMAIL'
+                  && request.auth.token.email_verified;
+      allow update, delete: if false;
+    }
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
+
+function shortText(value) {
+  return value is string && value.size() <= 300;
+}
+
+function validRecord(d) {
+  return d.keys().hasOnly(['event', 'tool', 'extension', 'ext_commit', 'install_path',
+                           'git_remote', 'revit_user', 'windows_user', 'domain', 'machine',
+                           'revit_version', 'pyrevit_version', 'os', 'session', 'time'])
+      && d.keys().hasAll(['event', 'tool', 'extension', 'machine', 'time'])
+      && d.event in ['tool', 'session']
+      && d.time is timestamp
+      && shortText(d.tool) && shortText(d.extension) && shortText(d.machine)
+      && (!('ext_commit' in d) || shortText(d.ext_commit))
+      && (!('install_path' in d) || shortText(d.install_path))
+      && (!('git_remote' in d) || shortText(d.git_remote))
+      && (!('revit_user' in d) || shortText(d.revit_user))
+      && (!('windows_user' in d) || shortText(d.windows_user))
+      && (!('domain' in d) || shortText(d.domain))
+      && (!('revit_version' in d) || shortText(d.revit_version))
+      && (!('pyrevit_version' in d) || shortText(d.pyrevit_version))
+      && (!('os' in d) || shortText(d.os))
+      && (!('session' in d) || shortText(d.session));
+}

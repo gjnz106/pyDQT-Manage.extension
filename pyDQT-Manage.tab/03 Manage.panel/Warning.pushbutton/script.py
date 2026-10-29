@@ -3,6 +3,8 @@
 Warning Manage - DQT
 Manage and resolve Revit warnings efficiently
 """
+try: __import__("dqt_usage").log_use(__file__)  # pyDQT usage log
+except Exception: pass
 
 __title__ = "Warning\nManage"
 __author__ = "dangquoctruong - DQT"

@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>pyDQT Usage</title>
+<style>
+  :root { --gold: #F0CC88; --accent: #D4B87A; --dark: #5D4E37; --text: #333333; --line: #E0E0E0; --warn: #B26A00; --bg: #FFFFFF; --row: #FAF3E0; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: "Segoe UI", Arial, sans-serif; color: var(--text); background: var(--bg); font-size: 13px; }
+  header { background: var(--gold); border-bottom: 2px solid var(--accent); padding: 14px 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  header h1 { margin: 0; font-size: 18px; color: var(--dark); }
+  header .who { font-size: 12px; color: var(--dark); }
+  button { background: #fff; color: var(--dark); border: 1px solid var(--accent); border-radius: 4px; padding: 6px 12px; cursor: pointer; font: inherit; }
+  main { max-width: 1200px; margin: 0 auto; padding: 16px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 16px; }
+  .card { border: 1px solid var(--accent); border-radius: 6px; padding: 10px 12px; }
+  .card .n { font-size: 22px; font-weight: 700; color: var(--dark); }
+  .card .l { font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: .04em; }
+  .card.warn .n { color: var(--warn); }
+  h2 { font-size: 13px; color: var(--dark); text-transform: uppercase; letter-spacing: .05em; margin: 22px 0 8px; }
+  .scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 6px; }
+  table { border-collapse: collapse; width: 100%; min-width: 640px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { background: var(--row); color: var(--dark); font-weight: 600; position: sticky; top: 0; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .tag { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 11px; background: #FFF6E5; color: var(--warn); border: 1px solid #F0D897; }
+  #status { color: #888; margin: 8px 0; }
+  .controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+  select, input { font: inherit; padding: 4px 6px; border: 1px solid var(--line); border-radius: 4px; }
+  footer { text-align: center; font-size: 11px; color: var(--dark); background: var(--gold); padding: 6px; margin-top: 24px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>pyDQT Usage</h1>
+  <div><span class="who" id="who"></span> <button id="signin">Sign in with Google</button> <button id="signout" hidden>Sign out</button></div>
+</header>
+<main>
+  <div class="controls">
+    <label>Period <select id="days">
+      <option value="7">Last 7 days</option><option value="30" selected>Last 30 days</option>
+      <option value="90">Last 90 days</option><option value="3650">All</option></select></label>
+    <button id="reload">Reload</button>
+  </div>
+  <div id="status">Sign in with the owner's Google account to read the log.</div>
+  <div class="cards" id="cards"></div>
+
+  <h2>Users</h2>
+  <div class="scroll"><table id="users"></table></div>
+
+  <h2>Tools</h2>
+  <div class="scroll"><table id="tools"></table></div>
+
+  <h2>Installs not from the official repositories</h2>
+  <p>Extension folders that were not installed from the pyDQT GitHub repositories, or that run under a different name -
+    copied, renamed or re-hosted copies.</p>
+  <div class="scroll"><table id="copies"></table></div>
+</main>
+<footer>Dang Quoc Truong - DQT (c) 2026</footer>
+
+<script type="module">
+// Firebase console > Project settings > General > Your apps (Web) - paste the config here.
+const firebaseConfig = { apiKey: "", authDomain: "", projectId: "" };
+const COLLECTION = "pydqt_usage";
+const OFFICIAL = {
+  "pyDQT-Manage": "github.com/gjnz106/pydqt-manage.extension",
+  "pyDQT-Design": "github.com/gjnz106/pydqt-design.extension",
+};
+
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged }
+  from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { getFirestore, collection, query, where, orderBy, limit, getDocs, Timestamp }
+  from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const day = (d) => d ? d.toISOString().slice(0, 16).replace("T", " ") : "";
+
+function normRemote(url) {
+  return String(url || "").toLowerCase().replace(/^git@github\.com:/, "github.com/").replace(/^https?:\/\//, "")
+    .replace(/\.git$/, "").replace(/\/$/, "");
+}
+function copyReason(r) {
+  const official = OFFICIAL[r.extension];
+  if (!official) return "unknown extension name";
+  if (!r.git_remote) return "not a git install (copied folder)";
+  if (normRemote(r.git_remote) !== official) return "other repository";
+  return "";
+}
+function person(r) { return r.revit_user || r.windows_user || "(unknown)"; }
+
+function table(el, head, rows) {
+  el.innerHTML = "<tr>" + head.map((h) => `<th>${esc(h)}</th>`).join("") + "</tr>" +
+    (rows.length ? rows.map((r) => "<tr>" + r.map((c) => typeof c === "number"
+      ? `<td class="num">${c}</td>` : `<td>${c}</td>`).join("") + "</tr>").join("")
+      : `<tr><td colspan="${head.length}">Nothing in this period.</td></tr>`);
+}
+
+async function load() {
+  $("status").textContent = "Loading...";
+  const since = Timestamp.fromDate(new Date(Date.now() - Number($("days").value) * 86400000));
+  const snap = await getDocs(query(collection(db, COLLECTION), where("time", ">=", since),
+                                   orderBy("time", "desc"), limit(20000)));
+  const recs = snap.docs.map((d) => ({ ...d.data(), time: d.data().time?.toDate() }));
+  const tools = recs.filter((r) => r.event === "tool");
+
+  const users = new Map();
+  for (const r of recs) {
+    const key = person(r) + "|" + (r.machine || "");
+    const u = users.get(key) || { name: person(r), win: r.windows_user, domain: r.domain, machine: r.machine,
+                                  runs: 0, sessions: 0, last: null, tools: new Map(), revit: r.revit_version, ext: new Set() };
+    if (r.event === "tool") { u.runs++; u.tools.set(r.tool, (u.tools.get(r.tool) || 0) + 1); } else u.sessions++;
+    if (!u.last || r.time > u.last) { u.last = r.time; u.revit = r.revit_version; }
+    if (r.extension) u.ext.add(r.extension);
+    users.set(key, u);
+  }
+  const toolMap = new Map();
+  for (const r of tools) {
+    const t = toolMap.get(r.tool) || { runs: 0, users: new Set(), last: null };
+    t.runs++; t.users.add(person(r)); if (!t.last || r.time > t.last) t.last = r.time;
+    toolMap.set(r.tool, t);
+  }
+  const copies = new Map();
+  for (const r of recs) {
+    const why = copyReason(r);
+    if (!why) continue;
+    const key = [r.extension, r.install_path, r.git_remote, r.machine].join("|");
+    const c = copies.get(key) || { r, why, people: new Set(), runs: 0, last: null };
+    c.people.add(person(r)); c.runs++; if (!c.last || r.time > c.last) c.last = r.time;
+    copies.set(key, c);
+  }
+  const people = new Set([...users.values()].map((u) => u.name));
+  $("cards").innerHTML = [
+    ["Users", people.size], ["Computers", new Set(recs.map((r) => r.machine)).size],
+    ["Tool runs", tools.length], ["Revit sessions", recs.length - tools.length],
+    ["Tools used", toolMap.size], ["Suspect installs", copies.size, copies.size ? "warn" : ""],
+  ].map(([l, n, c]) => `<div class="card ${c || ""}"><div class="n">${n}</div><div class="l">${l}</div></div>`).join("");
+
+  table($("users"), ["User", "Windows user", "Computer", "Tool runs", "Sessions", "Most used", "Revit", "Last seen"],
+    [...users.values()].sort((a, b) => b.last - a.last).map((u) => {
+      const top = [...u.tools.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([t, n]) => `${esc(t)} (${n})`).join("<br>");
+      return [esc(u.name), esc((u.domain ? u.domain + "\\" : "") + (u.win || "")), esc(u.machine), u.runs, u.sessions,
+              top, esc(u.revit), esc(day(u.last))];
+    }));
+  table($("tools"), ["Tool", "Runs", "Users", "Last run"],
+    [...toolMap.entries()].sort((a, b) => b[1].runs - a[1].runs)
+      .map(([t, v]) => [esc(t), v.runs, v.users.size, esc(day(v.last))]));
+  table($("copies"), ["Extension", "Why", "Installed at", "Git remote", "Computer", "People", "Records", "Last seen"],
+    [...copies.values()].sort((a, b) => b.last - a.last).map((c) => [
+      esc(c.r.extension), `<span class="tag">${esc(c.why)}</span>`, esc(c.r.install_path), esc(c.r.git_remote),
+      esc(c.r.machine), esc([...c.people].join(", ")), c.runs, esc(day(c.last))]));
+  $("status").textContent = `${recs.length} record(s) loaded` + (recs.length >= 20000 ? " (the newest 20000)" : "") + ".";
+}
+
+$("signin").onclick = () => signInWithPopup(auth, new GoogleAuthProvider());
+$("signout").onclick = () => signOut(auth);
+$("reload").onclick = () => load().catch((e) => $("status").textContent = "Could not read the log: " + e.message);
+$("days").onchange = $("reload").onclick;
+onAuthStateChanged(auth, (user) => {
+  $("signin").hidden = !!user; $("signout").hidden = !user;
+  $("who").textContent = user ? user.email : "";
+  if (user) $("reload").onclick();
+});
+</script>
+</body>
+</html>

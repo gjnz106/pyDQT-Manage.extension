@@ -7,6 +7,8 @@ level. Each is labelled, optionally with its full layer buildup.
 
 Shift-Click: settings (spacing, text style, bold, include buildup).
 """
+try: __import__("dqt_usage").log_use(__file__)  # pyDQT usage log
+except Exception: pass
 __title__ = "List\nWalls"
 __author__ = "Dang Quoc Truong (DQT)"
 

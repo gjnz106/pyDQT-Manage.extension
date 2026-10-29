@@ -3,6 +3,8 @@
 Author: Dang Quoc Truong (DQT)
 Fixed: Revit 2026 compatibility, Sweep/Curve geometry support
 """
+try: __import__("dqt_usage").log_use(__file__)  # pyDQT usage log
+except Exception: pass
 __title__ = "In-Place\nManager"
 __author__ = "DQT"
 

@@ -11,6 +11,8 @@ Based on CORENET X Code of Practice 3rd Edition September 2025.
 Copyright (c) 2025 Dang Quoc Truong (DQT)
 All rights reserved.
 """
+try: __import__("dqt_usage").log_use(__file__)  # pyDQT usage log
+except Exception: pass
 
 __title__ = "IFC-SG\nChecker"
 __author__ = "Dang Quoc Truong (DQT)"

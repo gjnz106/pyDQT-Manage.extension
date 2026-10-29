@@ -4,6 +4,8 @@
 Draw a short detail line for every Line Style (Object Styles > Lines
 subcategory) with a label, so all line styles can be reviewed at a glance.
 """
+try: __import__("dqt_usage").log_use(__file__)  # pyDQT usage log
+except Exception: pass
 __title__ = "List Line\nStyles"
 __author__ = "Dang Quoc Truong (DQT)"
 
